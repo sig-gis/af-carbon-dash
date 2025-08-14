@@ -85,6 +85,7 @@ merged_df['C_total'] = merged_df['C_total'].round(2)
 merged_df['BUF'] = merged_df['BUF'].round(2)
 merged_df['ERT'] = merged_df['ERT'].round(2)
 
+st.session_state.merged_df = merged_df
 
 # -- PLot ERTs ---
 ERT_chart = alt.Chart(merged_df).mark_line(point=True).encode(
@@ -101,20 +102,3 @@ ERT_chart = alt.Chart(merged_df).mark_line(point=True).encode(
 )
 
 st.altair_chart(ERT_chart, use_container_width=True)
-
-# # --- Calculate carbon per acre ---
-# df["C_per_acre"] = df["C_Score"] / acreage
-
-# # --- Plot ---
-# line = alt.Chart(df).mark_line(point=True).encode(
-#     x=alt.X('Year:O', title='Year', axis=alt.Axis(labelAngle=30)),  
-#     y=alt.Y('C_per_acre:Q', title='Carbon Units per Acre'),
-#     tooltip=['Year', 'C_per_acre']
-# ).properties(
-#     title="Cumulative Carbon Units per Acre Over Time",
-#     width=600,
-#     height=400
-# )
-
-# st.altair_chart(line, use_container_width=True)
-# st.success(f"Final Carbon per Acre (year {max(df['Year'])}): {df['C_per_acre'].iloc[-1]:.2f}")
