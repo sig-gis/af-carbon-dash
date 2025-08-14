@@ -8,6 +8,7 @@ dependencies = [
     "altair>=5.5.0",
     "ipykernel>=6.30.1",
     "matplotlib>=3.10.5",
+    "numpy-financial>=1.0.0",
     "scipy>=1.15.3",
     "seaborn>=0.13.2",
     "streamlit>=1.48.1",
