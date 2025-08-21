@@ -1,23 +1,45 @@
 import streamlit as st
 import numpy_financial as npf
+import altair as alt
 
 st.set_page_config(page_title="Credits", page_icon="📈")
 
+# Set defaults
+DEFAULTS = {
+    "net_acres": 239_644,
+    "num_plots": 400,
+    "cost_per_cfi_plot": 150,
+    "price_per_ert_initial": 25.0,
+    "credit_price_increase": 0.02,
+    "registry_fees": 500,
+    "validation_cost": 45_000,
+    "verification_cost": 25_000,
+    "issuance_fee_per_ert": 0.15,
+    "anticipated_inflation": 0.0,
+    "discount_rate": 0.06,
+    "planting_cost": 0,
+    "seedling_cost": 0,
+}
+
+for key, value in DEFAULTS.items():
+    if key not in st.session_state:
+        st.session_state[key] = value
+
 # -- User inputs: proforma options --
 with st.popover("Proforma Options"):
-    net_acres = st.number_input("Net Acres:", min_value=1, value=239644, step=100)
-    num_plots = st.number_input("# Plots:", min_value=1, value=400)
-    cost_per_cfi_plot = st.number_input("Cost/CFI Plot:", min_value=1, value=150)
-    price_per_ert_initial = st.number_input("Price/ERT (initial):", min_value=1, value=25)
-    credit_price_increase = st.number_input("Credit Price Increase:", min_value=0.0, value=0.02, step=0.01, format="%.2f")  # 2%
-    registry_fees = st.number_input("Registry Fees:", min_value=1, value=500)  
-    validation_cost = st.number_input("Validation Cost:", min_value=1, value=45000)
-    verification_cost = st.number_input("Verification Cost:", min_value=1, value=25000)
-    issuance_fee_per_ert = st.number_input("Issuance Fee per ERT:", min_value=0.0, value=0.15, step=0.01, format="%.2f")
-    anticipated_inflation = st.number_input("Anticipated Inflation:", min_value=0.0, value=0.0, step=0.01, format="%.2f")
-    discount_rate = st.number_input("Discount Rate:", min_value=0.0, value=0.06, step=0.01, format="%.2f")  # 6%
-    planting_cost = st.number_input("Planting Cost (initial):", min_value=0, value=0)
-    seedling_cost = st.number_input("Seedling Cost (initial):", min_value=0, value=0)
+    net_acres = st.number_input("Net Acres:", min_value=1, key="net_acres", step=100)
+    num_plots = st.number_input("# Plots:", min_value=1, key="num_plots")
+    cost_per_cfi_plot = st.number_input("Cost/CFI Plot:", min_value=1, key="cost_per_cfi_plot")
+    price_per_ert_initial = st.number_input("Price/ERT (initial):", min_value=1.0, key="price_per_ert_initial")
+    credit_price_increase = st.number_input("Credit Price Increase:", min_value=0.0, key="credit_price_increase", step=0.01, format="%.2f")  # 2%
+    registry_fees = st.number_input("Registry Fees:", min_value=1, key="registry_fees")  
+    validation_cost = st.number_input("Validation Cost:", min_value=1, key="validation_cost")
+    verification_cost = st.number_input("Verification Cost:", min_value=1, key="verification_cost")
+    issuance_fee_per_ert = st.number_input("Issuance Fee per ERT:", min_value=0.0, key="issuance_fee_per_ert", step=0.01, format="%.2f")
+    anticipated_inflation = st.number_input("Anticipated Inflation:", min_value=0.0, key="anticipated_inflation", step=0.01, format="%.2f")
+    discount_rate = st.number_input("Discount Rate:", min_value=0.0, key="discount_rate", step=0.01, format="%.2f")  # 6%
+    planting_cost = st.number_input("Planting Cost (initial):", min_value=0, key="planting_cost")
+    seedling_cost = st.number_input("Seedling Cost (initial):", min_value=0, key="seedling_cost")
 # future planting and seedling costs
 year_start = 2025
 years_advance = 35
@@ -93,3 +115,20 @@ st.download_button(
     mime='text/csv',
     use_container_width=True
 )
+
+# -- PLot ERTs ---
+
+ERT_chart = alt.Chart(st.session_state.merged_df).mark_line(point=True).encode(
+    x=alt.X('Year:O', title='Year', axis=alt.Axis(labelAngle=30)),
+    y=alt.Y('ERT:Q', title='ERTs (tonnes CO₂e)'),
+    tooltip=['Year', 'ERT']
+).properties(
+    title='Annual ERT Estimates',
+    width=600,
+    height=400
+).configure_axis(
+    grid=True,
+    gridOpacity=0.3
+)
+
+st.altair_chart(ERT_chart, use_container_width=True)
