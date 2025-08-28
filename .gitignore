@@ -11,3 +11,7 @@ wheels/
 
 # local conf files
 conf/local/*
+
+# data
+data/*
+!data/.gitkeep
