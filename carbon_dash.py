@@ -4,11 +4,11 @@ home = st.Page("pages/0_home.py", title="🏠 Home")
 planting = st.Page("pages/1_planting.py", title="🌲 Planting Scenario")
 carbon_est = st.Page("pages/2_carbon_est.py", title="📈 Carbon Units Estimate")
 credits = st.Page("pages/3_credits.py", title="📈 Credits")
-maps = st.Page("pages/4_map.py", title="🗺️ Site Selection Map")
+maps = st.Page("pages/1_5_map_planting.py", title="🌲 Site Selection and Planting Scenario")
 pg = st.navigation([
     home,
     maps,
-    planting,
+    # planting,
     carbon_est,
     credits
 ])

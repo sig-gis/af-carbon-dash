@@ -35,7 +35,7 @@ simplified_geojson = os.path.join(BASE_DIR, "data", "FVSVariantMap20210525", "FV
 # Caching helps with performance
 @st.cache_data(show_spinner=False)
 def read_geojson_text(path: Path) -> str:
-    return path.read_text(encoding="utf-8")
+    return Path(path).read_text(encoding="utf-8")
 
 @st.cache_data(show_spinner=False)
 def simplify_geojson(path: Path, tolerance_deg: float = 0.001) -> str:
@@ -79,6 +79,7 @@ if os.path.exists(simplified_geojson):
     # Optionally infer fields from the first feature for tooltips:
     try:
         feat0_props = json.loads(geojson_str)["features"][0]["properties"]
+        st.success(f'GeoJSON loaded successfully')
         tooltip_fields = list(feat0_props.keys())[:3]  # keep it light
     except Exception:
         tooltip_fields = None
@@ -130,3 +131,8 @@ if map_data and map_data.get("last_active_drawing"):
     if clicked:
         st.subheader("Selected Feature Info")
         st.json(clicked)
+
+        variant_value = clicked.get("FVSVariant")
+        if variant_value:
+            st.session_state["selected_variant"] = variant_value
+            st.success(f"Variant '{variant_value}' selected! Go to the 🌲 Planting Scenario page.")
