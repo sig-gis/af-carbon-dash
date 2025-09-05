@@ -1,5 +1,7 @@
 import streamlit as st
 
+st.set_page_config(layout="wide", page_title="Home", page_icon="🌲")
+
 st.title("🌲 Welcome to the Carbon Dashboard")
 st.markdown("""
 Use the sidebar to begin exploring the app:

@@ -9,7 +9,7 @@ pg = st.navigation([
     home,
     maps,
     # planting,
-    carbon_est,
+    # carbon_est,
     credits
 ])
 st.set_page_config(page_title="American Forests Dashboard", page_icon="🌲")
