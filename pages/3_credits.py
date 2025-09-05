@@ -1,7 +1,6 @@
 import streamlit as st
 
-st.set_page_config(page_title="Credits", page_icon="📈")
-
+st.set_page_config(layout="wide", page_title="Credits", page_icon="📈")
 
 net_acres = st.number_input("Net Acres:", min_value=1, value=1000, step=100)
 n_plots = st.number_input("# Plots:", min_value=1, value=100)
