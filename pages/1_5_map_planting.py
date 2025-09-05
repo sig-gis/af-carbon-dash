@@ -291,19 +291,6 @@ simplified_geojson = os.path.join(BASE_DIR, "data", "FVSVariantMap20210525", "FV
 
 st.set_page_config(layout="wide", page_title="Site Selection and Planting Scenario", page_icon="🌲")
 
-# with map_tab:
-#     geojson_str, tooltip_fields = load_geojson_fragment(simplified_geojson, local_shapefile)
-#     st.title("🌲 Site Selection")
-#     st.subheader("Step 1: Select FVS Variant")
-#     st.session_state.setdefault("map_view", {"center": [37.8, -96.9], "zoom": 5})
-#     m = build_map(geojson_str, 
-#                   center=tuple(st.session_state["map_view"]["center"]), 
-#                   zoom=int(st.session_state["map_view"]["zoom"]), 
-#                   tooltip_fields=tooltip_fields)
-#     map_data = st_folium(m, key="fvs_map", height=500, use_container_width=True)
-#     get_tooltip_fields(geojson_str)
-#     show_clicked_variant(map_data)
-
 with map_tab:
     st.title("🌲 Site Selection")
     st.subheader("Step 1: Select FVS Variant")
