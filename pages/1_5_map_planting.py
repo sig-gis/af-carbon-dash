@@ -12,7 +12,7 @@ from pathlib import Path
 from streamlit_folium import st_folium
 from scipy.interpolate import make_interp_spline
 import altair as alt
-
+from urllib.parse import quote
 
 # -----------------------------
 # Functions
@@ -58,17 +58,84 @@ def load_geojson_fragment(simplified_geojson_path, shapefile_path, tolerance_deg
     return geojson_str, tooltip_fields
 
 @st.fragment
-def build_map(geojson_str, center=(37.8, -96.9), zoom=5, tooltip_fields=None):
+def geojson_style(feature):
+    return {"fillColor": "blue", "color": "black", "weight": 1, "fillOpacity": 0.3}
+
+@st.fragment
+def geojson_highlight(feature):
+    return {"fillColor": "yellow", "color": "red", "weight": 2, "fillOpacity": 0.6}
+
+
+@st.fragment
+# def build_map(geojson_str, center=(37.8, -96.9), zoom=5, tooltip_fields=None):
+#     m = folium.Map(location=center, zoom_start=zoom, tiles="CartoDB positron")
+#     gj = folium.GeoJson(
+#         data=geojson_str,
+#         name="FVS Variants",
+#         style_function=lambda x: {"fillColor": "blue", "color": "black", "weight": 1, "fillOpacity": 0.3},
+#         highlight_function=lambda x: {"fillColor": "yellow", "color": "red", "weight": 2, "fillOpacity": 0.6},
+#     )
+#     if tooltip_fields:
+#         gj.add_child(folium.GeoJsonTooltip(fields=tooltip_fields, aliases=tooltip_fields, sticky=True))
+#     gj.add_to(m)
+#     folium.LayerControl(collapsed=True).add_to(m)
+#     return m
+
+@st.fragment
+def build_map(
+    geojson_str,
+    center=(37.8, -96.9),
+    zoom=5,
+    tooltip_fields=None,
+    cog_path=None,       # local COG path
+    min_val=None,        # optional rescale min
+    max_val=None,        # optional rescale max
+    colormap="viridis"   # default colormap
+):
     m = folium.Map(location=center, zoom_start=zoom, tiles="CartoDB positron")
+
+    # Add GeoJSON overlay
     gj = folium.GeoJson(
         data=geojson_str,
         name="FVS Variants",
-        style_function=lambda x: {"fillColor": "blue", "color": "black", "weight": 1, "fillOpacity": 0.3},
-        highlight_function=lambda x: {"fillColor": "yellow", "color": "red", "weight": 2, "fillOpacity": 0.6},
+        style_function=geojson_style,
+        highlight_function=geojson_highlight
     )
     if tooltip_fields:
-        gj.add_child(folium.GeoJsonTooltip(fields=tooltip_fields, aliases=tooltip_fields, sticky=True))
+        gj.add_child(
+            folium.GeoJsonTooltip(
+                fields=tooltip_fields,
+                aliases=tooltip_fields,
+                sticky=True
+            )
+        )
     gj.add_to(m)
+
+    # Add COG tile layer if provided
+    if cog_path:
+        # Ensure file URL is properly quoted
+        cog_url = "file:///" + quote(cog_path.replace("\\", "/"))
+
+        # Build Titiler tile URL with optional rescale + colormap
+        params = []
+        if min_val is not None and max_val is not None:
+            params.append(f"rescale={min_val},{max_val}")
+        if colormap:
+            params.append(f"colormap_name={colormap}")
+
+        param_str = "&".join(params)
+        tile_url = f"http://localhost:8501/cog/tiles/{{z}}/{{x}}/{{y}}?url={cog_url}"
+        if param_str:
+            tile_url += "&" + param_str
+
+        folium.TileLayer(
+            tiles=tile_url,
+            attr="COG",
+            name="Raster Layer",
+            overlay=True,
+            control=True
+        ).add_to(m)
+
     folium.LayerControl(collapsed=True).add_to(m)
     return m
 
@@ -288,6 +355,14 @@ map_tab, plant_tab, carbon_out, carbon_est = st.tabs(["Map", "Planting Sliders",
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 local_shapefile = os.path.join(BASE_DIR, "data", "FVSVariantMap20210525", "FVS_Variants_and_Locations_4326.shp")
 simplified_geojson = os.path.join(BASE_DIR, "data", "FVSVariantMap20210525", "FVS_Variants_and_Locations_4326_simplified.geojson")
+# cog_url = "http://localhost:8501/cog/tiles/{z}/{x}/{y}?url=file:///C:/Users/edalt/PC585_AF/af-carbon-dash/data/final/RDS-2020-0016-2__BP_CONUS/BP_CONUS/BP_CONUS_COG.tif"
+# cog_url = (
+#     "http://localhost:8501/cog/tiles/{z}/{x}/{y}"
+#     "?url=file:///C:/Users/edalt/PC585_AF/af-carbon-dash/data/final/RDS-2020-0016-2__BP_CONUS/BP_CONUS/BP_CONUS_COG.tif"
+#     "&rescale=0,1"
+#     "&colormap_name=viridis"
+# )
+cog_file = r"C:\Users\edalt\PC585_AF\af-carbon-dash\data\final\BP_CONUS_COG.tif"
 
 st.set_page_config(layout="wide", page_title="Site Selection and Planting Scenario", page_icon="🌲")
 
@@ -300,12 +375,24 @@ with map_tab:
     
     # Form for map selection
     with st.form("map_select_form"):
+
         m = build_map(
-            geojson_str, 
+            geojson_str=geojson_str,
             center=tuple(st.session_state["map_view"]["center"]), 
             zoom=int(st.session_state["map_view"]["zoom"]), 
-            tooltip_fields=tooltip_fields
+            tooltip_fields=tooltip_fields,
+            cog_path=cog_file,
+            min_val=0,
+            max_val=1,
+            colormap="viridis",
         )
+
+        # m = build_map(
+        #     geojson_str, 
+        #     center=tuple(st.session_state["map_view"]["center"]), 
+        #     zoom=int(st.session_state["map_view"]["zoom"]), 
+        #     tooltip_fields=tooltip_fields
+        # )
         map_data = st_folium(m, key="fvs_map", height=500, use_container_width=True)
         
         submitted = st.form_submit_button("Select Variant")
