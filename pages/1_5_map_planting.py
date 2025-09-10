@@ -58,8 +58,10 @@ def load_geojson_fragment(simplified_geojson_path, shapefile_path, tolerance_deg
     return geojson_str, tooltip_fields
 
 @st.fragment
-def build_map(geojson_str, center=(37.8, -96.9), zoom=5, tooltip_fields=None):
+def build_map(geojson_str, center=(37.8, -96.9), zoom=5, tooltip_fields=None, highlight_feature=None):
     m = folium.Map(location=center, zoom_start=zoom, tiles="CartoDB positron")
+
+    # Base layer
     gj = folium.GeoJson(
         data=geojson_str,
         name="FVS Variants",
@@ -69,6 +71,15 @@ def build_map(geojson_str, center=(37.8, -96.9), zoom=5, tooltip_fields=None):
     if tooltip_fields:
         gj.add_child(folium.GeoJsonTooltip(fields=tooltip_fields, aliases=tooltip_fields, sticky=True))
     gj.add_to(m)
+
+    # Highlight only the last clicked feature
+    if highlight_feature:
+        folium.GeoJson(
+            highlight_feature["geometry"],
+            name="Selected Boundary",
+            style_function=lambda x: {"fillColor": "yellow", "color": "red", "weight": 3, "fillOpacity": 0.2},
+        ).add_to(m)
+
     folium.LayerControl(collapsed=True).add_to(m)
     return m
 
@@ -84,30 +95,47 @@ def get_tooltip_fields(geojson_str, skip_keys={"Shape_Area", "Shape_Leng"}, max_
 
 @st.fragment
 def show_clicked_variant(map_data):
+    """Update session state with the last clicked feature and its properties."""
+    if map_data and map_data.get("last_active_drawing"):
+        feat = map_data["last_active_drawing"]
+        props = feat.get("properties", {})
+
+        if props:
+            # Only trigger rerun if this feature is newly clicked
+            if st.session_state.get("clicked_feature") != feat:
+                st.session_state["clicked_feature"] = feat
+                st.session_state["clicked_props"] = props
+                st.session_state["selected_variant"] = props.get("FVSVariant", "PN")
+                st.rerun()  # <-- Updated for latest Streamlit
+
+@st.fragment
+def display_selected_info():
+    if "clicked_props" in st.session_state:
+        props = st.session_state["clicked_props"]
+
+        st.subheader("Selected Feature Info")
+        pretty_names = {
+            "FVSLocCode": "FVS Location Code",
+            "FVSLocName": "FVS Location Name",
+            "FVSVarName": "FVS Variant Name",
+            "FVSVariant": "FVS Variant",
+        }
+        skip_keys = {"Shape_Area", "Shape_Leng"}
+
+        for key, value in props.items():
+            if key not in skip_keys:
+                display_key = pretty_names.get(key, key)
+                st.markdown(f"**{display_key}:** {value}")
+
+
+@st.fragment
+def submit_map(map_data):
     if map_data and map_data.get("last_active_drawing"):
         clicked = map_data["last_active_drawing"].get("properties", {})
         if clicked:
             st.session_state["selected_variant"] = clicked.get("FVSVariant", "PN")
-            st.subheader("Selected Feature Info")
-            
-            # Mapping for display names
-            pretty_names = {
-                "FVSLocCode": "FVS Location Code",
-                "FVSLocName": "FVS Location Name",
-                "FVSVarName": "FVS Variant Name",
-                "FVSVariant": "FVS Variant",
-            }
 
-            # Keys to skip
-            skip_keys = {"Shape_Area", "Shape_Leng"}
-
-            for key, value in clicked.items():
-                if key in skip_keys:
-                    continue
-                display_key = pretty_names.get(key, key)
-                st.markdown(f"**{display_key}:** {value}")
-
-@st.fragment
+# @st.fragment
 def planting_sliders_fragment():
 
     # Variant presets
@@ -141,13 +169,13 @@ def planting_sliders_fragment():
     st.session_state["survival"] = st.slider("Survival Percentage", 40, 90, preset["survival"])
     st.session_state["si"] = st.slider("Site Index", 96, 137, preset["si"])
 
-    st.subheader("🌲 Species Mix (TPA)")
+    st.markdown("🌲 Species Mix (TPA)")
     st.session_state["tpa_df"] = st.slider("Douglas Fir", 0, 435, preset["tpa_df"])
     st.session_state["tpa_rc"] = st.slider("Red Cedar", 0, 436 - st.session_state["tpa_df"], preset["tpa_rc"])
     st.session_state["tpa_wh"] = st.slider("Western Hemlock", 0, 437 - st.session_state["tpa_df"] - st.session_state["tpa_rc"], preset["tpa_wh"])
     st.markdown(f"Total TPA: {st.session_state['tpa_df'] + st.session_state['tpa_rc'] + st.session_state['tpa_wh']}")
 
-@st.fragment
+# @st.fragment
 def carbon_chart_fragment():
     # Ensure the sliders have been set
     if not all(k in st.session_state for k in ["tpa_df", "tpa_rc", "tpa_wh", "survival", "si"]):
@@ -193,37 +221,32 @@ def carbon_chart_fragment():
         height=400
     )
     st.altair_chart(line, use_container_width=True)
-    st.success(f"Final Carbon Output (year {max(df['Year'])}): {df['C_Score'].iloc[-1]:.2f}")
+    st.markdown(f"Final Carbon Output (year {max(df['Year'])}): {df['C_Score'].iloc[-1]:.2f}")
 
-@st.fragment
 def carbon_units_fragment():
-    st.title("📈 Carbon Units Estimate")
-
-    # --- Retrieve carbon_df from previous page ---
     if "carbon_df" not in st.session_state:
-        st.error("No carbon data found. Please return to the Planting Scenario page first.")
+        st.error("No carbon data found. Please adjust sliders first.")
         st.stop()
 
     df = st.session_state.carbon_df.copy()
 
-    # --- User input: Acreage ---
-    acreage = st.number_input("Enter acreage:", min_value=1, value=100)
+    # Read inputs from session state (set by the left column)
+    inputs = st.session_state.get("carbon_units_inputs", {"acreage": 100, "protocol": "ACR"})
+    acreage = inputs["acreage"]
+    protocol = inputs["protocol"]
 
-    # --- User input: Protocol ---
-    protocol = st.selectbox("Select Protocol", options=["ACR", "CAR", "VERRA"])
-
-    # --- Build project DataFrame ---
+    # Build project DataFrame
     df_acr = df.copy()
     df_acr['Area_acres'] = acreage
-    df_acr['Onsite Total CO2'] = df_acr['C_Score'] * 3.667  # Convert C_Score to CO2 equivalent (1 ton C = 3.667 tons CO2)
+    df_acr['Onsite Total CO2'] = df_acr['C_Score'] * 3.667
     df_acr['StudyArea_ModelType'] = "Project"
     df_acr['StudyArea_Protocol'] = protocol
 
-    # Interpolate missing years
+    # Interpolation and calculations remain unchanged
     df_poly = df_acr[['Year', 'Onsite Total CO2']].sort_values('Year')
     X = df_poly['Year'].values
     y = df_poly['Onsite Total CO2'].values
-    spline = make_interp_spline(X, y, k=3)  # cubic spline
+    spline = make_interp_spline(X, y, k=3)
     years_interp = np.arange(df_poly['Year'].min(), df_poly['Year'].max() + 1)
     y_interp = spline(years_interp)
 
@@ -233,56 +256,67 @@ def carbon_units_fragment():
         'ModelType': 'Project'
     })
 
-    # --- Baseline DataFrame ---
     baseline_df = pd.DataFrame({
         'Year': years_interp,
         'Onsite Total CO2_interp': 0,
         'ModelType': 'Baseline',
     })
 
-    # Calculate delta C
     baseline_df['delta_C_baseline'] = baseline_df['Onsite Total CO2_interp'].diff()
     df_interp['delta_C_project'] = df_interp['Onsite Total CO2_interp'].diff()
 
-    # Merge baseline and project deltas
     merged_df = pd.merge(
         baseline_df[['Year', 'delta_C_baseline']],
         df_interp[['Year', 'delta_C_project']],
         on='Year'
     )
 
-    # Calculate C_total, buffer, and ERT
     BUF = 0.20
     merged_df['C_total'] = merged_df['delta_C_project'] - merged_df['delta_C_baseline']
     merged_df['BUF'] = merged_df['C_total'] * BUF
     merged_df['ERT'] = merged_df['C_total'] - merged_df['BUF']
 
-    # Round columns
     for col in ['delta_C_project', 'delta_C_baseline', 'C_total', 'BUF', 'ERT']:
         merged_df[col] = merged_df[col].round(2)
 
-    # --- Plot ERTs ---
+    # Plot chart
     ERT_chart = alt.Chart(merged_df).mark_line(point=True).encode(
         x=alt.X('Year:O', title='Year', axis=alt.Axis(labelAngle=30)),
         y=alt.Y('ERT:Q', title='ERTs (tonnes CO₂e)'),
         tooltip=['Year', 'ERT']
-    ).properties(
-        title='Annual ERT Estimates',
-        width=600,
-        height=400
-    ).configure_axis(
-        grid=True,
-        gridOpacity=0.3
-    )
+    ).properties(title='Annual ERT Estimates', width=600, height=400).configure_axis(grid=True, gridOpacity=0.3)
 
     st.altair_chart(ERT_chart, use_container_width=True)
+
+@st.fragment
+def run_chart():
+    # Row 1: Planting sliders | Carbon chart
+    col1, col2 = st.columns(2)
+    with col1:
+        planting_sliders_fragment()
+    with col2:
+        carbon_chart_fragment()
+
+    # Row 2: Acreage & Protocol | Carbon units chart
+    col3, col4 = st.columns(2)
+    with col3:
+        st.subheader("Carbon Estimates")
+        if "carbon_df" not in st.session_state:
+            st.error("No carbon data found. Adjust sliders above first.")
+            st.stop()
+        acreage = st.number_input("Enter acreage:", min_value=1, value=100, key="carbon_units_acreage")
+        protocol = st.selectbox("Select Protocol", options=["ACR", "CAR", "VERRA"], key="carbon_units_protocol")
+        st.session_state["carbon_units_inputs"] = {"acreage": acreage, "protocol": protocol}
+
+    with col4:
+        carbon_units_fragment()  
 
 ########################################################################################################################################################################################
 # -----------------------------
 # Main
 # -----------------------------
 # Tabs
-map_tab, plant_tab, carbon_out, carbon_est = st.tabs(["Map", "Planting Sliders", "Carbon Output", "Carbon Estimate"])
+map_tab, plant_tab = st.tabs(["Site Selection Map", "Planting Sliders and Carbon Charts"])
 
 # Load Shapefile / GeoJSON
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -293,37 +327,38 @@ st.set_page_config(layout="wide", page_title="Site Selection and Planting Scenar
 
 with map_tab:
     st.title("🌲 Site Selection")
-    st.subheader("Step 1: Select FVS Variant")
+    st.subheader("Select FVS Variant")
 
     geojson_str, tooltip_fields = load_geojson_fragment(simplified_geojson, local_shapefile)
     st.session_state.setdefault("map_view", {"center": [37.8, -96.9], "zoom": 5})
-    
-    # Form for map selection
-    with st.form("map_select_form"):
-        m = build_map(
-            geojson_str, 
-            center=tuple(st.session_state["map_view"]["center"]), 
-            zoom=int(st.session_state["map_view"]["zoom"]), 
-            tooltip_fields=tooltip_fields
-        )
-        map_data = st_folium(m, key="fvs_map", height=500, use_container_width=True)
-        
-        submitted = st.form_submit_button("Select Variant")
-        
-        if submitted:
-            show_clicked_variant(map_data)
-            st.success(f"Selected Variant: {st.session_state.get('selected_variant', 'PN')}")
 
+    m = build_map(
+        geojson_str,
+        center=tuple(st.session_state["map_view"]["center"]),
+        zoom=int(st.session_state["map_view"]["zoom"]),
+        tooltip_fields=tooltip_fields,
+        highlight_feature=st.session_state.get("clicked_feature"),
+    )
+
+    map_data = st_folium(
+        m,
+        key="fvs_map",
+        height=500,
+        use_container_width=True,
+    )
+
+    show_clicked_variant(map_data)
+    display_selected_info()
+
+    with st.form("map_select_form"):
+        submitted = st.form_submit_button("Select Variant")
+        if submitted:
+            if "selected_variant" in st.session_state:
+                st.success(f"Selected Variant: {st.session_state['selected_variant']}")
+            else:
+                st.info("Click a feature on the map first.")
 
 with plant_tab:
     st.title("🌲 Planting Scenario")
-    st.subheader("Step 2: Planting Scenario")
-    planting_sliders_fragment()
-
-with carbon_out:
-    st.title("🌲 Carbon Output")
-    carbon_chart_fragment()
-
-with carbon_est:
-    st.title("🌲 Carbon Estimate")
-    carbon_units_fragment()
+    st.subheader("Planting Scenario")
+    run_chart()
