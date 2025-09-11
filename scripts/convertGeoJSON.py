@@ -9,8 +9,10 @@ def main():
     p.add_argument("--output", required=True, help="Path to output GeoJSON")
     p.add_argument("--tolerance-m", type=float, default=200.0,
                    help="Douglas-Peucker simplify tolerance in meters (default: 200)")
-    p.add_argument("--keep", nargs="*", default=[],
+    p.add_argument("--keep-cols", nargs="*", default=[],
                    help="Attribute columns to keep (besides geometry). Default: keep all")
+    p.add_argument('--keep-variants', nargs='*', default=[],
+                   help='List of FVSVariant names to keep (e.g., "PN EC"). Default: keep all.')
     args = p.parse_args()
 
     in_path = Path(args.input)
@@ -31,9 +33,12 @@ def main():
     gdf_4326 = gdf_m.to_crs(4326)
 
     # Trim columns if requested
-    if args.keep:
+    if args.keep_cols:
         keep_cols = [c for c in args.keep if c in gdf_4326.columns]
         gdf_4326 = gdf_4326[keep_cols + ["geometry"]]
+    
+    if args.keep_variants and "FVSVariant" in gdf_4326.columns:
+        gdf_4326 = gdf_4326[gdf_4326["FVSVariant"].isin(args.keep_variants)]
 
     # Save compact GeoJSON
     gdf_4326.to_file(out_path, driver="GeoJSON")
