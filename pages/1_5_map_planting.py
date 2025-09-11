@@ -135,51 +135,97 @@ def submit_map(map_data):
         if clicked:
             st.session_state["selected_variant"] = clicked.get("FVSVariant", "PN")
 
-# @st.fragment
+SPECIES_LABELS = {
+    "tpa_df": "Douglas-fir",
+    "tpa_rc": "red cedar",
+    "tpa_wh": "western hemlock",
+    "tpa_ss": "Sitka spruce",
+    "tpa_pp": "ponderosa pine",
+    "tpa_wl": "western larch"
+}
+
+@st.cache_data
+def load_variant_presets(path: str = "data/FVSVariant_presets.json"):
+    with open(path, "r") as f:
+        return json.load(f)
+    
+def _species_keys(preset: dict):
+    # any key that starts with tpa_ is treated as a species slider
+    return [k for k in preset.keys() if k.startswith("tpa_")]
+
+def _label_for(key: str) -> str:
+    return SPECIES_LABELS.get(key, key.replace("tpa_", "TPA_").upper())
+
 def planting_sliders_fragment():
-
-    # Variant presets
-    variant_presets = {
-        "AK": {"survival": 70, "si": 110, "tpa_df": 50, "tpa_rc": 20, "tpa_wh": 10},
-        "BM": {"survival": 65, "si": 120, "tpa_df": 60, "tpa_rc": 25, "tpa_wh": 15},
-        "CA": {"survival": 80, "si": 130, "tpa_df": 55, "tpa_rc": 30, "tpa_wh": 10},
-        "CI": {"survival": 75, "si": 125, "tpa_df": 45, "tpa_rc": 25, "tpa_wh": 20},
-        "CR": {"survival": 60, "si": 115, "tpa_df": 40, "tpa_rc": 30, "tpa_wh": 15},
-        "CS": {"survival": 68, "si": 118, "tpa_df": 50, "tpa_rc": 20, "tpa_wh": 15},
-        "EC": {"survival": 72, "si": 122, "tpa_df": 55, "tpa_rc": 15, "tpa_wh": 20},
-        "EM": {"survival": 66, "si": 119, "tpa_df": 60, "tpa_rc": 20, "tpa_wh": 10},
-        "IE": {"survival": 70, "si": 124, "tpa_df": 50, "tpa_rc": 25, "tpa_wh": 15},
-        "LS": {"survival": 65, "si": 117, "tpa_df": 45, "tpa_rc": 30, "tpa_wh": 10},
-        "NC": {"survival": 75, "si": 128, "tpa_df": 55, "tpa_rc": 25, "tpa_wh": 10},
-        "NE": {"survival": 68, "si": 120, "tpa_df": 50, "tpa_rc": 20, "tpa_wh": 15},
-        "PN": {"survival": 70, "si": 125, "tpa_df": 60, "tpa_rc": 15, "tpa_wh": 20},
-        "SN": {"survival": 66, "si": 123, "tpa_df": 55, "tpa_rc": 25, "tpa_wh": 10},
-        "SO": {"survival": 72, "si": 126, "tpa_df": 50, "tpa_rc": 30, "tpa_wh": 10},
-        "TT": {"survival": 65, "si": 119, "tpa_df": 45, "tpa_rc": 20, "tpa_wh": 15},
-        "UT": {"survival": 70, "si": 121, "tpa_df": 55, "tpa_rc": 15, "tpa_wh": 20},
-        "WC": {"survival": 68, "si": 124, "tpa_df": 50, "tpa_rc": 25, "tpa_wh": 10},
-        "WS": {"survival": 66, "si": 122, "tpa_df": 60, "tpa_rc": 20, "tpa_wh": 15}
-    }
-
+    presets = load_variant_presets()
     variant = st.session_state.get("selected_variant", "PN")
+
+    if variant not in presets:
+        st.warning(f"Variant '{variant}' not found in presets. Falling back to 'PN'.")
+    preset = presets.get(variant, presets.get("PN", {}))
+
     st.markdown(f"**FVS Variant:** {variant}")
-    preset = variant_presets.get(variant, variant_presets["PN"])
 
-    # Sliders
-    st.session_state["survival"] = st.slider("Survival Percentage", 40, 90, preset["survival"])
-    st.session_state["si"] = st.slider("Site Index", 96, 137, preset["si"])
+    # When variant changes, clear old tpa_* and seed defaults for current species
+    last_variant = st.session_state.get("_last_variant")
+    if last_variant != variant:
+        # clear previous species values
+        for k in list(st.session_state.keys()):
+            if k.startswith("tpa_"):
+                del st.session_state[k]
+        # seed defaults for this variant's species
+        for spk in _species_keys(preset):
+            st.session_state[spk] = preset.get(spk, 0)
+        # seed survival/si if first time or variant changed
+        st.session_state["survival"] = preset.get("survival", st.session_state.get("survival", 70))
+        st.session_state["si"] = preset.get("si", st.session_state.get("si", 120))
+        st.session_state["_last_variant"] = variant
 
+    # --- Common sliders ---
+    st.slider("Survival Percentage", 40, 90,
+              value=int(st.session_state.get("survival", preset.get("survival", 70))),
+              key="survival")
+    st.slider("Site Index", 96, 137,
+              value=int(st.session_state.get("si", preset.get("si", 120))),
+              key="si")
+
+    # --- Dynamic species sliders ---
     st.markdown("🌲 Species Mix (TPA)")
-    st.session_state["tpa_df"] = st.slider("Douglas Fir", 0, 435, preset["tpa_df"])
-    st.session_state["tpa_rc"] = st.slider("Red Cedar", 0, 436 - st.session_state["tpa_df"], preset["tpa_rc"])
-    st.session_state["tpa_wh"] = st.slider("Western Hemlock", 0, 437 - st.session_state["tpa_df"] - st.session_state["tpa_rc"], preset["tpa_wh"])
-    st.markdown(f"Total TPA: {st.session_state['tpa_df'] + st.session_state['tpa_rc'] + st.session_state['tpa_wh']}")
+    species_keys = _species_keys(preset)
+
+    # Optional: set a total TPA cap if you want to enforce one (put `_tpa_cap` in JSON if needed)
+    tpa_cap = preset.get("_tpa_cap", 435) 
+
+    running_total = 0
+    for i, spk in enumerate(species_keys):
+        default_val = int(st.session_state.get(spk, preset.get(spk, 0)))
+        label = _label_for(spk)
+
+        if tpa_cap is not None:
+            # Greedy budget: allow up to remaining budget; last species can soak up the rest
+            remaining = max(0, tpa_cap - running_total)
+            max_val = remaining if i == len(species_keys) - 1 else tpa_cap
+            st.slider(label, 0, 435, value=min(default_val, int(max_val)), key=spk)
+        else:
+            # No total cap — simple independent sliders
+            st.slider(label, 0, 435, value=default_val, key=spk)
+
+        running_total += int(st.session_state.get(spk, 0))
+
+    # Summary
+    total_tpa = sum(int(st.session_state.get(k, 0)) for k in species_keys)
+    st.markdown(f"**Total TPA:** {total_tpa}")
+    if running_total > tpa_cap:
+        st.warning(f"Total TPA exceeds {tpa_cap} and may present an unrealistic scenario. Consider adjusting sliders.")
+
+    # If you need the selected species mix as a dict elsewhere:
+    st.session_state["species_mix"] = {k: int(st.session_state.get(k, 0)) for k in species_keys}
 
 # @st.fragment
 def carbon_chart_fragment():
     # Ensure the sliders have been set
     if not all(k in st.session_state for k in ["tpa_df", "tpa_rc", "tpa_wh", "survival", "si"]):
-        st.info("Adjust sliders above to see the carbon output.")
+        st.info("Adjust Planting Scenario sliders to see the carbon output.")
         return
 
     tpa_df = st.session_state["tpa_df"]
@@ -330,7 +376,7 @@ with map_tab:
     st.subheader("Select FVS Variant")
 
     geojson_str, tooltip_fields = load_geojson_fragment(simplified_geojson, local_shapefile)
-    st.session_state.setdefault("map_view", {"center": [37.8, -96.9], "zoom": 5})
+    st.session_state.setdefault("map_view", {"center": [45.5, -118], "zoom": 6})
 
     m = build_map(
         geojson_str,
@@ -350,13 +396,13 @@ with map_tab:
     show_clicked_variant(map_data)
     display_selected_info()
 
-    with st.form("map_select_form"):
-        submitted = st.form_submit_button("Select Variant")
-        if submitted:
-            if "selected_variant" in st.session_state:
-                st.success(f"Selected Variant: {st.session_state['selected_variant']}")
-            else:
-                st.info("Click a feature on the map first.")
+    # with st.form("map_select_form"):
+    #     submitted = st.form_submit_button("Select Variant")
+    #     if submitted:
+    #         if "selected_variant" in st.session_state:
+    #             st.success(f"Selected Variant: {st.session_state['selected_variant']}")
+    #         else:
+    #             st.info("Click a feature on the map first.")
 
 with plant_tab:
     st.title("🌲 Planting Scenario")
