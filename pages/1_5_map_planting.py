@@ -93,6 +93,13 @@ def get_tooltip_fields(geojson_str, skip_keys={"Shape_Area", "Shape_Leng"}, max_
         tooltip_fields = None
     return tooltip_fields
 
+# helper
+def _loccode_str(v):
+    try:
+        return f"{int(v):03d}"
+    except Exception:
+        return None
+
 @st.fragment
 def show_clicked_variant(map_data):
     """Update session state with the last clicked feature and its properties."""
@@ -101,12 +108,13 @@ def show_clicked_variant(map_data):
         props = feat.get("properties", {})
 
         if props:
-            # Only trigger rerun if this feature is newly clicked
             if st.session_state.get("clicked_feature") != feat:
                 st.session_state["clicked_feature"] = feat
                 st.session_state["clicked_props"] = props
                 st.session_state["selected_variant"] = props.get("FVSVariant", "PN")
-                st.rerun()  # <-- Updated for latest Streamlit
+                # NEW: stash loc code (zero-padded like 712 -> "712")
+                st.session_state["FVSLocCode"] = _loccode_str(props.get("FVSLocCode"))
+                st.rerun()
 
 @st.fragment
 def display_selected_info():
@@ -145,7 +153,7 @@ SPECIES_LABELS = {
 }
 
 @st.cache_data
-def load_variant_presets(path: str = "data/FVSVariant_presets.json"):
+def load_variant_presets(path: str = "conf/base/FVSVariant_presets.json"):
     with open(path, "r") as f:
         return json.load(f)
     
@@ -205,10 +213,10 @@ def planting_sliders_fragment():
             # Greedy budget: allow up to remaining budget; last species can soak up the rest
             remaining = max(0, tpa_cap - running_total)
             max_val = remaining if i == len(species_keys) - 1 else tpa_cap
-            st.slider(label, 0, 435, value=min(default_val, int(max_val)), key=spk)
+            st.slider(label, 0, tpa_cap, value=min(default_val, int(max_val)), key=spk)
         else:
             # No total cap — simple independent sliders
-            st.slider(label, 0, 435, value=default_val, key=spk)
+            st.slider(label, 0, tpa_cap, value=default_val, key=spk)
 
         running_total += int(st.session_state.get(spk, 0))
 
@@ -216,7 +224,7 @@ def planting_sliders_fragment():
     total_tpa = sum(int(st.session_state.get(k, 0)) for k in species_keys)
     st.markdown(f"**Total TPA:** {total_tpa}")
     if running_total > tpa_cap:
-        st.warning(f"Total TPA exceeds {tpa_cap} and may present an unrealistic scenario. Consider adjusting sliders.")
+        st.warning(f"Total initial TPA exceeds {tpa_cap} and may present an unrealistic scenario. Consider adjusting sliders.")
 
     # If you need the selected species mix as a dict elsewhere:
     st.session_state["species_mix"] = {k: int(st.session_state.get(k, 0)) for k in species_keys}
@@ -362,14 +370,14 @@ def run_chart():
 # Main
 # -----------------------------
 # Tabs
-map_tab, plant_tab = st.tabs(["Site Selection Map", "Planting Sliders and Carbon Charts"])
+map_tab, plant_tab = st.tabs(["Site Selection Map", "Planting Scenario"])
 
 # Load Shapefile / GeoJSON
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 local_shapefile = os.path.join(BASE_DIR, "data", "FVSVariantMap20210525", "FVS_Variants_and_Locations_4326.shp")
 simplified_geojson = os.path.join(BASE_DIR, "data", "FVSVariantMap20210525", "FVS_Variants_and_Locations_4326_simplified.geojson")
 
-st.set_page_config(layout="wide", page_title="Site Selection and Planting Scenario", page_icon="🌲")
+st.set_page_config(layout="wide", page_title="Project Builder", page_icon="🌲")
 
 with map_tab:
     st.title("🌲 Site Selection")
