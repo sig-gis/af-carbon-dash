@@ -40,7 +40,20 @@ source .venv/bin/activate
 
 This creates and activates the .venv, syncing dependencies from pyproject.toml and uv.lock.
 
-## 3. Run the streamlit app
+## 3. Prep data
+
+The Makefile downloads the [FVS Variants shapefile](https://www.fs.usda.gov/fmsc/ftp/fvs/docs/overviews/FVSVariantMap20210525.zip) and simplifies it into a GeoJSON for efficiency. 
+
+The Variants are automatically filtered to the line-separated list of supported FVS Variants in `conf/base/supported_variants.txt`
+
+Simply run the Makefile to prep the data:
+
+```
+make
+```
+
+
+## 4. Run the streamlit app
 
 ### ✅ Option A (Recommended): Without Manual Activation
 
