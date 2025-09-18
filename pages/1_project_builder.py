@@ -165,7 +165,7 @@ def _species_keys(preset: dict):
 def _label_for(key: str) -> str:
     return SPECIES_LABELS.get(key, key.replace("tpa_", "TPA_").upper())
 
-def planting_sliders():
+def planting_sliders_fragment():
     presets = load_variant_presets()
     variant = st.session_state.get("selected_variant", "PN")
 
@@ -230,7 +230,7 @@ def planting_sliders():
     # If you need the selected species mix as a dict elsewhere:
     st.session_state["species_mix"] = {k: int(st.session_state.get(k, 0)) for k in species_keys}
 
-def carbon_chart():
+def carbon_chart_fragment():
     # Ensure the sliders have been set
     if not all(k in st.session_state for k in ["tpa_df", "tpa_rc", "tpa_wh", "survival", "si"]):
         st.info("Adjust Planting Scenario sliders to see the carbon output.")
@@ -279,71 +279,112 @@ def carbon_chart():
     st.altair_chart(line, use_container_width=True)
     st.success(f"Final Carbon Output (year {max(df['Year'])}): {df['C_Score'].iloc[-1]:.2f}")
 
-def carbon_units():
+def carbon_units_fragment():
     if "carbon_df" not in st.session_state:
         st.error("No carbon data found. Please adjust sliders first.")
         st.stop()
 
     df = st.session_state.carbon_df.copy()
 
-    # Read inputs from session state (set by the left column)
-    inputs = st.session_state.get("carbon_units_inputs", {"acreage": 100, "protocol": "ACR"})
-    # acreage = inputs["acreage"]
-    protocol = inputs["protocol"]
+    # Read multiple protocols
+    inputs = st.session_state.get("carbon_units_inputs", {"protocols": ["ACR"]})
+    protocols = inputs["protocols"]
 
-    # Build project DataFrame
-    df_acr = df.copy()
-    # df_acr['Area_acres'] = acreage
-    df_acr['Onsite Total CO2'] = df_acr['C_Score'] * 3.667
-    df_acr['StudyArea_ModelType'] = "Project"
-    df_acr['StudyArea_Protocol'] = protocol
+    all_protocol_dfs = []
+    
+    for protocol in protocols:
+        df_base = df.copy()
+        df_base['Onsite Total CO2'] = df_base['C_Score'] * 3.667
 
-    # Interpolation and calculations remain unchanged
-    df_poly = df_acr[['Year', 'Onsite Total CO2']].sort_values('Year')
-    X = df_poly['Year'].values
-    y = df_poly['Onsite Total CO2'].values
-    spline = make_interp_spline(X, y, k=3)
-    years_interp = np.arange(df_poly['Year'].min(), df_poly['Year'].max() + 1)
-    y_interp = spline(years_interp)
+        # ----------------------------------
+        # Protocol-specific calculations
+        # ----------------------------------
+        if protocol == "ACR":
+            BUF = 0.20
+            coeff = 1.0
+            apply_buf = True
+        elif protocol == "GS":
+            coeff = 1.0
+            apply_buf = False
+        elif protocol == "CAR":
+            BUF = 0.25
+            coeff = 0.9
+            apply_buf = True
+        elif protocol == "VERRA":
+            BUF = 0.15
+            coeff = 1.1
+            apply_buf = True
+        else:
+            BUF = 0.20
+            coeff = 1.0
+            apply_buf = True
 
-    df_interp = pd.DataFrame({
-        'Year': years_interp,
-        'Onsite Total CO2_interp': y_interp,
-        'ModelType': 'Project'
-    })
+        # Apply scaling
+        df_base['Onsite Total CO2'] = df_base['Onsite Total CO2'] * coeff
 
-    baseline_df = pd.DataFrame({
-        'Year': years_interp,
-        'Onsite Total CO2_interp': 0,
-        'ModelType': 'Baseline',
-    })
+        # Interpolation
+        df_poly = df_base[['Year', 'Onsite Total CO2']].sort_values('Year')
+        X = df_poly['Year'].values
+        y = df_poly['Onsite Total CO2'].values
+        spline = make_interp_spline(X, y, k=3)
+        years_interp = np.arange(df_poly['Year'].min(), df_poly['Year'].max() + 1)
+        y_interp = spline(years_interp)
 
-    baseline_df['delta_C_baseline'] = baseline_df['Onsite Total CO2_interp'].diff()
-    df_interp['delta_C_project'] = df_interp['Onsite Total CO2_interp'].diff()
+        df_interp = pd.DataFrame({
+            'Year': years_interp,
+            'Onsite Total CO2_interp': y_interp,
+            'ModelType': 'Project',
+            'Protocol': protocol
+        })
 
-    merged_df = pd.merge(
-        baseline_df[['Year', 'delta_C_baseline']],
-        df_interp[['Year', 'delta_C_project']],
-        on='Year'
-    )
+        baseline_df = pd.DataFrame({
+            'Year': years_interp,
+            'Onsite Total CO2_interp': 0,
+            'ModelType': 'Baseline',
+            'Protocol': protocol
+        })
 
-    BUF = 0.20
-    merged_df['C_total'] = merged_df['delta_C_project'] - merged_df['delta_C_baseline']
-    merged_df['BUF'] = merged_df['C_total'] * BUF
-    merged_df['ERT'] = merged_df['C_total'] - merged_df['BUF']
+        baseline_df['delta_C_baseline'] = baseline_df['Onsite Total CO2_interp'].diff()
+        df_interp['delta_C_project'] = df_interp['Onsite Total CO2_interp'].diff()
 
-    for col in ['delta_C_project', 'delta_C_baseline', 'C_total', 'BUF', 'ERT']:
-        merged_df[col] = merged_df[col].round(2)
+        merged_df = pd.merge(
+            baseline_df[['Year', 'delta_C_baseline']],
+            df_interp[['Year', 'delta_C_project']],
+            on='Year'
+        )
 
-    # add merged_df to session_state
-    st.session_state.merged_df = merged_df
+        # Compute ERT only if buffer applies
+        if apply_buf:
+            merged_df['C_total'] = merged_df['delta_C_project'] - merged_df['delta_C_baseline']
+            merged_df['BUF'] = merged_df['C_total'] * BUF
+            merged_df['CU'] = merged_df['C_total'] - merged_df['BUF']
+        else:
+            merged_df['C_total'] = merged_df['delta_C_project'] - merged_df['delta_C_baseline']
+            merged_df['BUF'] = 0.0
+            merged_df['CU'] = merged_df['C_total']
 
-    # Plot chart
-    ERT_chart = alt.Chart(merged_df).mark_line(point=True).encode(
+        merged_df['Protocol'] = protocol
+
+        for col in ['delta_C_project', 'delta_C_baseline', 'C_total', 'BUF', 'CU']:
+            merged_df[col] = merged_df[col].round(2)
+
+        # Append each protocol's results to the list
+        all_protocol_dfs.append(merged_df)
+
+    # Combine results
+    if all_protocol_dfs:
+        final_df = pd.concat(all_protocol_dfs)
+    else:
+        st.error("No protocols selected or no data available to plot.")
+        return
+
+    # Plot chart with Protocol color encoding
+    ERT_chart = alt.Chart(final_df).mark_line(point=True).encode(
         x=alt.X('Year:O', title='Year', axis=alt.Axis(labelAngle=30)),
-        y=alt.Y('ERT:Q', title='ERTs (tons CO₂e/acre)'),
-        tooltip=['Year', 'ERT']
-    ).properties(title='Annual ERT Estimates', width=600, height=400).configure_axis(grid=True, gridOpacity=0.3)
+        y=alt.Y('CU:Q', title='CUs (tonnes CO₂e)'),
+        color='Protocol:N',
+        tooltip=['Year', 'CU', 'Protocol']
+    ).properties(title='Annual CU Estimates', width=600, height=400).configure_axis(grid=True, gridOpacity=0.3)
 
     st.altair_chart(ERT_chart, use_container_width=True)
 
@@ -503,24 +544,33 @@ def run_chart():
     with st.expander(label="Planting Parameters", expanded=True):
         col1, col2 = st.columns([1,2], gap="large")
         with col1:
-            planting_sliders()
+            planting_sliders_fragment()
         with col2:
-            carbon_chart()
+            carbon_chart_fragment()
 
     # Row 2: Acreage & Protocol | Carbon units chart
-    with st.expander(label="Carbon Estimates", expanded=True):
-        col3, col4 = st.columns([1,2], gap="large")
-        with col3:
-            if "carbon_df" not in st.session_state:
-                st.error("No carbon data found. Adjust sliders above first.")
-                st.stop()
-            # acreage = st.number_input("Enter acreage:", min_value=1, value=100, key="carbon_units_acreage")
-            protocol = st.selectbox("Select Protocol", options=["ACR"], key="carbon_units_protocol")
-            # st.session_state["carbon_units_inputs"] = {"acreage": acreage, "protocol": protocol}
-            st.session_state["carbon_units_inputs"] = {"protocol": protocol}
+    col3, col4 = st.columns(2)
+    with col3:
+        st.subheader("Carbon Estimates")
+        if "carbon_df" not in st.session_state:
+            st.error("No carbon data found. Adjust sliders above first.")
+            st.stop()
+        # acreage = st.number_input("Enter acreage:", min_value=1, value=100, key="carbon_units_acreage")
+        # protocol = st.selectbox("Select Protocol", options=["ACR", "CAR", "VERRA"], key="carbon_units_protocol")
+        protocols = st.multiselect(
+            "Select Protocol(s)",
+            options=["ACR", "GS", "CAR", "VERRA"],
+            default=["ACR"],
+            key="carbon_units_protocols"
+        )
+
+        st.session_state["carbon_units_inputs"] = {"protocols": protocols}
+
+        # st.session_state["carbon_units_inputs"] = {"acreage": acreage, "protocol": protocol}
+        # st.session_state["carbon_units_inputs"] = {"protocol": protocol}
 
         with col4:
-            carbon_units() 
+            carbon_units_fragment() 
 
     # Row 3: Proforma inputs | Credits chart + summary
     with st.expander(label="Credits (Proforma)", expanded=True):
