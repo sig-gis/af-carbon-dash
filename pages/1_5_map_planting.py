@@ -12,6 +12,7 @@ from pathlib import Path
 from streamlit_folium import st_folium
 from scipy.interpolate import make_interp_spline
 import altair as alt
+import numpy_financial as npf
 
 
 # -----------------------------
@@ -164,7 +165,7 @@ def _species_keys(preset: dict):
 def _label_for(key: str) -> str:
     return SPECIES_LABELS.get(key, key.replace("tpa_", "TPA_").upper())
 
-def planting_sliders_fragment():
+def planting_sliders():
     presets = load_variant_presets()
     variant = st.session_state.get("selected_variant", "PN")
 
@@ -230,7 +231,7 @@ def planting_sliders_fragment():
     st.session_state["species_mix"] = {k: int(st.session_state.get(k, 0)) for k in species_keys}
 
 # @st.fragment
-def carbon_chart_fragment():
+def carbon_chart():
     # Ensure the sliders have been set
     if not all(k in st.session_state for k in ["tpa_df", "tpa_rc", "tpa_wh", "survival", "si"]):
         st.info("Adjust Planting Scenario sliders to see the carbon output.")
@@ -260,8 +261,10 @@ def carbon_chart_fragment():
         c_scores.append(c_score)
         ann_c_scores.append(ann_c_score)
         years.append(int(year))
-
+    
+    year_0 = pd.DataFrame({"Year": [2024], "C_Score": [0], "Annual_C_Score": [0]})
     df = pd.DataFrame({"Year": years, "C_Score": c_scores, "Annual_C_Score": ann_c_scores})
+    df = pd.concat([year_0, df])
     st.session_state.carbon_df = df
 
     # Plot
@@ -275,9 +278,9 @@ def carbon_chart_fragment():
         height=400
     )
     st.altair_chart(line, use_container_width=True)
-    st.markdown(f"Final Carbon Output (year {max(df['Year'])}): {df['C_Score'].iloc[-1]:.2f}")
+    st.success(f"Final Carbon Output (year {max(df['Year'])}): {df['C_Score'].iloc[-1]:.2f}")
 
-def carbon_units_fragment():
+def carbon_units():
     if "carbon_df" not in st.session_state:
         st.error("No carbon data found. Please adjust sliders first.")
         st.stop()
@@ -286,12 +289,12 @@ def carbon_units_fragment():
 
     # Read inputs from session state (set by the left column)
     inputs = st.session_state.get("carbon_units_inputs", {"acreage": 100, "protocol": "ACR"})
-    acreage = inputs["acreage"]
+    # acreage = inputs["acreage"]
     protocol = inputs["protocol"]
 
     # Build project DataFrame
     df_acr = df.copy()
-    df_acr['Area_acres'] = acreage
+    # df_acr['Area_acres'] = acreage
     df_acr['Onsite Total CO2'] = df_acr['C_Score'] * 3.667
     df_acr['StudyArea_ModelType'] = "Project"
     df_acr['StudyArea_Protocol'] = protocol
@@ -333,37 +336,201 @@ def carbon_units_fragment():
     for col in ['delta_C_project', 'delta_C_baseline', 'C_total', 'BUF', 'ERT']:
         merged_df[col] = merged_df[col].round(2)
 
+    # add merged_df to session_state
+    st.session_state.merged_df = merged_df
+
     # Plot chart
     ERT_chart = alt.Chart(merged_df).mark_line(point=True).encode(
         x=alt.X('Year:O', title='Year', axis=alt.Axis(labelAngle=30)),
-        y=alt.Y('ERT:Q', title='ERTs (tonnes CO₂e)'),
+        y=alt.Y('ERT:Q', title='ERTs (tons CO₂e/acre)'),
         tooltip=['Year', 'ERT']
     ).properties(title='Annual ERT Estimates', width=600, height=400).configure_axis(grid=True, gridOpacity=0.3)
 
     st.altair_chart(ERT_chart, use_container_width=True)
 
+# ---------- Credits (Proforma) functions ----------
+@st.cache_data
+def _load_proforma_defaults() -> dict:
+    with open("conf/base/proforma_presets.json") as f:
+        return json.load(f)
+
+def _seed_defaults(prefix: str = "credits_"):
+    defaults = _load_proforma_defaults()
+    # store under prefixed keys to avoid collisions
+    for k, v in defaults.items():
+        st.session_state.setdefault(prefix + k, v)
+
+def credits_inputs(prefix: str = "credits_") -> dict:
+    """
+    Render Proforma inputs in the current container and return a dict of typed values.
+    """
+    _seed_defaults(prefix)
+
+    with st.popover("Proforma Options"):
+        net_acres              = st.number_input("Net Acres:", min_value=1, step=100, key=prefix+"net_acres")
+        num_plots              = st.number_input("# Plots:", min_value=1, key=prefix+"num_plots")
+        cost_per_cfi_plot      = st.number_input("Cost/CFI Plot:", min_value=1, key=prefix+"cost_per_cfi_plot")
+        price_per_ert_initial  = st.number_input("Price/ERT (initial):", min_value=1.0, key=prefix+"price_per_ert_initial")
+        credit_price_increase_perc = st.number_input("Credit Price Increase (percent):", min_value=0.0, step=1.0, format="%.1f", key=prefix+"credit_price_increase")
+        registry_fees              = st.number_input("Registry Fees:", min_value=1, key=prefix+"registry_fees")
+        validation_cost            = st.number_input("Validation Cost:", min_value=1, key=prefix+"validation_cost")
+        verification_cost          = st.number_input("Verification Cost:", min_value=1, key=prefix+"verification_cost")
+        issuance_fee_per_ert       = st.number_input("Issuance Fee per ERT:", min_value=0.0, step=0.01, format="%.2f", key=prefix+"issuance_fee_per_ert")
+        anticipated_inflation_perc = st.number_input("Anticipated Inflation (percent):", min_value=0.0, step=1.0, format="%.1f", key=prefix+"anticipated_inflation")
+        discount_rate_perc         = st.number_input("Discount Rate (percent):", min_value=0.0, step=1.0, format="%.1f", key=prefix+"discount_rate")
+        planting_cost = st.number_input("Planting Cost (initial):", min_value=0, key=prefix+"planting_cost")
+        seedling_cost = st.number_input("Seedling Cost (initial):", min_value=0, key=prefix+"seedling_cost")
+
+    # constants (constrained by modeling backend)
+    year_start     = 2024
+    years_advance  = 35
+
+    return {
+        "net_acres": net_acres,
+        "num_plots": num_plots,
+        "cost_per_cfi_plot": cost_per_cfi_plot,
+        "price_per_ert_initial": float(price_per_ert_initial),
+        "credit_price_increase": float(credit_price_increase_perc) / 100.0,
+        "registry_fees": registry_fees,
+        "validation_cost": validation_cost,
+        "verification_cost": verification_cost,
+        "issuance_fee_per_ert": float(issuance_fee_per_ert),
+        "anticipated_inflation": float(anticipated_inflation_perc) / 100.0,
+        "discount_rate": float(discount_rate_perc) / 100.0,
+        "planting_cost": planting_cost,
+        "seedling_cost": seedling_cost,
+        "year_start": year_start,
+        "years_advance": years_advance,
+    }
+
+def _compute_proforma(df_ert_ac: pd.DataFrame, p: dict) -> pd.DataFrame:
+    """
+    df_ert_ac: DataFrame with ['Year','ERT'] where ERT is per-acre
+    p: params dict from credits_inputs()
+    returns full proforma DataFrame with costs, revenue, net revenue
+    """
+    df = df_ert_ac[['Year', 'ERT']].copy()
+    df = df.rename(columns={'ERT': 'ERT_ac'})
+    df['Project_acres'] = p['net_acres']
+    df['ERT'] = df['ERT_ac'] * p['net_acres']
+
+    # credit volume: sell every 5th year including start year
+    df['ERTs_Sold'] = 0.0
+    for i, row in df.iterrows():
+        if row['Year'] == p['year_start'] or ((row['Year'] - p['year_start']) % 5 == 0 and row['Year'] > p['year_start']):
+            df.loc[i, 'ERTs_Sold'] = df.loc[max(0, i-4):i, 'ERT'].sum()
+
+    # revenue
+    df['ERT_Credit_Price'] = p['price_per_ert_initial'] * ((1 + p['credit_price_increase']) ** (df['Year'] - p['year_start']))
+    df['Total_Revenue'] = df['ERTs_Sold'] * df['ERT_Credit_Price']
+
+    # costs
+    df['Validation_and_Verification'] = 0
+    df.loc[df['Year'] == p['year_start'], 'Validation_and_Verification'] = p['validation_cost']
+    df.loc[(df['Year'] > p['year_start']) & ((df['Year'] - p['year_start']) % 5 == 0), 'Validation_and_Verification'] = p['verification_cost']
+
+    df['Survey_Cost'] = 0
+    df.loc[(df['Year'] - p['year_start']) % 5 == 4, 'Survey_Cost'] = p['num_plots'] * p['cost_per_cfi_plot'] * (1 + p['anticipated_inflation'])
+
+    df['Registry_Fees'] = p['registry_fees']
+    df['Issuance_Fees'] = df['ERTs_Sold'] * p['issuance_fee_per_ert']
+    df['Planting_Cost'] = p['planting_cost']
+    df['Seedling_Cost'] = p['seedling_cost']
+
+    df['Total_Costs'] = (
+        df['Validation_and_Verification'] +
+        df['Survey_Cost'] +
+        df['Registry_Fees'] +
+        df['Issuance_Fees'] +
+        df['Planting_Cost'] +
+        df['Seedling_Cost']
+    )
+    df['Net_Revenue'] = df['Total_Revenue'] - df['Total_Costs']
+    return df
+
+def credits_results(params: dict):
+    if "merged_df" not in st.session_state:
+        st.error("No carbon data found. Please return to the Carbon Units Estimate section first.")
+        st.stop()
+
+    df_ert_ac = st.session_state.merged_df[['Year', 'ERT']].copy()
+    df_pf = _compute_proforma(df_ert_ac, params)
+
+    # summary metrics
+    year_start     = params['year_start']
+    total_net      = float(df_pf['Net_Revenue'].sum())
+    npv_yr20       = float(npf.npv(params['anticipated_inflation'] + params['discount_rate'],
+                                   df_pf[df_pf['Year'] <= (year_start + 20)]['Net_Revenue']))
+    npv_per_acre   = npv_yr20 / params['net_acres']
+
+    # chart (5-year ticks)
+    year_stop      = int(df_pf['Year'].max())
+    include_years  = np.arange(year_start, year_stop + 5, 5)
+    df_chart       = df_pf[df_pf['Year'].isin(include_years)]
+
+    project_acres = params['net_acres']
+    chart = (
+        alt.Chart(df_chart)
+        .mark_line(point=True)
+        .encode(
+            x=alt.X('Year:O', title='Year', axis=alt.Axis(labelAngle=30)),
+            y=alt.Y('Net_Revenue:Q', title='Net Revenue'),
+            tooltip=['Year', alt.Tooltip('Net_Revenue:Q', format='$,.2f')]
+        )
+        .properties(title=f'Estimated Credits for {project_acres} Acre Project', width=600, height=400)
+        .configure_axis(grid=True, gridOpacity=0.3)
+    )
+
+    st.altair_chart(chart, use_container_width=True)
+
+    # results summary
+    st.subheader("Proforma Results Summary")
+    st.success(f"Total Net Revenue ({year_start}-{(year_stop)}): ${total_net:,.2f}")
+    st.success(f"NPV at year {(year_start+20)}: ${npv_yr20:,.2f}")
+    st.success(f"NPV/acre at year {(year_start+20)}: ${npv_per_acre:.2f}")
+
+    # CSV download
+    st.download_button(
+        label="⬇️ Download Proforma table (CSV)",
+        data=df_pf.to_csv(index=False).encode("utf-8"),
+        file_name="credits_proforma.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
+
 @st.fragment
 def run_chart():
     # Row 1: Planting sliders | Carbon chart
-    col1, col2 = st.columns(2)
-    with col1:
-        planting_sliders_fragment()
-    with col2:
-        carbon_chart_fragment()
+    with st.expander(label="Planting Parameters", expanded=True):
+        col1, col2 = st.columns([1,2], gap="large")
+        with col1:
+            planting_sliders()
+        with col2:
+            carbon_chart()
 
     # Row 2: Acreage & Protocol | Carbon units chart
-    col3, col4 = st.columns(2)
-    with col3:
-        st.subheader("Carbon Estimates")
-        if "carbon_df" not in st.session_state:
-            st.error("No carbon data found. Adjust sliders above first.")
-            st.stop()
-        acreage = st.number_input("Enter acreage:", min_value=1, value=100, key="carbon_units_acreage")
-        protocol = st.selectbox("Select Protocol", options=["ACR", "CAR", "VERRA"], key="carbon_units_protocol")
-        st.session_state["carbon_units_inputs"] = {"acreage": acreage, "protocol": protocol}
+    with st.expander(label="Carbon Estimates", expanded=True):
+        col3, col4 = st.columns([1,2], gap="large")
+        with col3:
+            if "carbon_df" not in st.session_state:
+                st.error("No carbon data found. Adjust sliders above first.")
+                st.stop()
+            # acreage = st.number_input("Enter acreage:", min_value=1, value=100, key="carbon_units_acreage")
+            protocol = st.selectbox("Select Protocol", options=["ACR"], key="carbon_units_protocol")
+            # st.session_state["carbon_units_inputs"] = {"acreage": acreage, "protocol": protocol}
+            st.session_state["carbon_units_inputs"] = {"protocol": protocol}
 
-    with col4:
-        carbon_units_fragment()  
+        with col4:
+            carbon_units() 
+
+    # Row 3: Proforma inputs | Credits chart + summary
+    with st.expander(label="Credits (Proforma)", expanded=True):
+        col5, col6 = st.columns([1,2], gap="large")
+        with col5:
+            proforma_params = credits_inputs(prefix="credits_")
+        with col6:
+            # st.subheader("Credits (Proforma) – Results")
+            credits_results(proforma_params) 
 
 ########################################################################################################################################################################################
 # -----------------------------
@@ -380,7 +547,7 @@ simplified_geojson = os.path.join(BASE_DIR, "data", "FVSVariantMap20210525", "FV
 st.set_page_config(layout="wide", page_title="Project Builder", page_icon="🌲")
 
 with map_tab:
-    st.title("🌲 Site Selection")
+    st.title("🗺️ Site Selection")
     st.subheader("Select FVS Variant")
 
     geojson_str, tooltip_fields = load_geojson_fragment(simplified_geojson, local_shapefile)
@@ -404,15 +571,6 @@ with map_tab:
     show_clicked_variant(map_data)
     display_selected_info()
 
-    # with st.form("map_select_form"):
-    #     submitted = st.form_submit_button("Select Variant")
-    #     if submitted:
-    #         if "selected_variant" in st.session_state:
-    #             st.success(f"Selected Variant: {st.session_state['selected_variant']}")
-    #         else:
-    #             st.info("Click a feature on the map first.")
-
 with plant_tab:
     st.title("🌲 Planting Scenario")
-    st.subheader("Planting Scenario")
     run_chart()
