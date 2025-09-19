@@ -1,0 +1,15 @@
+{
+    "net_acres": 10000,
+    "num_plots": 250,
+    "cost_per_cfi_plot": 150,
+    "price_per_ert_initial": 25.0,
+    "credit_price_increase": 2,
+    "registry_fees": 500,
+    "validation_cost": 45000,
+    "verification_cost": 25000,
+    "issuance_fee_per_ert": 0.15,
+    "anticipated_inflation": 0,
+    "discount_rate": 6.0,
+    "planting_cost": 0,
+    "seedling_cost": 0
+}
