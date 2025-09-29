@@ -323,7 +323,6 @@ def carbon_units():
         y = df_poly['Onsite Total CO2'].values
         spline = make_interp_spline(X, y, k=3)
 
-
         years_interp = np.arange(df_poly['Year'].min(), df_poly['Year'].max() + 1)
         y_interp = spline(years_interp)
 
@@ -351,16 +350,13 @@ def carbon_units():
         )
 
         # Compute CU only if buffer applies
-        # Compute CU only if buffer applies
         if apply_buf:
             merged_df['C_total'] = merged_df['delta_C_project'] - merged_df['delta_C_baseline']
             merged_df['BUF'] = merged_df['C_total'] * BUF
             merged_df['CU'] = merged_df['C_total'] - merged_df['BUF']
-            merged_df['CU'] = merged_df['C_total'] - merged_df['BUF']
         else:
             merged_df['C_total'] = merged_df['delta_C_project'] - merged_df['delta_C_baseline']
             merged_df['BUF'] = 0.0
-            merged_df['CU'] = merged_df['C_total']
             merged_df['CU'] = merged_df['C_total']
 
         merged_df['Protocol'] = protocol
@@ -388,7 +384,6 @@ def carbon_units():
     ).properties(title='Annual CU Estimates', width=600, height=400).configure_axis(grid=True, gridOpacity=0.3)
 
     st.altair_chart(CU_chart, use_container_width=True)
-    st.altair_chart(CU_chart, use_container_width=True)
 
 # ---------- Credits (Proforma) functions ----------
 @st.cache_data
@@ -413,12 +408,10 @@ def credits_inputs(prefix: str = "credits_") -> dict:
         num_plots              = st.number_input("# Plots:", min_value=1, key=prefix+"num_plots")
         cost_per_cfi_plot      = st.number_input("Cost/CFI Plot:", min_value=1, key=prefix+"cost_per_cfi_plot")
         price_per_ert_initial  = st.number_input("Price/CU (initial):", min_value=1.0, key=prefix+"price_per_ert_initial")
-        price_per_ert_initial  = st.number_input("Price/CU (initial):", min_value=1.0, key=prefix+"price_per_ert_initial")
         credit_price_increase_perc = st.number_input("Credit Price Increase (percent):", min_value=0.0, step=1.0, format="%.1f", key=prefix+"credit_price_increase")
         registry_fees              = st.number_input("Registry Fees:", min_value=1, key=prefix+"registry_fees")
         validation_cost            = st.number_input("Validation Cost:", min_value=1, key=prefix+"validation_cost")
         verification_cost          = st.number_input("Verification Cost:", min_value=1, key=prefix+"verification_cost")
-        issuance_fee_per_ert       = st.number_input("Issuance Fee per CU:", min_value=0.0, step=0.01, format="%.2f", key=prefix+"issuance_fee_per_ert")
         issuance_fee_per_ert       = st.number_input("Issuance Fee per CU:", min_value=0.0, step=0.01, format="%.2f", key=prefix+"issuance_fee_per_ert")
         anticipated_inflation_perc = st.number_input("Anticipated Inflation (percent):", min_value=0.0, step=1.0, format="%.1f", key=prefix+"anticipated_inflation")
         discount_rate_perc         = st.number_input("Discount Rate (percent):", min_value=0.0, step=1.0, format="%.1f", key=prefix+"discount_rate")
@@ -450,7 +443,6 @@ def credits_inputs(prefix: str = "credits_") -> dict:
 def _compute_proforma(df_ert_ac: pd.DataFrame, p: dict) -> pd.DataFrame:
     """
     df_ert_ac: DataFrame with ['Year','CU','Protocol'] where CU is per-acre
-    df_ert_ac: DataFrame with ['Year','CU','Protocol'] where CU is per-acre
     p: params dict from credits_inputs()
     returns full proforma DataFrame with costs, revenue, net revenue for each protocol
     """
@@ -458,23 +450,16 @@ def _compute_proforma(df_ert_ac: pd.DataFrame, p: dict) -> pd.DataFrame:
     for protocol, subdf in df_ert_ac.groupby("Protocol"):
         df = subdf[['Year', 'CU']].copy()
         df = df.rename(columns={'CU': 'CU_ac'})
-        df = subdf[['Year', 'CU']].copy()
-        df = df.rename(columns={'CU': 'CU_ac'})
         df['Project_acres'] = p['net_acres']
-        df['CU'] = df['CU_ac'] * p['net_acres']
         df['CU'] = df['CU_ac'] * p['net_acres']
 
         # credit volume: sell every 5th year including start year
         df['CUs_Sold'] = 0.0
-        df['CUs_Sold'] = 0.0
         for i, row in df.iterrows():
             if row['Year'] == p['year_start'] or ((row['Year'] - p['year_start']) % 5 == 0 and row['Year'] > p['year_start']):
                 df.loc[i, 'CUs_Sold'] = df.loc[max(0, i-4):i, 'CU'].sum()
-                df.loc[i, 'CUs_Sold'] = df.loc[max(0, i-4):i, 'CU'].sum()
 
         # revenue
-        df['CU_Credit_Price'] = p['price_per_ert_initial'] * ((1 + p['credit_price_increase']) ** (df['Year'] - p['year_start']))
-        df['Total_Revenue'] = df['CUs_Sold'] * df['CU_Credit_Price']
         df['CU_Credit_Price'] = p['price_per_ert_initial'] * ((1 + p['credit_price_increase']) ** (df['Year'] - p['year_start']))
         df['Total_Revenue'] = df['CUs_Sold'] * df['CU_Credit_Price']
 
@@ -487,7 +472,6 @@ def _compute_proforma(df_ert_ac: pd.DataFrame, p: dict) -> pd.DataFrame:
         df.loc[(df['Year'] - p['year_start']) % 5 == 4, 'Survey_Cost'] = p['num_plots'] * p['cost_per_cfi_plot'] * (1 + p['anticipated_inflation'])
 
         df['Registry_Fees'] = p['registry_fees']
-        df['Issuance_Fees'] = df['CUs_Sold'] * p['issuance_fee_per_ert']
         df['Issuance_Fees'] = df['CUs_Sold'] * p['issuance_fee_per_ert']
         df['Planting_Cost'] = p['planting_cost']
         df['Seedling_Cost'] = p['seedling_cost']
@@ -511,8 +495,6 @@ def credits_results(params: dict):
         st.error("No carbon data found. Please return to the Carbon Units Estimate section first.")
         st.stop()
 
-    # Extract merged CU data per protocol
-    df_ert_ac = st.session_state.merged_df[['Year', 'CU', 'Protocol']].copy()
     # Extract merged CU data per protocol
     df_ert_ac = st.session_state.merged_df[['Year', 'CU', 'Protocol']].copy()
 
@@ -606,13 +588,8 @@ def run_chart():
                 st.error("No carbon data found. Adjust sliders above first.")
                 st.stop()
             
-            
             protocols = st.multiselect(
                 "Select Protocol(s)",
-                options=["ACR/CAR/VERRA", 
-                         "GS",  
-                         "ISO"],
-                default=["ACR/CAR/VERRA"],
                 options=["ACR/CAR/VERRA", 
                          "GS",  
                          "ISO"],
