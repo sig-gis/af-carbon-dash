@@ -307,7 +307,7 @@ def carbon_units():
             coeff = 1.0
             apply_buf = False
         elif protocol == "ISO":
-            BUF = 0.20
+            BUF = 0.25 #dummy value
             coeff = 1.0
             apply_buf = True
         else:
