@@ -281,71 +281,109 @@ def carbon_chart():
 
 def carbon_units():
     if "carbon_df" not in st.session_state:
-        st.error("No carbon data found. Please adjust sliders first.")
-        st.stop()
+            st.error("No carbon data found. Please adjust sliders first.")
+            st.stop()
 
     df = st.session_state.carbon_df.copy()
 
-    # Read inputs from session state (set by the left column)
-    inputs = st.session_state.get("carbon_units_inputs", {"acreage": 100, "protocol": "ACR"})
-    # acreage = inputs["acreage"]
-    protocol = inputs["protocol"]
+    # Read multiple protocols
+    inputs = st.session_state.get("carbon_units_inputs", {"protocols": ["ACR/CAR/VERRA"]})
+    protocols = inputs["protocols"]
 
-    # Build project DataFrame
-    df_acr = df.copy()
-    # df_acr['Area_acres'] = acreage
-    df_acr['Onsite Total CO2'] = df_acr['C_Score'] * 3.667
-    df_acr['StudyArea_ModelType'] = "Project"
-    df_acr['StudyArea_Protocol'] = protocol
+    all_protocol_dfs = []
+    
+    for protocol in protocols:
+        df_base = df.copy()
+        df_base['Onsite Total CO2'] = df_base['C_Score'] * 3.667
 
-    # Interpolation and calculations remain unchanged
-    df_poly = df_acr[['Year', 'Onsite Total CO2']].sort_values('Year')
-    X = df_poly['Year'].values
-    y = df_poly['Onsite Total CO2'].values
-    spline = make_interp_spline(X, y, k=3)
-    years_interp = np.arange(df_poly['Year'].min(), df_poly['Year'].max() + 1)
-    y_interp = spline(years_interp)
+        # ----------------------------------
+        # Protocol-specific calculations
+        # ----------------------------------
+        if protocol == "ACR/CAR/VERRA": 
+            BUF = 0.20
+            coeff = 1.0
+            apply_buf = True
+        elif protocol == "GS": #no buffer value
+            coeff = 1.0
+            apply_buf = False
+        elif protocol == "ISO":
+            BUF = 0.25 #dummy value
+            coeff = 1.0
+            apply_buf = True
+        else:
+            BUF = 0.20
+            coeff = 1.0
+            apply_buf = True
 
-    df_interp = pd.DataFrame({
-        'Year': years_interp,
-        'Onsite Total CO2_interp': y_interp,
-        'ModelType': 'Project'
-    })
+        df_base['Onsite Total CO2'] = df_base['Onsite Total CO2'] * coeff
 
-    baseline_df = pd.DataFrame({
-        'Year': years_interp,
-        'Onsite Total CO2_interp': 0,
-        'ModelType': 'Baseline',
-    })
+        # Interpolation
+        df_poly = df_base[['Year', 'Onsite Total CO2']].sort_values('Year')
+        X = df_poly['Year'].values
+        y = df_poly['Onsite Total CO2'].values
+        spline = make_interp_spline(X, y, k=3)
 
-    baseline_df['delta_C_baseline'] = baseline_df['Onsite Total CO2_interp'].diff()
-    df_interp['delta_C_project'] = df_interp['Onsite Total CO2_interp'].diff()
+        years_interp = np.arange(df_poly['Year'].min(), df_poly['Year'].max() + 1)
+        y_interp = spline(years_interp)
 
-    merged_df = pd.merge(
-        baseline_df[['Year', 'delta_C_baseline']],
-        df_interp[['Year', 'delta_C_project']],
-        on='Year'
-    )
+        df_interp = pd.DataFrame({
+            'Year': years_interp,
+            'Onsite Total CO2_interp': y_interp,
+            'ModelType': 'Project',
+            'Protocol': protocol
+        })
 
-    BUF = 0.20
-    merged_df['C_total'] = merged_df['delta_C_project'] - merged_df['delta_C_baseline']
-    merged_df['BUF'] = merged_df['C_total'] * BUF
-    merged_df['ERT'] = merged_df['C_total'] - merged_df['BUF']
+        baseline_df = pd.DataFrame({
+            'Year': years_interp,
+            'Onsite Total CO2_interp': 0,
+            'ModelType': 'Baseline',
+            'Protocol': protocol
+        })
 
-    for col in ['delta_C_project', 'delta_C_baseline', 'C_total', 'BUF', 'ERT']:
-        merged_df[col] = merged_df[col].round(2)
+        baseline_df['delta_C_baseline'] = baseline_df['Onsite Total CO2_interp'].diff()
+        df_interp['delta_C_project'] = df_interp['Onsite Total CO2_interp'].diff()
 
-    # add merged_df to session_state
-    st.session_state.merged_df = merged_df
+        merged_df = pd.merge(
+            baseline_df[['Year', 'delta_C_baseline']],
+            df_interp[['Year', 'delta_C_project']],
+            on='Year'
+        )
 
-    # Plot chart
-    ERT_chart = alt.Chart(merged_df).mark_line(point=True).encode(
+        # Compute CU only if buffer applies
+        if apply_buf:
+            merged_df['C_total'] = merged_df['delta_C_project'] - merged_df['delta_C_baseline']
+            merged_df['BUF'] = merged_df['C_total'] * BUF
+            merged_df['CU'] = merged_df['C_total'] - merged_df['BUF']
+        else:
+            merged_df['C_total'] = merged_df['delta_C_project'] - merged_df['delta_C_baseline']
+            merged_df['BUF'] = 0.0
+            merged_df['CU'] = merged_df['C_total']
+
+        merged_df['Protocol'] = protocol
+
+        for col in ['delta_C_project', 'delta_C_baseline', 'C_total', 'BUF', 'CU']:
+            merged_df[col] = merged_df[col].round(2)
+
+        # Append each protocol's results to the list
+        all_protocol_dfs.append(merged_df)
+
+    # Combine results
+    if all_protocol_dfs:
+        final_df = pd.concat(all_protocol_dfs)
+        st.session_state.merged_df = final_df
+    else:
+        st.error("No protocols selected or no data available to plot.")
+        return
+
+    # Plot chart with Protocol color encoding
+    CU_chart = alt.Chart(final_df).mark_line(point=True).encode(
         x=alt.X('Year:O', title='Year', axis=alt.Axis(labelAngle=30)),
-        y=alt.Y('ERT:Q', title='ERTs (tons CO₂e/acre)'),
-        tooltip=['Year', 'ERT']
-    ).properties(title='Annual ERT Estimates', width=600, height=400).configure_axis(grid=True, gridOpacity=0.3)
+        y=alt.Y('CU:Q', title='CUs (tonnes CO₂e)'),
+        color='Protocol:N',
+        tooltip=['Year', 'CU', 'Protocol']
+    ).properties(title='Annual CU Estimates', width=600, height=400).configure_axis(grid=True, gridOpacity=0.3)
 
-    st.altair_chart(ERT_chart, use_container_width=True)
+    st.altair_chart(CU_chart, use_container_width=True)
 
 # ---------- Credits (Proforma) functions ----------
 @st.cache_data
@@ -365,16 +403,16 @@ def credits_inputs(prefix: str = "credits_") -> dict:
     """
     _seed_defaults(prefix)
 
-    with st.popover("Proforma Options"):
+    with st.popover("Financial Options"):
         net_acres              = st.number_input("Net Acres:", min_value=1, step=100, key=prefix+"net_acres")
         num_plots              = st.number_input("# Plots:", min_value=1, key=prefix+"num_plots")
         cost_per_cfi_plot      = st.number_input("Cost/CFI Plot:", min_value=1, key=prefix+"cost_per_cfi_plot")
-        price_per_ert_initial  = st.number_input("Price/ERT (initial):", min_value=1.0, key=prefix+"price_per_ert_initial")
+        price_per_ert_initial  = st.number_input("Price/CU (initial):", min_value=1.0, key=prefix+"price_per_ert_initial")
         credit_price_increase_perc = st.number_input("Credit Price Increase (percent):", min_value=0.0, step=1.0, format="%.1f", key=prefix+"credit_price_increase")
         registry_fees              = st.number_input("Registry Fees:", min_value=1, key=prefix+"registry_fees")
         validation_cost            = st.number_input("Validation Cost:", min_value=1, key=prefix+"validation_cost")
         verification_cost          = st.number_input("Verification Cost:", min_value=1, key=prefix+"verification_cost")
-        issuance_fee_per_ert       = st.number_input("Issuance Fee per ERT:", min_value=0.0, step=0.01, format="%.2f", key=prefix+"issuance_fee_per_ert")
+        issuance_fee_per_ert       = st.number_input("Issuance Fee per CU:", min_value=0.0, step=0.01, format="%.2f", key=prefix+"issuance_fee_per_ert")
         anticipated_inflation_perc = st.number_input("Anticipated Inflation (percent):", min_value=0.0, step=1.0, format="%.1f", key=prefix+"anticipated_inflation")
         discount_rate_perc         = st.number_input("Discount Rate (percent):", min_value=0.0, step=1.0, format="%.1f", key=prefix+"discount_rate")
         planting_cost = st.number_input("Planting Cost (initial):", min_value=0, key=prefix+"planting_cost")
@@ -404,89 +442,124 @@ def credits_inputs(prefix: str = "credits_") -> dict:
 
 def _compute_proforma(df_ert_ac: pd.DataFrame, p: dict) -> pd.DataFrame:
     """
-    df_ert_ac: DataFrame with ['Year','ERT'] where ERT is per-acre
+    df_ert_ac: DataFrame with ['Year','CU','Protocol'] where CU is per-acre
     p: params dict from credits_inputs()
-    returns full proforma DataFrame with costs, revenue, net revenue
+    returns full proforma DataFrame with costs, revenue, net revenue for each protocol
     """
-    df = df_ert_ac[['Year', 'ERT']].copy()
-    df = df.rename(columns={'ERT': 'ERT_ac'})
-    df['Project_acres'] = p['net_acres']
-    df['ERT'] = df['ERT_ac'] * p['net_acres']
+    results = []
+    for protocol, subdf in df_ert_ac.groupby("Protocol"):
+        df = subdf[['Year', 'CU']].copy()
+        df = df.rename(columns={'CU': 'CU_ac'})
+        df['Project_acres'] = p['net_acres']
+        df['CU'] = df['CU_ac'] * p['net_acres']
 
-    # credit volume: sell every 5th year including start year
-    df['ERTs_Sold'] = 0.0
-    for i, row in df.iterrows():
-        if row['Year'] == p['year_start'] or ((row['Year'] - p['year_start']) % 5 == 0 and row['Year'] > p['year_start']):
-            df.loc[i, 'ERTs_Sold'] = df.loc[max(0, i-4):i, 'ERT'].sum()
+        # credit volume: sell every 5th year including start year
+        df['CUs_Sold'] = 0.0
+        for i, row in df.iterrows():
+            if row['Year'] == p['year_start'] or ((row['Year'] - p['year_start']) % 5 == 0 and row['Year'] > p['year_start']):
+                df.loc[i, 'CUs_Sold'] = df.loc[max(0, i-4):i, 'CU'].sum()
 
-    # revenue
-    df['ERT_Credit_Price'] = p['price_per_ert_initial'] * ((1 + p['credit_price_increase']) ** (df['Year'] - p['year_start']))
-    df['Total_Revenue'] = df['ERTs_Sold'] * df['ERT_Credit_Price']
+        # revenue
+        df['CU_Credit_Price'] = p['price_per_ert_initial'] * ((1 + p['credit_price_increase']) ** (df['Year'] - p['year_start']))
+        df['Total_Revenue'] = df['CUs_Sold'] * df['CU_Credit_Price']
 
-    # costs
-    df['Validation_and_Verification'] = 0
-    df.loc[df['Year'] == p['year_start'], 'Validation_and_Verification'] = p['validation_cost']
-    df.loc[(df['Year'] > p['year_start']) & ((df['Year'] - p['year_start']) % 5 == 0), 'Validation_and_Verification'] = p['verification_cost']
+        # costs
+        df['Validation_and_Verification'] = 0
+        df.loc[df['Year'] == p['year_start'], 'Validation_and_Verification'] = p['validation_cost']
+        df.loc[(df['Year'] > p['year_start']) & ((df['Year'] - p['year_start']) % 5 == 0), 'Validation_and_Verification'] = p['verification_cost']
 
-    df['Survey_Cost'] = 0
-    df.loc[(df['Year'] - p['year_start']) % 5 == 4, 'Survey_Cost'] = p['num_plots'] * p['cost_per_cfi_plot'] * (1 + p['anticipated_inflation'])
+        df['Survey_Cost'] = 0
+        df.loc[(df['Year'] - p['year_start']) % 5 == 4, 'Survey_Cost'] = p['num_plots'] * p['cost_per_cfi_plot'] * (1 + p['anticipated_inflation'])
 
-    df['Registry_Fees'] = p['registry_fees']
-    df['Issuance_Fees'] = df['ERTs_Sold'] * p['issuance_fee_per_ert']
-    df['Planting_Cost'] = p['planting_cost']
-    df['Seedling_Cost'] = p['seedling_cost']
+        df['Registry_Fees'] = p['registry_fees']
+        df['Issuance_Fees'] = df['CUs_Sold'] * p['issuance_fee_per_ert']
+        df['Planting_Cost'] = p['planting_cost']
+        df['Seedling_Cost'] = p['seedling_cost']
 
-    df['Total_Costs'] = (
-        df['Validation_and_Verification'] +
-        df['Survey_Cost'] +
-        df['Registry_Fees'] +
-        df['Issuance_Fees'] +
-        df['Planting_Cost'] +
-        df['Seedling_Cost']
-    )
-    df['Net_Revenue'] = df['Total_Revenue'] - df['Total_Costs']
-    return df
+        df['Total_Costs'] = (
+            df['Validation_and_Verification'] +
+            df['Survey_Cost'] +
+            df['Registry_Fees'] +
+            df['Issuance_Fees'] +
+            df['Planting_Cost'] +
+            df['Seedling_Cost']
+        )
+        df['Net_Revenue'] = df['Total_Revenue'] - df['Total_Costs']
+        df['Protocol'] = protocol
+        results.append(df)
+
+    return pd.concat(results, ignore_index=True)
 
 def credits_results(params: dict):
     if "merged_df" not in st.session_state:
         st.error("No carbon data found. Please return to the Carbon Units Estimate section first.")
         st.stop()
 
-    df_ert_ac = st.session_state.merged_df[['Year', 'ERT']].copy()
+    # Extract merged CU data per protocol
+    df_ert_ac = st.session_state.merged_df[['Year', 'CU', 'Protocol']].copy()
+
+    # Compute full proforma table per protocol
     df_pf = _compute_proforma(df_ert_ac, params)
 
-    # summary metrics
-    year_start     = params['year_start']
-    total_net      = float(df_pf['Net_Revenue'].sum())
-    npv_yr20       = float(npf.npv(params['anticipated_inflation'] + params['discount_rate'],
-                                   df_pf[df_pf['Year'] <= (year_start + 20)]['Net_Revenue']))
-    npv_per_acre   = npv_yr20 / params['net_acres']
+    # Drop rows with NaN Net_Revenue to avoid chart issues
+    df_pf = df_pf.dropna(subset=['Net_Revenue'])
 
-    # chart (5-year ticks)
-    year_stop      = int(df_pf['Year'].max())
-    include_years  = np.arange(year_start, year_stop + 5, 5)
-    df_chart       = df_pf[df_pf['Year'].isin(include_years)]
+    # Summary metrics per protocol
+    year_start = params['year_start']
+    year_stop = int(df_pf['Year'].max())
 
-    project_acres = params['net_acres']
+    summaries = []
+    for protocol, subdf in df_pf.groupby("Protocol"):
+        total_net = subdf['Net_Revenue'].sum()
+        npv_yr20 = float(npf.npv(
+            params['anticipated_inflation'] + params['discount_rate'],
+            subdf[subdf['Year'] <= (year_start + 20)]['Net_Revenue']
+        ))
+        npv_per_acre = npv_yr20 / params['net_acres']
+        summaries.append({
+            "Protocol": protocol,
+            "total_net": total_net,
+            "npv_yr20": npv_yr20,
+            "npv_per_acre": npv_per_acre
+        })
+    summaries_df = pd.DataFrame(summaries)
+
+    # Filter chart to every 5 years (optional)
+    include_years = np.arange(year_start, year_stop + 5, 5)
+    df_chart = df_pf[df_pf['Year'].isin(include_years)]
+
+    # Chart: Net Revenue per protocol
     chart = (
         alt.Chart(df_chart)
         .mark_line(point=True)
         .encode(
-            x=alt.X('Year:O', title='Year', axis=alt.Axis(labelAngle=30)),
+            x=alt.X('Year:O', title='Year', axis=alt.Axis(labelAngle=30)), 
             y=alt.Y('Net_Revenue:Q', title='Net Revenue'),
-            tooltip=['Year', alt.Tooltip('Net_Revenue:Q', format='$,.2f')]
+            color=alt.Color('Protocol:N', title='Protocol'),
+            tooltip=['Year', 'Net_Revenue', 'Protocol']
         )
-        .properties(title=f'Estimated Credits for {project_acres} Acre Project', width=600, height=400)
+        .properties(
+            title=f'Estimated Credits for {params["net_acres"]} Acre Project',
+            width=600,
+            height=400
+        )
         .configure_axis(grid=True, gridOpacity=0.3)
     )
 
     st.altair_chart(chart, use_container_width=True)
 
-    # results summary
-    st.subheader("Proforma Results Summary")
-    st.success(f"Total Net Revenue ({year_start}-{(year_stop)}): ${total_net:,.2f}")
-    st.success(f"NPV at year {(year_start+20)}: ${npv_yr20:,.2f}")
-    st.success(f"NPV/acre at year {(year_start+20)}: ${npv_per_acre:.2f}")
+    # Show summary metrics
+    summaries_df_display = summaries_df.copy()
+    summaries_df_display['Total Net Revenue'] = summaries_df_display['total_net'].map('${:,.2f}'.format)
+    summaries_df_display['NPV (Year 20)'] = summaries_df_display['npv_yr20'].map('${:,.2f}'.format)
+    summaries_df_display['NPV per Acre'] = summaries_df_display['npv_per_acre'].map('${:,.2f}'.format)
+
+    # Keep only the columns to show
+    summaries_df_display = summaries_df_display[['Protocol', 'Total Net Revenue', 'NPV (Year 20)', 'NPV per Acre']]
+
+    # Display as a table
+    st.subheader("Project Financials Summary")
+    st.table(summaries_df_display.set_index('Protocol'))
 
     # CSV download
     st.download_button(
@@ -514,16 +587,23 @@ def run_chart():
             if "carbon_df" not in st.session_state:
                 st.error("No carbon data found. Adjust sliders above first.")
                 st.stop()
-            # acreage = st.number_input("Enter acreage:", min_value=1, value=100, key="carbon_units_acreage")
-            protocol = st.selectbox("Select Protocol", options=["ACR"], key="carbon_units_protocol")
-            # st.session_state["carbon_units_inputs"] = {"acreage": acreage, "protocol": protocol}
-            st.session_state["carbon_units_inputs"] = {"protocol": protocol}
+            
+            protocols = st.multiselect(
+                "Select Protocol(s)",
+                options=["ACR/CAR/VERRA", 
+                         "GS",  
+                         "ISO"],
+                default=["ACR/CAR/VERRA"],
+                key="carbon_units_protocols"
+            )
+
+            st.session_state["carbon_units_inputs"] = {"protocols": protocols}
 
         with col4:
             carbon_units() 
 
     # Row 3: Proforma inputs | Credits chart + summary
-    with st.expander(label="Credits (Proforma)", expanded=True):
+    with st.expander(label="Project Financials", expanded=True):
         col5, col6 = st.columns([1,2], gap="large")
         with col5:
             proforma_params = credits_inputs(prefix="credits_")
