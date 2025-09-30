@@ -403,7 +403,7 @@ def credits_inputs(prefix: str = "credits_") -> dict:
     """
     _seed_defaults(prefix)
 
-    with st.popover("Proforma Options"):
+    with st.popover("Financial Options"):
         net_acres              = st.number_input("Net Acres:", min_value=1, step=100, key=prefix+"net_acres")
         num_plots              = st.number_input("# Plots:", min_value=1, key=prefix+"num_plots")
         cost_per_cfi_plot      = st.number_input("Cost/CFI Plot:", min_value=1, key=prefix+"cost_per_cfi_plot")
@@ -533,7 +533,7 @@ def credits_results(params: dict):
         alt.Chart(df_chart)
         .mark_line(point=True)
         .encode(
-            x=alt.X('Year:Q', title='Year'),  # numeric axis
+            x=alt.X('Year:O', title='Year', axis=alt.Axis(labelAngle=30)), 
             y=alt.Y('Net_Revenue:Q', title='Net Revenue'),
             color=alt.Color('Protocol:N', title='Protocol'),
             tooltip=['Year', 'Net_Revenue', 'Protocol']
@@ -558,8 +558,8 @@ def credits_results(params: dict):
     summaries_df_display = summaries_df_display[['Protocol', 'Total Net Revenue', 'NPV (Year 20)', 'NPV per Acre']]
 
     # Display as a table
-    st.subheader("Proforma Results Summary")
-    st.table(summaries_df_display)
+    st.subheader("Project Financials Summary")
+    st.table(summaries_df_display.set_index('Protocol'))
 
     # CSV download
     st.download_button(
@@ -603,7 +603,7 @@ def run_chart():
             carbon_units() 
 
     # Row 3: Proforma inputs | Credits chart + summary
-    with st.expander(label="Credits (Proforma)", expanded=True):
+    with st.expander(label="Project Financials", expanded=True):
         col5, col6 = st.columns([1,2], gap="large")
         with col5:
             proforma_params = credits_inputs(prefix="credits_")
