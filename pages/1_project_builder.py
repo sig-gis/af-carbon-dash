@@ -122,14 +122,14 @@ def display_selected_info():
     if "clicked_props" in st.session_state:
         props = st.session_state["clicked_props"]
 
-        st.subheader("Selected Feature Info")
+        st.subheader("Selected Feature Info", anchor=None, help='Location information of selected FVS Variant.', divider=False, width="stretch")
         pretty_names = {
             "FVSLocCode": "FVS Location Code",
             "FVSLocName": "FVS Location Name",
             "FVSVarName": "FVS Variant Name",
             "FVSVariant": "FVS Variant",
         }
-        skip_keys = {"Shape_Area", "Shape_Leng"}
+        skip_keys = {"Shape_Area", "Shape_Leng", 'FVSVariantLoc'}
 
         for key, value in props.items():
             if key not in skip_keys:
@@ -173,7 +173,7 @@ def planting_sliders():
         st.warning(f"Variant '{variant}' not found in presets. Falling back to 'PN'.")
     preset = presets.get(variant, presets.get("PN", {}))
 
-    st.markdown(f"**FVS Variant:** {variant}")
+    st.markdown(f"**FVS Variant:** {variant}", unsafe_allow_html=False, help='Selected FVS Variant', width="stretch")
 
     # When variant changes, clear old tpa_* and seed defaults for current species
     last_variant = st.session_state.get("_last_variant")
@@ -193,13 +193,15 @@ def planting_sliders():
     # --- Common sliders ---
     st.slider("Survival Percentage", 40, 90,
               value=int(st.session_state.get("survival", preset.get("survival", 70))),
-              key="survival")
+              key="survival",
+              help = 'survival percentage help')
     st.slider("Site Index", 96, 137,
               value=int(st.session_state.get("si", preset.get("si", 120))),
-              key="si")
+              key="si",
+              help = 'site index help')
 
     # --- Dynamic species sliders ---
-    st.markdown("🌲 Species Mix (TPA)")
+    st.markdown("🌲 Species Mix (TPA)", unsafe_allow_html=False, help='Sliders for species mix help.', width="stretch")
     species_keys = _species_keys(preset)
 
     # Optional: set a total TPA cap if you want to enforce one (put `_tpa_cap` in JSON if needed)
@@ -223,7 +225,7 @@ def planting_sliders():
 
     # Summary
     total_tpa = sum(int(st.session_state.get(k, 0)) for k in species_keys)
-    st.markdown(f"**Total TPA:** {total_tpa}")
+    st.markdown(f"**Total TPA:** {total_tpa}", unsafe_allow_html=False, help='Calculated Total TPA', width="stretch")
     if running_total > tpa_cap:
         st.warning(f"Total initial TPA exceeds {tpa_cap} and may present an unrealistic scenario. Consider adjusting sliders.")
 
@@ -402,21 +404,23 @@ def credits_inputs(prefix: str = "credits_") -> dict:
     Render Proforma inputs in the current container and return a dict of typed values.
     """
     _seed_defaults(prefix)
-
-    with st.popover("Financial Options"):
-        net_acres              = st.number_input("Net Acres:", min_value=1, step=100, key=prefix+"net_acres")
-        num_plots              = st.number_input("# Plots:", min_value=1, key=prefix+"num_plots")
-        cost_per_cfi_plot      = st.number_input("Cost/CFI Plot:", min_value=1, key=prefix+"cost_per_cfi_plot")
+    
+    st.markdown("Financial Options", help = 'change number inputs below to change financial results.')
+    container = st.container(height=600)
+    with container:
+        net_acres              = st.number_input("Net Acres:", min_value=1, step=100, key=prefix+"net_acres", help = 'Help Text')
+        num_plots              = st.number_input("# Plots:", min_value=1, key=prefix+"num_plots", help = 'Help Text')
+        cost_per_cfi_plot      = st.number_input("Cost/CFI Plot:", min_value=1, key=prefix+"cost_per_cfi_plot", help = 'Help Text')
         price_per_ert_initial  = st.number_input("Price/CU (initial):", min_value=1.0, key=prefix+"price_per_ert_initial")
-        credit_price_increase_perc = st.number_input("Credit Price Increase (percent):", min_value=0.0, step=1.0, format="%.1f", key=prefix+"credit_price_increase")
-        registry_fees              = st.number_input("Registry Fees:", min_value=1, key=prefix+"registry_fees")
-        validation_cost            = st.number_input("Validation Cost:", min_value=1, key=prefix+"validation_cost")
-        verification_cost          = st.number_input("Verification Cost:", min_value=1, key=prefix+"verification_cost")
-        issuance_fee_per_ert       = st.number_input("Issuance Fee per CU:", min_value=0.0, step=0.01, format="%.2f", key=prefix+"issuance_fee_per_ert")
-        anticipated_inflation_perc = st.number_input("Anticipated Inflation (percent):", min_value=0.0, step=1.0, format="%.1f", key=prefix+"anticipated_inflation")
-        discount_rate_perc         = st.number_input("Discount Rate (percent):", min_value=0.0, step=1.0, format="%.1f", key=prefix+"discount_rate")
-        planting_cost = st.number_input("Planting Cost (initial):", min_value=0, key=prefix+"planting_cost")
-        seedling_cost = st.number_input("Seedling Cost (initial):", min_value=0, key=prefix+"seedling_cost")
+        credit_price_increase_perc = st.number_input("Credit Price Increase (percent):", min_value=0.0, step=1.0, format="%.1f", key=prefix+"credit_price_increase", help = 'Help Text')
+        registry_fees              = st.number_input("Registry Fees:", min_value=1, key=prefix+"registry_fees", help = 'Help Text')
+        validation_cost            = st.number_input("Validation Cost:", min_value=1, key=prefix+"validation_cost", help = 'Help Text')
+        verification_cost          = st.number_input("Verification Cost:", min_value=1, key=prefix+"verification_cost", help = 'Help Text')
+        issuance_fee_per_ert       = st.number_input("Issuance Fee per CU:", min_value=0.0, step=0.01, format="%.2f", key=prefix+"issuance_fee_per_ert", help = 'Help Text')
+        anticipated_inflation_perc = st.number_input("Anticipated Inflation (percent):", min_value=0.0, step=1.0, format="%.1f", key=prefix+"anticipated_inflation", help = 'Help Text')
+        discount_rate_perc         = st.number_input("Discount Rate (percent):", min_value=0.0, step=1.0, format="%.1f", key=prefix+"discount_rate", help = 'Help Text')
+        planting_cost = st.number_input("Planting Cost (initial):", min_value=0, key=prefix+"planting_cost", help = 'Help Text')
+        seedling_cost = st.number_input("Seedling Cost (initial):", min_value=0, key=prefix+"seedling_cost", help = 'Help Text')
 
     # constants (constrained by modeling backend)
     year_start     = 2024
@@ -558,7 +562,7 @@ def credits_results(params: dict):
     summaries_df_display = summaries_df_display[['Protocol', 'Total Net Revenue', 'NPV (Year 20)', 'NPV per Acre']]
 
     # Display as a table
-    st.subheader("Project Financials Summary")
+    st.subheader("Project Financials Summary", anchor=None, help='Help Text', divider=False, width="stretch")
     st.table(summaries_df_display.set_index('Protocol'))
 
     # CSV download
@@ -568,6 +572,7 @@ def credits_results(params: dict):
         file_name="credits_proforma.csv",
         mime="text/csv",
         use_container_width=True,
+        help = 'Click button to download financials table as csv.'
     )
 
 @st.fragment
@@ -594,7 +599,8 @@ def run_chart():
                          "GS",  
                          "ISO"],
                 default=["ACR/CAR/VERRA"],
-                key="carbon_units_protocols"
+                key="carbon_units_protocols",
+                help = 'Select a carbon protocol to compute financial estimates.'
             )
 
             st.session_state["carbon_units_inputs"] = {"protocols": protocols}
@@ -626,8 +632,13 @@ simplified_geojson = os.path.join(BASE_DIR, "data", "FVSVariantMap20210525", "FV
 st.set_page_config(layout="wide", page_title="Project Builder", page_icon="🌲")
 
 with map_tab:
-    st.title("🗺️ Site Selection")
-    st.subheader("Select FVS Variant")
+    st.title("🗺️ Site Selection", anchor=None, help="Select the FVS Variant Location geometry which contains your project location. " \
+            "Your selected FVS Variant Location will auto-populate helpful planting parameter " \
+            "defaults, including species mix, for you.", width="stretch")
+
+    st.subheader('Select FVS Variant', anchor=None, help="Select the FVS Variant Location geometry which contains your project location. " \
+            "Your selected FVS Variant Location will auto-populate helpful planting parameter " \
+            "defaults, including species mix, for you.", divider=False, width="content")
 
     geojson_str, tooltip_fields = load_geojson_fragment(simplified_geojson, local_shapefile)
     st.session_state.setdefault("map_view", {"center": [45.5, -118], "zoom": 6})
@@ -651,5 +662,7 @@ with map_tab:
     display_selected_info()
 
 with plant_tab:
-    st.title("🌲 Planting Scenario")
+    st.title("🌲 Planting Scenario", anchor=None, help="Select the FVS Variant Location geometry which contains your project location. " \
+            "Your selected FVS Variant Location will auto-populate helpful planting parameter " \
+            "defaults, including species mix, for you.", width="stretch")
     run_chart()
