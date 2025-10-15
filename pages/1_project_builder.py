@@ -14,7 +14,6 @@ from scipy.interpolate import make_interp_spline
 import altair as alt
 import numpy_financial as npf
 
-
 # -----------------------------
 # Functions
 # -----------------------------
@@ -61,7 +60,7 @@ def load_geojson_fragment(simplified_geojson_path, shapefile_path, tolerance_deg
 @st.fragment
 def build_map(geojson_str, center=(37.8, -96.9), zoom=5, tooltip_fields=None, highlight_feature=None):
     m = folium.Map(location=center, zoom_start=zoom, tiles="CartoDB positron")
-
+    
     # Base layer
     gj = folium.GeoJson(
         data=geojson_str,
@@ -122,7 +121,7 @@ def display_selected_info():
     if "clicked_props" in st.session_state:
         props = st.session_state["clicked_props"]
 
-        st.subheader("Selected Feature Info", anchor=None, help='Location information of selected FVS Variant.', divider=False, width="stretch")
+        st.subheader("Selected Feature Info", anchor=None, help='Location information of selected variant.', divider=False, width="stretch")
         pretty_names = {
             "FVSLocCode": "FVS Location Code",
             "FVSLocName": "FVS Location Name",
@@ -135,7 +134,6 @@ def display_selected_info():
             if key not in skip_keys:
                 display_key = pretty_names.get(key, key)
                 st.markdown(f"**{display_key}:** {value}")
-
 
 @st.fragment
 def submit_map(map_data):
@@ -165,7 +163,7 @@ def _species_keys(preset: dict):
 def _label_for(key: str) -> str:
     return SPECIES_LABELS.get(key, key.replace("tpa_", "TPA_").upper())
 
-def planting_sliders():
+def planting_sliders(prefix: str = "credits_"):
     presets = load_variant_presets()
     variant = st.session_state.get("selected_variant", "PN")
 
@@ -173,7 +171,7 @@ def planting_sliders():
         st.warning(f"Variant '{variant}' not found in presets. Falling back to 'PN'.")
     preset = presets.get(variant, presets.get("PN", {}))
 
-    st.markdown(f"**FVS Variant:** {variant}", unsafe_allow_html=False, help='Selected FVS Variant', width="stretch")
+    st.markdown(f"**FVS Variant:** {variant}", unsafe_allow_html=False, help='Selected FVS Variant (see Site Selection Map tab)', width="stretch")
 
     # When variant changes, clear old tpa_* and seed defaults for current species
     last_variant = st.session_state.get("_last_variant")
@@ -201,7 +199,7 @@ def planting_sliders():
               help = 'site index help')
 
     # --- Dynamic species sliders ---
-    st.markdown("🌲 Species Mix (TPA)", unsafe_allow_html=False, help='Sliders for species mix help.', width="stretch")
+    st.markdown("🌲 Species Mix (TPA)", unsafe_allow_html=False, help='Set trees per acre (TPA) to be planted for each species below.', width="stretch")
     species_keys = _species_keys(preset)
 
     # Optional: set a total TPA cap if you want to enforce one (put `_tpa_cap` in JSON if needed)
@@ -225,7 +223,7 @@ def planting_sliders():
 
     # Summary
     total_tpa = sum(int(st.session_state.get(k, 0)) for k in species_keys)
-    st.markdown(f"**Total TPA:** {total_tpa}", unsafe_allow_html=False, help='Calculated Total TPA', width="stretch")
+    st.markdown(f"**Total TPA:** {total_tpa}", unsafe_allow_html=False, help='Sum of TPA values for all species above.', width="stretch")
     if running_total > tpa_cap:
         st.warning(f"Total initial TPA exceeds {tpa_cap} and may present an unrealistic scenario. Consider adjusting sliders.")
 
@@ -405,26 +403,27 @@ def credits_inputs(prefix: str = "credits_") -> dict:
     """
     _seed_defaults(prefix)
     
-    st.markdown("Financial Options", help = 'change number inputs below to change financial results.')
+    st.markdown("Financial Options", help = None)
     container = st.container(height=600)
     with container:
-        net_acres              = st.number_input("Net Acres:", min_value=1, step=100, key=prefix+"net_acres", help = 'Help Text')
-        num_plots              = st.number_input("# Plots:", min_value=1, key=prefix+"num_plots", help = 'Help Text')
-        cost_per_cfi_plot      = st.number_input("Cost/CFI Plot:", min_value=1, key=prefix+"cost_per_cfi_plot", help = 'Help Text')
-        price_per_ert_initial  = st.number_input("Price/CU (initial):", min_value=1.0, key=prefix+"price_per_ert_initial")
-        credit_price_increase_perc = st.number_input("Credit Price Increase (percent):", min_value=0.0, step=1.0, format="%.1f", key=prefix+"credit_price_increase", help = 'Help Text')
-        registry_fees              = st.number_input("Registry Fees:", min_value=1, key=prefix+"registry_fees", help = 'Help Text')
-        validation_cost            = st.number_input("Validation Cost:", min_value=1, key=prefix+"validation_cost", help = 'Help Text')
-        verification_cost          = st.number_input("Verification Cost:", min_value=1, key=prefix+"verification_cost", help = 'Help Text')
-        issuance_fee_per_ert       = st.number_input("Issuance Fee per CU:", min_value=0.0, step=0.01, format="%.2f", key=prefix+"issuance_fee_per_ert", help = 'Help Text')
-        anticipated_inflation_perc = st.number_input("Anticipated Inflation (percent):", min_value=0.0, step=1.0, format="%.1f", key=prefix+"anticipated_inflation", help = 'Help Text')
-        discount_rate_perc         = st.number_input("Discount Rate (percent):", min_value=0.0, step=1.0, format="%.1f", key=prefix+"discount_rate", help = 'Help Text')
-        planting_cost = st.number_input("Planting Cost (initial):", min_value=0, key=prefix+"planting_cost", help = 'Help Text')
-        seedling_cost = st.number_input("Seedling Cost (initial):", min_value=0, key=prefix+"seedling_cost", help = 'Help Text')
+        net_acres              = st.number_input("Net Acres:", min_value=1, step=100, key=prefix+"net_acres", help = 'The total area of land enrolled in the project, measured in acres.')
+        num_plots              = st.number_input("# Plots:", min_value=1, key=prefix+"num_plots", help = 'The number of sampling plots established to monitor and measure forest growth/carbon.')
+        cost_per_cfi_plot      = st.number_input("Cost/CFI Plot, $:", min_value=1, key=prefix+"cost_per_cfi_plot", help = 'The cost of establishing and maintaining a single Continuous Forest Inventory plot.')
+        price_per_ert_initial  = st.number_input("Initial Price/CU, $:", min_value=1.0, key=prefix+"price_per_ert_initial", help = 'The assumed starting market price per carbon credit unit.This can be an ERT, VCU, or other unit depending on protocol.')
+        credit_price_increase_perc = st.number_input("Credit Price Increase, %:", min_value=0.0, step=1.0, format="%.1f", key=prefix+"credit_price_increase", help = 'The assumed annual percentage increase in credit price over the project duration.')
+        registry_fees              = st.number_input("Registry Fees, $:", min_value=1, key=prefix+"registry_fees", help = 'Fees charged by the carbon registry annually for project registration and maintenance.')
+        validation_cost            = st.number_input("Validation Cost, $:", min_value=1, key=prefix+"validation_cost", help = 'One-time cost for the initial third-party validation of the project.')
+        verification_cost          = st.number_input("Verification Cost, $:", min_value=1, key=prefix+"verification_cost", help = 'Recurring cost for independent verification of carbon credits generated.')
+        issuance_fee_per_ert       = st.number_input("Issuance Fee per CU, $:", min_value=0.0, step=0.01, format="%.2f", key=prefix+"issuance_fee_per_ert", help = 'The fee charged by the registry each time credits are issued, on a per-credit basis.')
+        anticipated_inflation_perc = st.number_input("Anticipated Inflation, %:", min_value=0.0, step=1.0, format="%.1f", key=prefix+"anticipated_inflation", help = 'The assumed annual inflation rate applied to costs over time.')
+        discount_rate_perc         = st.number_input("Discount Rate, %:", min_value=0.0, step=1.0, format="%.1f", key=prefix+"discount_rate", help = 'The rate used in NPV calculations to account for the time value of money and investment risk.')
+        planting_cost = st.number_input("Initial Planting Cost, $:", min_value=0, key=prefix+"planting_cost", help = 'Upfront cost of planting, including site preparation and labor.')
+        seedling_cost = st.number_input("Initial Seedling Cost, $:", min_value=0, key=prefix+"seedling_cost", help = 'Upfront cost of purchasing seedlings used for planting.')
 
     # constants (constrained by modeling backend)
     year_start     = 2024
     years_advance  = 35
+    net_acres = st.session_state[prefix + "net_acres"]
 
     return {
         "net_acres": net_acres,
@@ -562,7 +561,10 @@ def credits_results(params: dict):
     summaries_df_display = summaries_df_display[['Protocol', 'Total Net Revenue', 'NPV (Year 20)', 'NPV per Acre']]
 
     # Display as a table
-    st.subheader("Project Financials Summary", anchor=None, help='Help Text', divider=False, width="stretch")
+    st.subheader("Project Financials Summary", anchor=None, help='**Protocol:** The carbon accounting protocol / registry (ACR, CAR, VERRA, GS, or ISO) the financial results are based on.\n'
+            '**Total Net Revenue:** The total projected revenue from the project over its full crediting period, after deducting costs.\n'
+            '**NPV (Year 20) - Net Present Value at Year 20:** shows what the project’s 20-year returns are worth in today’s dollars.\n'
+            '**NPV per Acre:** Net Present Value (Year 20) on a per-acre basis.', divider=False, width="stretch")
     st.table(summaries_df_display.set_index('Protocol'))
 
     # CSV download
@@ -572,7 +574,7 @@ def credits_results(params: dict):
         file_name="credits_proforma.csv",
         mime="text/csv",
         use_container_width=True,
-        help = 'Click button to download financials table as csv.'
+        help = 'Download table used to calculate Project Financials.'
     )
 
 @st.fragment
@@ -600,7 +602,7 @@ def run_chart():
                          "ISO"],
                 default=["ACR/CAR/VERRA"],
                 key="carbon_units_protocols",
-                help = 'Select a carbon protocol to compute financial estimates.'
+                help = 'Select one or more protocols to estimate Carbon Units (CUs) and Project Financials.'
             )
 
             st.session_state["carbon_units_inputs"] = {"protocols": protocols}
@@ -621,25 +623,63 @@ def run_chart():
 # -----------------------------
 # Main
 # -----------------------------
-# Tabs
-map_tab, plant_tab = st.tabs(["Site Selection Map", "Planting Scenario"])
+# -----------------------------
+# Page Config
+# -----------------------------
+st.set_page_config(layout="wide", page_title="Project Builder", page_icon="🌲")
 
-# Load Shapefile / GeoJSON
+# -----------------------------
+# Initialize Session State
+# -----------------------------
+if "active_tab" not in st.session_state:
+    st.session_state.active_tab = "Site Selection Map"
+
+# -----------------------------
+# File Paths
+# -----------------------------
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 local_shapefile = os.path.join(BASE_DIR, "data", "FVSVariantMap20210525", "FVS_Variants_and_Locations_4326.shp")
 simplified_geojson = os.path.join(BASE_DIR, "data", "FVSVariantMap20210525", "FVS_Variants_and_Locations_4326_simplified.geojson")
 
-st.set_page_config(layout="wide", page_title="Project Builder", page_icon="🌲")
 
-with map_tab:
-    st.title("🗺️ Site Selection", anchor=None, help="Select the FVS Variant Location geometry which contains your project location. " \
-            "Your selected FVS Variant Location will auto-populate helpful planting parameter " \
-            "defaults, including species mix, for you.", width="stretch")
+# -----------------------------
+# Conditional Layout (acts like tabs)
+# -----------------------------
+if st.session_state.active_tab == "Site Selection Map":
+    # -----------------------------
+    # Site Selection Map View
+    # -----------------------------
+    # --- Title Row (conditionally shows button after variant selection) ---
+    col1, col2 = st.columns([8, 3])
 
-    st.subheader('Select FVS Variant', anchor=None, help="Select the FVS Variant Location geometry which contains your project location. " \
-            "Your selected FVS Variant Location will auto-populate helpful planting parameter " \
-            "defaults, including species mix, for you.", divider=False, width="content")
+    with col1:
+        st.title(
+            "🗺️ Site Selection",
+            anchor=None,
+            help=(
+                "Select the FVS Variant Location geometry which contains your project location. "
+                "Your selected FVS Variant location will auto-populate helpful planting parameter defaults, "
+                "including species mix, for you."
+            ),
+        )
 
+    with col2:
+        # Only show the "Continue" button if a variant is selected
+        if st.session_state.get("selected_variant"):
+            if st.button(
+                "➡️ Planting Scenario",
+                use_container_width=True,
+                help="Click to continue to the Planting Scenario calculations.",
+                type = 'primary'
+            ):
+                st.session_state.active_tab = "Planting Scenario"
+                st.rerun()
+        else:
+            st.empty()
+
+    st.subheader("Select FVS Variant", anchor=None, help=None, divider=False)
+
+    # Load GeoJSON and Map
     geojson_str, tooltip_fields = load_geojson_fragment(simplified_geojson, local_shapefile)
     st.session_state.setdefault("map_view", {"center": [45.5, -118], "zoom": 6})
 
@@ -658,11 +698,22 @@ with map_tab:
         use_container_width=True,
     )
 
+    # Display info below map
     show_clicked_variant(map_data)
     display_selected_info()
 
-with plant_tab:
-    st.title("🌲 Planting Scenario", anchor=None, help="Select the FVS Variant Location geometry which contains your project location. " \
-            "Your selected FVS Variant Location will auto-populate helpful planting parameter " \
-            "defaults, including species mix, for you.", width="stretch")
+else:
+    # -----------------------------
+    # Planting Scenario View
+    # -----------------------------
+    col1, col2 = st.columns([8, 3])  # adjust ratio as needed
+
+    with col1:
+        st.title("🌲 Planting Scenario", anchor=None, help=None)
+
+    with col2:
+        if st.button("⬅️ Site Selection", use_container_width=True, help = 'Click to go back to the Site Selection Map.', type = 'primary'):
+            st.session_state.active_tab = "Site Selection Map"
+            st.rerun()
+
     run_chart()
