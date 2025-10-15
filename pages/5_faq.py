@@ -45,7 +45,7 @@ The same project scenario can yield different credit numbers across protocols be
 
 *Note 1:* To isolate protocol-rule effects, this dashboard uses **FVS modules for all protocols** (we do not switch between Jenkins and FVS).
 
-*Note 2:* The **25% risk buffer** for *Isometric* reflects a valid value within their allowed range. Because this dashboard compares **default assumptions**, 20% would be most consistent across protocols. However, the current 25% value serves as a **placeholder** until the **financial verification cost step** is implemented, which will further differentiate Isometric from the others. *This value will be updated in future versions.*
+*Note 2:* The **25% risk buffer** for *Isometric* reflects a valid value within their allowed range. Because this dashboard compares **default assumptions**, 20% would be most consistent across protocols. However, the current 25% value serves as a **placeholder** until the **financial verification cost step** is implemented in *Project Financials*, which will further differentiate Isometric from the others. *This value will be updated in future versions.*
         """
     },
     {
