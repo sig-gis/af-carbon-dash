@@ -9,7 +9,7 @@ faqs = [
     {
         "q": 'What does "Cumulative On-Site Carbon" mean?',
         "a": """
-**Cumulative On-Site Carbon** is the total net amount of carbon stored on a property over time, adding up all eligible carbon *(note to discuss: minus losses from harvest or disturbances?)*. It reflects everything that happens within **one acre** in the selected variant.
+**Cumulative On-Site Carbon** is the total net amount of carbon stored on a property over time, adding up all eligible carbon. It reflects everything that happens within **one acre** in the selected variant.
         """
     },
     {
@@ -33,7 +33,7 @@ We apply a **cubic spline interpolation** to create continuous **annual** stocki
     {
         "q": "What is the difference between the carbon protocols?",
         "a": """
-The same project scenario can yield different credit numbers across protocols because rules may differ for baseline *(note to discuss: not accounted for yet)*, additionality *(note to discuss: not accounted for yet)*, leakage (0%), risk/buffer deductions, uncertainty (0%), and measurement *(note to discuss: Jenkins vs FVS)*.
+The same project scenario can yield different credit numbers across protocols because rules may differ for baseline, additionality, leakage (0%), risk/buffer deductions, uncertainty (0%), and measurement.
 This dashboard currently supports:
 - [Verra (VCS)](https://verra.org/methodologies/vm0047-afforestation-reforestation-and-revegetation-v1-0/)
 - [ACR](https://acrcarbon.org/methodology/afforestation-and-reforestation-of-degraded-lands/)
@@ -41,7 +41,7 @@ This dashboard currently supports:
 - [Isometric](https://registry.isometric.com/protocol/reforestation/1.0#data-sharing)
 - [Gold Standard](https://globalgoals.goldstandard.org/403-luf-ar-methodology-ghgs-emission-reduction-and-sequestration-methodology/)
 
-**Modeled buffer assumptions here:** Verra/ACR/CAR = **20%**, Gold Standard = **0%**, Isometric = **25%** *(note to discuss: why is this 25%?)*.  
+**Modeled buffer assumptions here:** Verra/ACR/CAR = **20%**, Gold Standard = **0%**, Isometric = **25%**.  
 *Note:* To isolate protocol-rule effects, this dashboard uses **FVS modules** for all protocols (we do not switch between Jenkins and FVS).
         """
     },
