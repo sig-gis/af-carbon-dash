@@ -33,16 +33,19 @@ We apply a **cubic spline interpolation** to create continuous **annual** stocki
     {
         "q": "What is the difference between the carbon protocols?",
         "a": """
-The same project scenario can yield different credit numbers across protocols because rules may differ for baseline, additionality, leakage (0%), risk/buffer deductions, uncertainty (0%), and measurement.
-This dashboard currently supports:
-- [Verra (VCS)](https://verra.org/methodologies/vm0047-afforestation-reforestation-and-revegetation-v1-0/)
-- [ACR](https://acrcarbon.org/methodology/afforestation-and-reforestation-of-degraded-lands/)
-- [CAR](https://www.climateactionreserve.org/wp-content/uploads/2023/07/Final_Forest_Protocol_V5.1_7.14.2023.pdf)
-- [Isometric](https://registry.isometric.com/protocol/reforestation/1.0#data-sharing)
-- [Gold Standard](https://globalgoals.goldstandard.org/403-luf-ar-methodology-ghgs-emission-reduction-and-sequestration-methodology/)
+The same project scenario can yield different credit numbers across protocols because of differences in accounting rules. Below are the protocols currently supported in this dashboard and the modeled assumptions for risk/buffer, leakage, uncertainty, and measurement.
 
-**Modeled buffer assumptions here:** Verra/ACR/CAR = **20%**, Gold Standard = **0%**, Isometric = **25%**.  
-*Note:* To isolate protocol-rule effects, this dashboard uses **FVS modules** for all protocols (we do not switch between Jenkins and FVS).
+| Protocol | Risk/Buffer | Leakage | Uncertainty | Measurement |
+|---|---:|---:|---:|---:|
+| [Verra (VCS)](https://verra.org/methodologies/vm0047-afforestation-reforestation-and-revegetation-v1-0/) | 20% | 0% | 0% | FVS |
+| [ACR](https://acrcarbon.org/methodology/afforestation-and-reforestation-of-degraded-lands/) | 20% | 0% | 0% | FVS |
+| [CAR](https://www.climateactionreserve.org/wp-content/uploads/2023/07/Final_Forest_Protocol_V5.1_7.14.2023.pdf) | 20% | 0% | 0% | FVS |
+| [Isometric](https://registry.isometric.com/protocol/reforestation/1.0#data-sharing) | 25% | 0% | 0% | FVS |
+| [Gold Standard](https://globalgoals.goldstandard.org/403-luf-ar-methodology-ghgs-emission-reduction-and-sequestration-methodology/) | 0% | 0% | 0% | FVS |
+
+*Note 1:* To isolate protocol-rule effects, this dashboard uses **FVS modules for all protocols** (we do not switch between Jenkins and FVS).
+
+*Note 2:* The **25% risk buffer** for *Isometric* reflects a valid value within their allowed range. Because this dashboard compares **default assumptions**, 20% would be most consistent across protocols. However, the current 25% value serves as a **placeholder** until the **financial verification cost step** is implemented in *Project Financials*, which will further differentiate Isometric from the others. *This value will be updated in future versions.*
         """
     },
     {
