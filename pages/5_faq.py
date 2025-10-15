@@ -61,7 +61,7 @@ for i, item in enumerate(faqs):
         st.markdown(item["a"])
 
 # Special case: LaTeX formula in its own expander
-with st.expander("How are the Full verification costs calculated?"):
+with st.expander("How are the full verification costs calculated?"):
     st.markdown("""
 The following formula is used to calculate the full verification costs, based on user inputs selected in the Financial Options drop-down menu:
 """)
