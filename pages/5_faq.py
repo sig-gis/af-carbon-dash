@@ -33,7 +33,7 @@ We apply a **cubic spline interpolation** to create continuous **annual** stocki
     {
         "q": "What is the difference between the carbon protocols?",
         "a": """
-The same project scenario can yield different credit numbers across protocols because of differences in accounting rules. Below are the protocols currently supported in this dashboard and the modeled assumptions for risk/buffer, leakage, and uncertainty.
+The same project scenario can yield different credit numbers across protocols because of differences in accounting rules. Below are the protocols currently supported in this dashboard and the modeled assumptions for risk/buffer, leakage, uncertainty, and measurement.
 
 | Protocol | Risk/Buffer | Leakage | Uncertainty | Measurement |
 |---|---:|---:|---:|---:|
