@@ -135,6 +135,8 @@ def display_selected_info():
                 display_key = pretty_names.get(key, key)
                 st.markdown(f"**{display_key}:** {value}")
 
+        st.success("FVS variant selected. Continue to Step 2. Planting Design.")
+
 @st.fragment
 def submit_map(map_data):
     if map_data and map_data.get("last_active_drawing"):
@@ -749,6 +751,68 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 local_shapefile = os.path.join(BASE_DIR, "data", "FVSVariantMap20210525", "FVS_Variants_and_Locations_4326.shp")
 simplified_geojson = os.path.join(BASE_DIR, "data", "FVSVariantMap20210525", "FVS_Variants_and_Locations_4326_simplified.geojson")
 
+# -----------------------------
+# Sidebar: Workflow Overview
+# -----------------------------
+st.sidebar.markdown("## Project Workflow")
+
+workflow_steps = [
+    {
+        "label": "1. Site Selection",
+        "tab": "Site Selection Map",
+        "caption": "Define your project area by selecting a FVS variant from the map.",
+    },
+    {
+        "label": "2. Planting Design",
+        "tab": "Planting Scenario",
+        "caption": (
+            "Estimate certified carbon units under different protocols.\n\n"
+            "*1. Planting Parameters*: Design your reforestation plan and estimate FVS results in real time.\n"
+            "*2. Carbon Estimates*: Estimate carbon units (CUs)(tons CO₂e/acre) under different protocols.\n"
+            "*3. Credits*: Customize financial factors to estimate net project revenue."
+        ),
+    },
+]
+
+# Custom CSS for sidebar step styling
+st.sidebar.markdown("""
+    <style>
+    .workflow-step {
+        padding: 8px 12px;
+        border-radius: 6px;
+        margin-bottom: 6px;
+    }
+    .active-step {
+        background-color: #e6f4ea; /* light green background */
+        border-left: 5px solid #4CAF50; /* green accent bar */
+        font-weight: 600;
+        color: #2e7d32;
+    }
+    .inactive-step {
+        color: #555;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# Render each step with highlight + caption under the correct one
+for step in workflow_steps:
+    is_active = st.session_state.active_tab == step["tab"]
+    step_class = "active-step" if is_active else "inactive-step"
+
+    # Step title
+    st.sidebar.markdown(
+        f'<div class="workflow-step {step_class}">{step["label"]}</div>',
+        unsafe_allow_html=True
+    )
+
+    # Step caption (only for the active step), split by line
+    if is_active:
+        for line in step["caption"].split("\n"):
+            if line.strip():  # skip empty lines
+                st.sidebar.caption(line.strip())
+
+st.sidebar.markdown("---")
+st.sidebar.info("Having Trouble? Visit the FAQ page above for more information.")
 
 # -----------------------------
 # Conditional Layout (acts like tabs)
@@ -775,9 +839,9 @@ if st.session_state.active_tab == "Site Selection Map":
         # Only show the "Continue" button if a variant is selected
         if st.session_state.get("selected_variant"):
             if st.button(
-                "➡️ Planting Scenario",
+                "➡️ Planting Design",
                 use_container_width=True,
-                help="Click to continue to the Planting Scenario calculations.",
+                help="Click to continue to the Planting Design calculations.",
                 type = 'primary'
             ):
                 st.session_state.active_tab = "Planting Scenario"
@@ -817,7 +881,7 @@ else:
     col1, col2 = st.columns([8, 3])  # adjust ratio as needed
 
     with col1:
-        st.title("🌲 Planting Scenario", anchor=None, help=None)
+        st.title("🌲 Planting Design", anchor=None, help=None)
 
     with col2:
         if st.button("⬅️ Site Selection", use_container_width=True, help = 'Click to go back to the Site Selection Map.', type = 'primary'):
