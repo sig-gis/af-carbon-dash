@@ -17,6 +17,8 @@ import numpy_financial as npf
 # -----------------------------
 # Functions
 # -----------------------------
+
+# ---------- Site Selection Map ----------
 @st.fragment
 def load_geojson_fragment(simplified_geojson_path, shapefile_path, tolerance_deg=0.001, skip_keys={"Shape_Area", "Shape_Leng"}, max_tooltip_fields=3):
     """
@@ -142,6 +144,7 @@ def submit_map(map_data):
         if clicked:
             st.session_state["selected_variant"] = clicked.get("FVSVariant", "PN")
 
+# ---------- Helper functions ----------
 SPECIES_LABELS = {
     "tpa_df": "Douglas-fir",
     "tpa_rc": "red cedar",
@@ -163,6 +166,7 @@ def _species_keys(preset: dict):
 def _label_for(key: str) -> str:
     return SPECIES_LABELS.get(key, key.replace("tpa_", "TPA_").upper())
 
+# ---------- Statefulness functions ----------
 def _init_planting_state(variant: str, preset: dict):
     """
     Seed/clear planting slider state ONLY when the selected variant changes.
@@ -186,6 +190,38 @@ def _init_planting_state(variant: str, preset: dict):
         st.session_state.setdefault(spk, int(preset.get(spk, 0)))
 
     st.session_state["_last_variant"] = variant
+
+def _init_carbon_units_state():
+    """
+    Initialize Carbon Units inputs ONLY if missing.
+    Does NOT overwrite existing user selections.
+    """
+    # canonical default protocols
+    default_protocols = ["ACR/CAR/VERRA"]
+
+    # initialize the mapping dict used downstream
+    if "carbon_units_inputs" not in st.session_state:
+        st.session_state["carbon_units_inputs"] = {"protocols": default_protocols}
+
+    # ensure the widget-backed list key exists as well
+    if "carbon_units_protocols" not in st.session_state:
+        st.session_state["carbon_units_protocols"] = st.session_state["carbon_units_inputs"].get("protocols", default_protocols)
+
+def _carbon_units_keys() -> list[str]:
+    """
+    Return the set of session-state keys that should persist for the Carbon Units section.
+    We keep this intentionally small to avoid backing up large result dataframes.
+    """
+    return ["carbon_units_protocols", "carbon_units_inputs"]
+
+
+def _credits_keys(prefix: str = "credits_") -> list[str]:
+    """
+    Return all proforma input keys (prefixed) that should persist for the Credits section.
+    Uses the JSON defaults as the source of truth for which keys exist.
+    """
+    defaults = _load_proforma_defaults()
+    return [prefix + k for k in defaults.keys()]
 
 def _backup_keys(keys, backup_name: str = "_planting_backup"):
     """
@@ -214,7 +250,6 @@ def _backup_keys(keys, backup_name: str = "_planting_backup"):
     st.session_state[backup_name] = backup
     return backup
 
-
 def _restore_backup(keys, backup_name: str = "_planting_backup"):
     """
     Restore any *missing* session-state keys from a previously saved backup.
@@ -240,6 +275,8 @@ def _restore_backup(keys, backup_name: str = "_planting_backup"):
         if k not in st.session_state and k in backup:
             st.session_state[k] = backup[k]
 
+
+# ---------- Planting Scenario ----------
 def planting_sliders():
     presets = load_variant_presets()
     variant = st.session_state.get("selected_variant", "PN")
@@ -327,6 +364,7 @@ def carbon_chart():
     st.altair_chart(line, use_container_width=True)
     st.success(f"Final Carbon Output (year {max(df['Year'])}): {df['C_Score'].iloc[-1]:.2f}")
 
+# ---------- Carbon Units ----------
 def carbon_units():
     if "carbon_df" not in st.session_state:
             st.error("No carbon data found. Please adjust sliders first.")
@@ -433,7 +471,7 @@ def carbon_units():
 
     st.altair_chart(CU_chart, use_container_width=True)
 
-# ---------- Credits (Proforma) functions ----------
+# ---------- Project Financials ----------
 @st.cache_data
 def _load_proforma_defaults() -> dict:
     with open("conf/base/proforma_presets.json") as f:
@@ -449,6 +487,10 @@ def credits_inputs(prefix: str = "credits_") -> dict:
     """
     Render Proforma inputs in the current container and return a dict of typed values.
     """
+    # restore backup so users keep their previous values after navigation
+    _restore_backup(_credits_keys(prefix), backup_name="_credits_backup")
+    
+    # seed defaults (setdefault) will not overwrite restored/user values
     _seed_defaults(prefix)
     
     st.markdown("Financial Options", help = None)
@@ -467,6 +509,9 @@ def credits_inputs(prefix: str = "credits_") -> dict:
         discount_rate_perc         = st.number_input("Discount Rate, %:", min_value=0.0, step=1.0, format="%.1f", key=prefix+"discount_rate", help = 'The rate used in NPV calculations to account for the time value of money and investment risk.')
         planting_cost = st.number_input("Initial Planting Cost, $:", min_value=0, key=prefix+"planting_cost", help = 'Upfront cost of planting, including site preparation and labor.')
         seedling_cost = st.number_input("Initial Seedling Cost, $:", min_value=0, key=prefix+"seedling_cost", help = 'Upfront cost of purchasing seedlings used for planting.')
+
+    # backup inputs so the latest entries persist across navigation
+    _backup_keys(_credits_keys(prefix), backup_name="_credits_backup")
 
     # constants (constrained by modeling backend)
     year_start     = 2024
@@ -643,17 +688,25 @@ def run_chart():
                 st.error("No carbon data found. Adjust sliders above first.")
                 st.stop()
             
+            # restore backup and init state for carbon units
+            _restore_backup(_carbon_units_keys(), backup_name="_carbon_units_backup")
+            _init_carbon_units_state()
+
+            # render widget using key only to enable restoring backups
             protocols = st.multiselect(
                 "Select Protocol(s)",
                 options=["ACR/CAR/VERRA", 
                          "GS",  
                          "ISO"],
-                default=["ACR/CAR/VERRA"],
+                # default=["ACR/CAR/VERRA"],
                 key="carbon_units_protocols",
                 help = 'Select one or more protocols to estimate Carbon Units (CUs) and Project Financials.'
             )
 
             st.session_state["carbon_units_inputs"] = {"protocols": protocols}
+
+            # backup latest selections for carbon units
+            _backup_keys(_carbon_units_keys(), backup_name="_carbon_units_backup")
 
         with col4:
             carbon_units() 
