@@ -1,6 +1,3 @@
-# -----------------------------
-# Imports
-# -----------------------------
 import streamlit as st
 import json
 import pandas as pd
@@ -41,7 +38,6 @@ def load_geojson_fragment(simplified_geojson_path, shapefile_path, tolerance_deg
     # Load GeoJSON
     if os.path.exists(simplified_geojson_path):
         geojson_str = read_geojson_text(simplified_geojson_path)
-        st.success("GeoJSON loaded successfully")
     else:
         try:
             geojson_str = simplify_geojson(shapefile_path, tolerance_deg=tolerance_deg)
@@ -167,6 +163,27 @@ def _label_for(key: str) -> str:
     return SPECIES_LABELS.get(key, key.replace("tpa_", "TPA_").upper())
 
 # ---------- Statefulness functions ----------
+def _planting_keys():
+    """
+    Return list of planting session state keys
+    """
+    return [k for k in list(st.session_state.keys()) if k.startswith("tpa_") or k in ("survival", "si")]
+
+def _carbon_units_keys() -> list[str]:
+    """
+    Return the set of session-state keys that should persist for the Carbon Units section.
+    We keep this intentionally small to avoid backing up large result dataframes.
+    """
+    return ["carbon_units_protocols", "carbon_units_inputs"]
+
+def _credits_keys(prefix: str = "credits_") -> list[str]:
+    """
+    Return all proforma input keys (prefixed) that should persist for the Credits section.
+    Uses the JSON defaults as the source of truth for which keys exist.
+    """
+    defaults = _load_proforma_defaults()
+    return [prefix + k for k in defaults.keys()]
+
 def _init_planting_state(variant: str, preset: dict):
     """
     Seed/clear planting slider state ONLY when the selected variant changes.
@@ -176,10 +193,8 @@ def _init_planting_state(variant: str, preset: dict):
     if last_variant == variant:
         return  # nothing to do — don't reset user inputs
 
-    # Variant changed: clear old species keys and reseed defaults for this variant
-    for k in list(st.session_state.keys()):
-        if k.startswith("tpa_") or k in ("survival", "si"):
-            st.session_state.pop(k, None)
+    for k in _planting_keys():
+        st.session_state.pop(k, None)
 
     # Seed base defaults if missing
     st.session_state["survival"] = preset.get("survival", st.session_state.get("survival", 70))
@@ -206,22 +221,6 @@ def _init_carbon_units_state():
     # ensure the widget-backed list key exists as well
     if "carbon_units_protocols" not in st.session_state:
         st.session_state["carbon_units_protocols"] = st.session_state["carbon_units_inputs"].get("protocols", default_protocols)
-
-def _carbon_units_keys() -> list[str]:
-    """
-    Return the set of session-state keys that should persist for the Carbon Units section.
-    We keep this intentionally small to avoid backing up large result dataframes.
-    """
-    return ["carbon_units_protocols", "carbon_units_inputs"]
-
-
-def _credits_keys(prefix: str = "credits_") -> list[str]:
-    """
-    Return all proforma input keys (prefixed) that should persist for the Credits section.
-    Uses the JSON defaults as the source of truth for which keys exist.
-    """
-    defaults = _load_proforma_defaults()
-    return [prefix + k for k in defaults.keys()]
 
 def _backup_keys(keys, backup_name: str = "_planting_backup"):
     """
@@ -670,6 +669,7 @@ def credits_results(params: dict):
         help = 'Download table used to calculate Project Financials.'
     )
 
+# ---------- Render all sections with expanders ----------
 @st.fragment
 def run_chart():
     # Row 1: Planting sliders | Carbon chart
@@ -724,33 +724,23 @@ def run_chart():
 # -----------------------------
 # Main
 # -----------------------------
-# -----------------------------
+
 # Page Config
-# -----------------------------
 st.set_page_config(layout="wide", page_title="Project Builder", page_icon="🌲")
 
-# -----------------------------
-# Initialize Session State
-# -----------------------------
+# Initialize Session State 
 if "active_tab" not in st.session_state:
     st.session_state.active_tab = "Site Selection Map"
 
-# -----------------------------
 # File Paths
-# -----------------------------
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 local_shapefile = os.path.join(BASE_DIR, "data", "FVSVariantMap20210525", "FVS_Variants_and_Locations_4326.shp")
 simplified_geojson = os.path.join(BASE_DIR, "data", "FVSVariantMap20210525", "FVS_Variants_and_Locations_4326_simplified.geojson")
 
-
-# -----------------------------
 # Conditional Layout (acts like tabs)
-# -----------------------------
 if st.session_state.active_tab == "Site Selection Map":
-    # -----------------------------
     # Site Selection Map View
-    # -----------------------------
-    # --- Title Row (conditionally shows button after variant selection) ---
+    # Title Row (conditionally shows button after variant selection) 
     col1, col2 = st.columns([8, 3])
 
     with col1:
@@ -804,9 +794,7 @@ if st.session_state.active_tab == "Site Selection Map":
     display_selected_info()
 
 else:
-    # -----------------------------
     # Planting Scenario View
-    # -----------------------------
     col1, col2 = st.columns([8, 3])  # adjust ratio as needed
 
     with col1:
