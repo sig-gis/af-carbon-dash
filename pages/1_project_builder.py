@@ -163,7 +163,84 @@ def _species_keys(preset: dict):
 def _label_for(key: str) -> str:
     return SPECIES_LABELS.get(key, key.replace("tpa_", "TPA_").upper())
 
-def planting_sliders(prefix: str = "credits_"):
+def _init_planting_state(variant: str, preset: dict):
+    """
+    Seed/clear planting slider state ONLY when the selected variant changes.
+    Otherwise, leave the user's inputs intact across page switches.
+    """
+    last_variant = st.session_state.get("_last_variant")
+    if last_variant == variant:
+        return  # nothing to do — don't reset user inputs
+
+    # Variant changed: clear old species keys and reseed defaults for this variant
+    for k in list(st.session_state.keys()):
+        if k.startswith("tpa_") or k in ("survival", "si"):
+            st.session_state.pop(k, None)
+
+    # Seed base defaults if missing
+    st.session_state["survival"] = preset.get("survival", st.session_state.get("survival", 70))
+    st.session_state["si"]       = preset.get("si",       st.session_state.get("si", 120))
+
+    # Seed species defaults if missing
+    for spk in _species_keys(preset):
+        st.session_state.setdefault(spk, int(preset.get(spk, 0)))
+
+    st.session_state["_last_variant"] = variant
+
+def _backup_keys(keys, backup_name: str = "_planting_backup"):
+    """
+    Persist the current values for the given session-state keys to a small
+    backup dict stored under `backup_name` in `st.session_state`.
+    Helpful when Streamlit drops a widget's state when navigating back and forth between content. 
+
+    Parameters
+    ----------
+    keys : Iterable[str]
+        The session-state keys you want to persist (e.g., ["survival", "si", *species_keys]).
+    backup_name : str, optional
+        The session-state key under which the backup is stored. Default: "_planting_backup".
+
+    Notes
+    -----
+    - Call this *after* rendering widgets so the latest user inputs are captured.
+    - Only keys present in `st.session_state` are saved; missing keys are ignored.
+    """
+    backup = {}
+    for k in keys:
+        if k in st.session_state:
+            # Cast to int for sliders; adapt if you have non-int widgets
+            val = st.session_state[k]
+            backup[k] = int(val) if isinstance(val, (int, float, str)) and str(val).isdigit() else val
+    st.session_state[backup_name] = backup
+    return backup
+
+
+def _restore_backup(keys, backup_name: str = "_planting_backup"):
+    """
+    Restore any *missing* session-state keys from a previously saved backup.
+
+    Parameters
+    ----------
+    keys : Iterable[str]
+        The session-state keys you want to ensure are present (e.g., ["survival", "si", *species_keys]).
+    backup_name : str, optional
+        The session-state key where the backup dict is stored. Default: "_planting_backup".
+
+    Behavior
+    --------
+    - If a key is already present in `st.session_state`, it is left untouched.
+    - If a key is missing and present in the backup, it is restored from backup.
+    - If no backup exists, this is a no-op.
+    """
+    backup = st.session_state.get(backup_name, {})
+    if not backup:
+        return
+
+    for k in keys:
+        if k not in st.session_state and k in backup:
+            st.session_state[k] = backup[k]
+
+def planting_sliders():
     presets = load_variant_presets()
     variant = st.session_state.get("selected_variant", "PN")
 
@@ -171,64 +248,35 @@ def planting_sliders(prefix: str = "credits_"):
         st.warning(f"Variant '{variant}' not found in presets. Falling back to 'PN'.")
     preset = presets.get(variant, presets.get("PN", {}))
 
-    st.markdown(f"**FVS Variant:** {variant}", unsafe_allow_html=False, help='Selected FVS Variant (see Site Selection Map tab)', width="stretch")
+    st.markdown(f"**FVS Variant:** {variant}")
 
-    # When variant changes, clear old tpa_* and seed defaults for current species
-    last_variant = st.session_state.get("_last_variant")
-    if last_variant != variant:
-        # clear previous species values
-        for k in list(st.session_state.keys()):
-            if k.startswith("tpa_"):
-                del st.session_state[k]
-        # seed defaults for this variant's species
-        for spk in _species_keys(preset):
-            st.session_state[spk] = preset.get(spk, 0)
-        # seed survival/si if first time or variant changed
-        st.session_state["survival"] = preset.get("survival", st.session_state.get("survival", 70))
-        st.session_state["si"] = preset.get("si", st.session_state.get("si", 120))
-        st.session_state["_last_variant"] = variant
-
-    # --- Common sliders ---
-    st.slider("Survival Percentage", 40, 90,
-              value=int(st.session_state.get("survival", preset.get("survival", 70))),
-              key="survival",
-              help = 'survival percentage help')
-    st.slider("Site Index", 96, 137,
-              value=int(st.session_state.get("si", preset.get("si", 120))),
-              key="si",
-              help = 'site index help')
-
-    # --- Dynamic species sliders ---
-    st.markdown("🌲 Species Mix (TPA)", unsafe_allow_html=False, help='Set trees per acre (TPA) to be planted for each species below.', width="stretch")
     species_keys = _species_keys(preset)
+    
+    # restore any missing keys from previous interaction with page (in case widgets were unmounted on the other page)
+    _restore_backup(["survival", "si", *species_keys])
 
-    # Optional: set a total TPA cap if you want to enforce one (put `_tpa_cap` in JSON if needed)
-    tpa_cap = preset.get("_tpa_cap", 435) 
+    # Initialize presets ONLY if the variant truly changed
+    _init_planting_state(variant, preset)  # must not overwrite existing keys unless variant changed
 
-    running_total = 0
-    for i, spk in enumerate(species_keys):
-        default_val = int(st.session_state.get(spk, preset.get(spk, 0)))
-        label = _label_for(spk)
+    # Render widgets (key only; no value) so existing state is used
+    st.slider("Survival Percentage", 40, 90, key="survival", help="survival percentage help")
+    st.slider("Site Index", 96, 137, key="si", help="site index help")
 
-        if tpa_cap is not None:
-            # Greedy budget: allow up to remaining budget; last species can soak up the rest
-            remaining = max(0, tpa_cap - running_total)
-            max_val = remaining if i == len(species_keys) - 1 else tpa_cap
-            st.slider(label, 0, tpa_cap, value=min(default_val, int(max_val)), key=spk)
-        else:
-            # No total cap — simple independent sliders
-            st.slider(label, 0, tpa_cap, value=default_val, key=spk)
+    st.markdown("🌲 Species Mix (TPA)")
+    tpa_cap = preset.get("_tpa_cap", 435)
+    for spk in species_keys:
+        st.slider(_label_for(spk), 0, tpa_cap, key=spk)
 
-        running_total += int(st.session_state.get(spk, 0))
-
-    # Summary
+    # Summary 
     total_tpa = sum(int(st.session_state.get(k, 0)) for k in species_keys)
-    st.markdown(f"**Total TPA:** {total_tpa}", unsafe_allow_html=False, help='Sum of TPA values for all species above.', width="stretch")
-    if running_total > tpa_cap:
+    st.markdown(f"**Total TPA:** {total_tpa}")
+    if total_tpa > tpa_cap:
         st.warning(f"Total initial TPA exceeds {tpa_cap} and may present an unrealistic scenario. Consider adjusting sliders.")
 
-    # If you need the selected species mix as a dict elsewhere:
     st.session_state["species_mix"] = {k: int(st.session_state.get(k, 0)) for k in species_keys}
+
+    # Backup latest values so they're available if user navigates away and back
+    _backup_keys(["survival", "si", *species_keys])
 
 def carbon_chart():
     # Ensure the sliders have been set
