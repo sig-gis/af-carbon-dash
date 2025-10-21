@@ -1,6 +1,3 @@
-# -----------------------------
-# Imports
-# -----------------------------
 import streamlit as st
 import json
 import pandas as pd
@@ -14,10 +11,29 @@ from scipy.interpolate import make_interp_spline
 import altair as alt
 import numpy_financial as npf
 
-
 # -----------------------------
 # Functions
 # -----------------------------
+
+# ---------- Help Text ----------
+@st.cache_data
+def load_help(path: str = "conf/base/help_text.json"):
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+    
+# access HELP text
+HELP = load_help()
+def H(key: str) -> str:
+    """
+    Safe accessor for help text loaded from conf/base/helptext.json.
+    Returns empty string if key is missing to avoid runtime errors.
+    """
+    entry = HELP.get(key)
+    if isinstance(entry, dict) and "help" in entry:
+        return entry["help"]
+    return ""
+
+# ---------- Site Selection Map ----------
 @st.fragment
 def load_geojson_fragment(simplified_geojson_path, shapefile_path, tolerance_deg=0.001, skip_keys={"Shape_Area", "Shape_Leng"}, max_tooltip_fields=3):
     """
@@ -40,7 +56,6 @@ def load_geojson_fragment(simplified_geojson_path, shapefile_path, tolerance_deg
     # Load GeoJSON
     if os.path.exists(simplified_geojson_path):
         geojson_str = read_geojson_text(simplified_geojson_path)
-        st.success("GeoJSON loaded successfully")
     else:
         try:
             geojson_str = simplify_geojson(shapefile_path, tolerance_deg=tolerance_deg)
@@ -61,7 +76,7 @@ def load_geojson_fragment(simplified_geojson_path, shapefile_path, tolerance_deg
 @st.fragment
 def build_map(geojson_str, center=(37.8, -96.9), zoom=5, tooltip_fields=None, highlight_feature=None):
     m = folium.Map(location=center, zoom_start=zoom, tiles="CartoDB positron")
-
+    
     # Base layer
     gj = folium.GeoJson(
         data=geojson_str,
@@ -122,20 +137,19 @@ def display_selected_info():
     if "clicked_props" in st.session_state:
         props = st.session_state["clicked_props"]
 
-        st.subheader("Selected Feature Info")
+        st.subheader("Selected Feature Info", anchor=None, help=H("site.subheader_selected_feature_info"), divider=False, width="stretch")
         pretty_names = {
             "FVSLocCode": "FVS Location Code",
             "FVSLocName": "FVS Location Name",
             "FVSVarName": "FVS Variant Name",
             "FVSVariant": "FVS Variant",
         }
-        skip_keys = {"Shape_Area", "Shape_Leng"}
+        skip_keys = {"Shape_Area", "Shape_Leng", 'FVSVariantLoc'}
 
         for key, value in props.items():
             if key not in skip_keys:
                 display_key = pretty_names.get(key, key)
                 st.markdown(f"**{display_key}:** {value}")
-
 
 @st.fragment
 def submit_map(map_data):
@@ -144,6 +158,7 @@ def submit_map(map_data):
         if clicked:
             st.session_state["selected_variant"] = clicked.get("FVSVariant", "PN")
 
+# ---------- Helper functions ----------
 SPECIES_LABELS = {
     "tpa_df": "Douglas-fir",
     "tpa_rc": "red cedar",
@@ -165,6 +180,120 @@ def _species_keys(preset: dict):
 def _label_for(key: str) -> str:
     return SPECIES_LABELS.get(key, key.replace("tpa_", "TPA_").upper())
 
+# ---------- Statefulness functions ----------
+def _planting_keys():
+    """
+    Return list of planting session state keys
+    """
+    return [k for k in list(st.session_state.keys()) if k.startswith("tpa_") or k in ("survival", "si")]
+
+def _carbon_units_keys() -> list[str]:
+    """
+    Return the set of session-state keys that should persist for the Carbon Units section.
+    We keep this intentionally small to avoid backing up large result dataframes.
+    """
+    return ["carbon_units_protocols", "carbon_units_inputs"]
+
+def _credits_keys(prefix: str = "credits_") -> list[str]:
+    """
+    Return all proforma input keys (prefixed) that should persist for the Credits section.
+    Uses the JSON defaults as the source of truth for which keys exist.
+    """
+    defaults = _load_proforma_defaults()
+    return [prefix + k for k in defaults.keys()]
+
+def _init_planting_state(variant: str, preset: dict):
+    """
+    Seed/clear planting slider state ONLY when the selected variant changes.
+    Otherwise, leave the user's inputs intact across page switches.
+    """
+    last_variant = st.session_state.get("_last_variant")
+    if last_variant == variant:
+        return  # nothing to do — don't reset user inputs
+
+    for k in _planting_keys():
+        st.session_state.pop(k, None)
+
+    # Seed base defaults if missing
+    st.session_state["survival"] = preset.get("survival", st.session_state.get("survival", 70))
+    st.session_state["si"]       = preset.get("si",       st.session_state.get("si", 120))
+
+    # Seed species defaults if missing
+    for spk in _species_keys(preset):
+        st.session_state.setdefault(spk, int(preset.get(spk, 0)))
+
+    st.session_state["_last_variant"] = variant
+
+def _init_carbon_units_state():
+    """
+    Initialize Carbon Units inputs ONLY if missing.
+    Does NOT overwrite existing user selections.
+    """
+    # canonical default protocols
+    default_protocols = ["ACR/CAR/VERRA"]
+
+    # initialize the mapping dict used downstream
+    if "carbon_units_inputs" not in st.session_state:
+        st.session_state["carbon_units_inputs"] = {"protocols": default_protocols}
+
+    # ensure the widget-backed list key exists as well
+    if "carbon_units_protocols" not in st.session_state:
+        st.session_state["carbon_units_protocols"] = st.session_state["carbon_units_inputs"].get("protocols", default_protocols)
+
+def _backup_keys(keys, backup_name: str = "_planting_backup"):
+    """
+    Persist the current values for the given session-state keys to a small
+    backup dict stored under `backup_name` in `st.session_state`.
+    Helpful when Streamlit drops a widget's state when navigating back and forth between content. 
+
+    Parameters
+    ----------
+    keys : Iterable[str]
+        The session-state keys you want to persist (e.g., ["survival", "si", *species_keys]).
+    backup_name : str, optional
+        The session-state key under which the backup is stored. Default: "_planting_backup".
+
+    Notes
+    -----
+    - Call this *after* rendering widgets so the latest user inputs are captured.
+    - Only keys present in `st.session_state` are saved; missing keys are ignored.
+    """
+    backup = {}
+    for k in keys:
+        if k in st.session_state:
+            # Cast to int for sliders; adapt if you have non-int widgets
+            val = st.session_state[k]
+            backup[k] = int(val) if isinstance(val, (int, float, str)) and str(val).isdigit() else val
+    st.session_state[backup_name] = backup
+    return backup
+
+def _restore_backup(keys, backup_name: str = "_planting_backup"):
+    """
+    Restore any *missing* session-state keys from a previously saved backup.
+
+    Parameters
+    ----------
+    keys : Iterable[str]
+        The session-state keys you want to ensure are present (e.g., ["survival", "si", *species_keys]).
+    backup_name : str, optional
+        The session-state key where the backup dict is stored. Default: "_planting_backup".
+
+    Behavior
+    --------
+    - If a key is already present in `st.session_state`, it is left untouched.
+    - If a key is missing and present in the backup, it is restored from backup.
+    - If no backup exists, this is a no-op.
+    """
+    backup = st.session_state.get(backup_name, {})
+    if not backup:
+        return
+
+    for k in keys:
+        if k not in st.session_state and k in backup:
+            st.session_state[k] = backup[k]
+
+
+# ---------- Planting Scenario ----------
 def planting_sliders():
     presets = load_variant_presets()
     variant = st.session_state.get("selected_variant", "PN")
@@ -173,62 +302,35 @@ def planting_sliders():
         st.warning(f"Variant '{variant}' not found in presets. Falling back to 'PN'.")
     preset = presets.get(variant, presets.get("PN", {}))
 
-    st.markdown(f"**FVS Variant:** {variant}")
+    st.markdown(f"**FVS Variant:** {variant}", unsafe_allow_html=False, help=H("planting.variant_label"), width="stretch")
 
-    # When variant changes, clear old tpa_* and seed defaults for current species
-    last_variant = st.session_state.get("_last_variant")
-    if last_variant != variant:
-        # clear previous species values
-        for k in list(st.session_state.keys()):
-            if k.startswith("tpa_"):
-                del st.session_state[k]
-        # seed defaults for this variant's species
-        for spk in _species_keys(preset):
-            st.session_state[spk] = preset.get(spk, 0)
-        # seed survival/si if first time or variant changed
-        st.session_state["survival"] = preset.get("survival", st.session_state.get("survival", 70))
-        st.session_state["si"] = preset.get("si", st.session_state.get("si", 120))
-        st.session_state["_last_variant"] = variant
-
-    # --- Common sliders ---
-    st.slider("Survival Percentage", 40, 90,
-              value=int(st.session_state.get("survival", preset.get("survival", 70))),
-              key="survival")
-    st.slider("Site Index", 96, 137,
-              value=int(st.session_state.get("si", preset.get("si", 120))),
-              key="si")
-
-    # --- Dynamic species sliders ---
-    st.markdown("🌲 Species Mix (TPA)")
     species_keys = _species_keys(preset)
+    
+    # restore any missing keys from previous interaction with page (in case widgets were unmounted on the other page)
+    _restore_backup(["survival", "si", *species_keys])
 
-    # Optional: set a total TPA cap if you want to enforce one (put `_tpa_cap` in JSON if needed)
-    tpa_cap = preset.get("_tpa_cap", 435) 
+    # Initialize presets ONLY if the variant truly changed
+    _init_planting_state(variant, preset)  # must not overwrite existing keys unless variant changed
 
-    running_total = 0
-    for i, spk in enumerate(species_keys):
-        default_val = int(st.session_state.get(spk, preset.get(spk, 0)))
-        label = _label_for(spk)
+    # Render widgets (key only; no value) so existing state is used
+    st.slider("Survival Percentage", 40, 90, key="survival", help=H("planting.slider_survival"))
+    st.slider("Site Index", 96, 137, key="si", help=H("planting.slider_si"))
 
-        if tpa_cap is not None:
-            # Greedy budget: allow up to remaining budget; last species can soak up the rest
-            remaining = max(0, tpa_cap - running_total)
-            max_val = remaining if i == len(species_keys) - 1 else tpa_cap
-            st.slider(label, 0, tpa_cap, value=min(default_val, int(max_val)), key=spk)
-        else:
-            # No total cap — simple independent sliders
-            st.slider(label, 0, tpa_cap, value=default_val, key=spk)
+    st.markdown("🌲 Species Mix (TPA)", unsafe_allow_html=False, help=H("planting.species_mix_header"), width="stretch")
+    tpa_cap = preset.get("_tpa_cap", 435)
+    for spk in species_keys:
+        st.slider(_label_for(spk), 0, tpa_cap, key=spk)
 
-        running_total += int(st.session_state.get(spk, 0))
-
-    # Summary
+    # Summary 
     total_tpa = sum(int(st.session_state.get(k, 0)) for k in species_keys)
-    st.markdown(f"**Total TPA:** {total_tpa}")
-    if running_total > tpa_cap:
+    st.markdown(f"**Total TPA:** {total_tpa}", unsafe_allow_html=False, help=H("planting.total_tpa_label"), width="stretch")
+    if total_tpa > tpa_cap:
         st.warning(f"Total initial TPA exceeds {tpa_cap} and may present an unrealistic scenario. Consider adjusting sliders.")
 
-    # If you need the selected species mix as a dict elsewhere:
     st.session_state["species_mix"] = {k: int(st.session_state.get(k, 0)) for k in species_keys}
+
+    # Backup latest values so they're available if user navigates away and back
+    _backup_keys(["survival", "si", *species_keys])
 
 def carbon_chart():
     # Ensure the sliders have been set
@@ -279,6 +381,7 @@ def carbon_chart():
     st.altair_chart(line, use_container_width=True)
     st.success(f"Final Carbon Output (year {max(df['Year'])}): {df['C_Score'].iloc[-1]:.2f}")
 
+# ---------- Carbon Units ----------
 def carbon_units():
     if "carbon_df" not in st.session_state:
             st.error("No carbon data found. Please adjust sliders first.")
@@ -385,7 +488,7 @@ def carbon_units():
 
     st.altair_chart(CU_chart, use_container_width=True)
 
-# ---------- Credits (Proforma) functions ----------
+# ---------- Project Financials ----------
 @st.cache_data
 def _load_proforma_defaults() -> dict:
     with open("conf/base/proforma_presets.json") as f:
@@ -401,26 +504,36 @@ def credits_inputs(prefix: str = "credits_") -> dict:
     """
     Render Proforma inputs in the current container and return a dict of typed values.
     """
+    # restore backup so users keep their previous values after navigation
+    _restore_backup(_credits_keys(prefix), backup_name="_credits_backup")
+    
+    # seed defaults (setdefault) will not overwrite restored/user values
     _seed_defaults(prefix)
+    
+    st.markdown("Financial Options", help=None)
+    container = st.container(height=600)
+    with container:
+        net_acres              = st.number_input("Net Acres:", min_value=1, step=100, key=prefix+"net_acres", help=H("credits.inputs.net_acres"))
+        num_plots              = st.number_input("# Plots:", min_value=1, key=prefix+"num_plots", help=H("credits.inputs.num_plots"))
+        cost_per_cfi_plot      = st.number_input("Cost/CFI Plot, $:", min_value=1, key=prefix+"cost_per_cfi_plot", help=H("credits.inputs.cost_per_cfi_plot"))
+        price_per_ert_initial  = st.number_input("Initial Price/CU, $:", min_value=1.0, key=prefix+"price_per_ert_initial", help=H("credits.inputs.price_per_ert_initial"))
+        credit_price_increase_perc = st.number_input("Credit Price Increase, %:", min_value=0.0, step=1.0, format="%.1f", key=prefix+"credit_price_increase", help=H("credits.inputs.credit_price_increase"))
+        registry_fees              = st.number_input("Registry Fees, $:", min_value=1, key=prefix+"registry_fees", help=H("credits.inputs.registry_fees"))
+        validation_cost            = st.number_input("Validation Cost, $:", min_value=1, key=prefix+"validation_cost", help=H("credits.inputs.validation_cost"))
+        verification_cost          = st.number_input("Verification Cost, $:", min_value=1, key=prefix+"verification_cost", help=H("credits.inputs.verification_cost"))
+        issuance_fee_per_ert       = st.number_input("Issuance Fee per CU, $:", min_value=0.0, step=0.01, format="%.2f", key=prefix+"issuance_fee_per_ert", help=H("credits.inputs.issuance_fee_per_ert"))
+        anticipated_inflation_perc = st.number_input("Anticipated Inflation, %:", min_value=0.0, step=1.0, format="%.1f", key=prefix+"anticipated_inflation", help=H("credits.inputs.anticipated_inflation"))
+        discount_rate_perc         = st.number_input("Discount Rate, %:", min_value=0.0, step=1.0, format="%.1f", key=prefix+"discount_rate", help=H("credits.inputs.discount_rate"))
+        planting_cost              = st.number_input("Initial Planting Cost, $:", min_value=0, key=prefix+"planting_cost", help=H("credits.inputs.planting_cost"))
+        seedling_cost              = st.number_input("Initial Seedling Cost, $:", min_value=0, key=prefix+"seedling_cost", help=H("credits.inputs.seedling_cost"))
 
-    with st.popover("Financial Options"):
-        net_acres              = st.number_input("Net Acres:", min_value=1, step=100, key=prefix+"net_acres")
-        num_plots              = st.number_input("# Plots:", min_value=1, key=prefix+"num_plots")
-        cost_per_cfi_plot      = st.number_input("Cost/CFI Plot:", min_value=1, key=prefix+"cost_per_cfi_plot")
-        price_per_ert_initial  = st.number_input("Price/CU (initial):", min_value=1.0, key=prefix+"price_per_ert_initial")
-        credit_price_increase_perc = st.number_input("Credit Price Increase (percent):", min_value=0.0, step=1.0, format="%.1f", key=prefix+"credit_price_increase")
-        registry_fees              = st.number_input("Registry Fees:", min_value=1, key=prefix+"registry_fees")
-        validation_cost            = st.number_input("Validation Cost:", min_value=1, key=prefix+"validation_cost")
-        verification_cost          = st.number_input("Verification Cost:", min_value=1, key=prefix+"verification_cost")
-        issuance_fee_per_ert       = st.number_input("Issuance Fee per CU:", min_value=0.0, step=0.01, format="%.2f", key=prefix+"issuance_fee_per_ert")
-        anticipated_inflation_perc = st.number_input("Anticipated Inflation (percent):", min_value=0.0, step=1.0, format="%.1f", key=prefix+"anticipated_inflation")
-        discount_rate_perc         = st.number_input("Discount Rate (percent):", min_value=0.0, step=1.0, format="%.1f", key=prefix+"discount_rate")
-        planting_cost = st.number_input("Planting Cost (initial):", min_value=0, key=prefix+"planting_cost")
-        seedling_cost = st.number_input("Seedling Cost (initial):", min_value=0, key=prefix+"seedling_cost")
+    # backup inputs so the latest entries persist across navigation
+    _backup_keys(_credits_keys(prefix), backup_name="_credits_backup")
 
     # constants (constrained by modeling backend)
     year_start     = 2024
     years_advance  = 35
+    net_acres = st.session_state[prefix + "net_acres"]
 
     return {
         "net_acres": net_acres,
@@ -558,7 +671,7 @@ def credits_results(params: dict):
     summaries_df_display = summaries_df_display[['Protocol', 'Total Net Revenue', 'NPV (Year 20)', 'NPV per Acre']]
 
     # Display as a table
-    st.subheader("Project Financials Summary")
+    st.subheader("Project Financials Summary", anchor=None, help=H("credits.summary_subheader"), divider=False, width="stretch")
     st.table(summaries_df_display.set_index('Protocol'))
 
     # CSV download
@@ -568,8 +681,10 @@ def credits_results(params: dict):
         file_name="credits_proforma.csv",
         mime="text/csv",
         use_container_width=True,
+        help=H("credits.download_button")
     )
 
+# ---------- Render all sections with expanders ----------
 @st.fragment
 def run_chart():
     # Row 1: Planting sliders | Carbon chart
@@ -588,16 +703,24 @@ def run_chart():
                 st.error("No carbon data found. Adjust sliders above first.")
                 st.stop()
             
+            # restore backup and init state for carbon units
+            _restore_backup(_carbon_units_keys(), backup_name="_carbon_units_backup")
+            _init_carbon_units_state()
+
+            # render widget using key only to enable restoring backups
             protocols = st.multiselect(
                 "Select Protocol(s)",
                 options=["ACR/CAR/VERRA", 
                          "GS",  
                          "ISO"],
-                default=["ACR/CAR/VERRA"],
-                key="carbon_units_protocols"
+                key="carbon_units_protocols",
+                help=H("carbon.protocols_multiselect")
             )
 
             st.session_state["carbon_units_inputs"] = {"protocols": protocols}
+
+            # backup latest selections for carbon units
+            _backup_keys(_carbon_units_keys(), backup_name="_carbon_units_backup")
 
         with col4:
             carbon_units() 
@@ -608,27 +731,60 @@ def run_chart():
         with col5:
             proforma_params = credits_inputs(prefix="credits_")
         with col6:
-            # st.subheader("Credits (Proforma) – Results")
             credits_results(proforma_params) 
 
 ########################################################################################################################################################################################
 # -----------------------------
 # Main
 # -----------------------------
-# Tabs
-map_tab, plant_tab = st.tabs(["Site Selection Map", "Planting Scenario"])
 
-# Load Shapefile / GeoJSON
+# Page Config
+st.set_page_config(layout="wide", page_title="Project Builder", page_icon="🌲")
+
+# Initialize Session State 
+if "active_tab" not in st.session_state:
+    st.session_state.active_tab = "Site Selection Map"
+
+# File Paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 local_shapefile = os.path.join(BASE_DIR, "data", "FVSVariantMap20210525", "FVS_Variants_and_Locations_4326.shp")
 simplified_geojson = os.path.join(BASE_DIR, "data", "FVSVariantMap20210525", "FVS_Variants_and_Locations_4326_simplified.geojson")
 
-st.set_page_config(layout="wide", page_title="Project Builder", page_icon="🌲")
+# Conditional Layout (acts like tabs)
+if st.session_state.active_tab == "Site Selection Map":
+    # Site Selection Map View
+    # Title Row (conditionally shows button after variant selection) 
+    col1, col2 = st.columns([8, 3])
 
-with map_tab:
-    st.title("🗺️ Site Selection")
-    st.subheader("Select FVS Variant")
+    with col1:
+        st.title(
+            "🗺️ Site Selection",
+            anchor=None,
+            help=H("site.title"),
+        )
 
+    with col2:
+        # Only show the "Continue" button if a variant is selected
+        if st.session_state.get("selected_variant"):
+            if st.button(
+                "➡️ Planting Scenario",
+                use_container_width=True,
+                help=H("site.button_forward_to_planting"),
+                type='primary'
+            ):
+                st.session_state.active_tab = "Planting Scenario"
+                st.rerun()
+        else:
+            st.empty()
+
+    st.subheader(
+        "Select FVS Variant",
+        anchor=None,
+        divider=False,
+        help=H("site.subheader_select_variant")
+    )
+
+    # Load GeoJSON and Map
     geojson_str, tooltip_fields = load_geojson_fragment(simplified_geojson, local_shapefile)
     st.session_state.setdefault("map_view", {"center": [45.5, -118], "zoom": 6})
 
@@ -647,9 +803,20 @@ with map_tab:
         use_container_width=True,
     )
 
+    # Display info below map
     show_clicked_variant(map_data)
     display_selected_info()
 
-with plant_tab:
-    st.title("🌲 Planting Scenario")
+else:
+    # Planting Scenario View
+    col1, col2 = st.columns([8, 3])  # adjust ratio as needed
+
+    with col1:
+        st.title("🌲 Planting Scenario", anchor=None, help=H("planting.title"))
+
+    with col2:
+        if st.button("⬅️ Site Selection", use_container_width=True, help=H("planting.button_back_to_site"), type='primary'):
+            st.session_state.active_tab = "Site Selection Map"
+            st.rerun()
+
     run_chart()

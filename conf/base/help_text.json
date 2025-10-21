@@ -1,0 +1,138 @@
+{
+    "site.title": {
+      "streamlit_function": "title",
+      "component": "Site Selection page title",
+      "help": "Select the FVS Variant Location geometry which contains your project location. Your selected FVS Variant location will auto-populate helpful planting parameter defaults, including species mix, for you."
+    },
+    "site.subheader_select_variant": {
+      "streamlit_function": "subheader",
+      "component": "Subheader above the variant map",
+      "help": "An FVS \"Variant\" is a model calibrated for a particular geographic region. Variants are further subdivided into \"Locations\" which is typically a specific National Forest or district."
+    },
+    "site.subheader_selected_feature_info": {
+        "streamlit_function": "subheader",
+        "component": "Subheader below the variant map",
+        "help": "Location information of selected variant."
+    },
+    "site.button_forward_to_planting": {
+      "streamlit_function": "button",
+      "component": "Continue button from Site Selection to Planting Scenario",
+      "help": "Continue to the Planting Scenario calculations."
+    },
+    "planting.title": {
+      "streamlit_function": "title",
+      "component": "Planting Scenario page title",
+      "help": "Planting Parameter selections are fed into machine learning models trained to approximate FVS simulation outputs. Approximated FVS outputs are used to calculate Carbon Estimates and Project Financials."
+    },
+    "planting.variant_label": {
+      "streamlit_function": "markdown",
+      "component": "Bold line showing the current FVS Variant above the planting sliders",
+      "help": "Selected FVS Variant"
+    },
+    "planting.slider_survival": {
+      "streamlit_function": "slider",
+      "component": "Survival Percentage slider",
+      "help": "FVS does not directly predict the survival of seedlings and relies on the user to provide this information. Therefore 'Survival Percentage' can be either a best-guess value that reflects an expected outcome for a given location, or it can be used as another lever to explore the sensitivity of theoretical outcomes to various parameter values."
+    },
+    "planting.slider_si": {
+      "streamlit_function": "slider",
+      "component": "Site Index slider",
+      "help": "Site index (SI) is a widely-used forestry concept used to describe the inherent productivity of a site in a standardized frame of reference, i.e., the expected height of an average tree of a given species after a given number of years."
+    },
+    "planting.species_mix_header": {
+      "streamlit_function": "markdown",
+      "component": "Header text above species TPA sliders",
+      "help": "Set trees per acre (TPA) for each species."
+    },
+    "planting.total_tpa_label": {
+      "streamlit_function": "markdown",
+      "component": "Computed Total TPA line under species sliders",
+      "help": "Calculated Total TPA."
+    },
+    "planting.button_back_to_site": {
+        "streamlit_function": "button",
+        "component": "Back button from Planting Scenario to Site Selection",
+        "help": "Return to Site Selection map"
+    },
+    "carbon.protocols_multiselect": {
+      "streamlit_function": "multiselect",
+      "component": "Protocol selector for Carbon Units / Project Financials",
+      "help": "Select one or more protocols to estimate Carbon Units (CUs) and Project Financials."
+    },
+    "credits.summary_subheader": {
+      "streamlit_function": "subheader",
+      "component": "Project Financials summary block",
+      "help": "**Protocol:** The carbon accounting protocol / registry (ACR, CAR, VERRA, GS, or ISO) the financial results are based on.\n**Total Net Revenue:** The total projected revenue from the project over its full crediting period, after deducting costs.\n**NPV (Year 20) - Net Present Value at Year 20:** shows what the project’s 20-year returns are worth in today’s dollars.\n**NPV per Acre:** Net Present Value (Year 20) on a per-acre basis."
+    },
+    "credits.download_button": {
+      "streamlit_function": "download_button",
+      "component": "Download button for the full proforma CSV",
+      "help": "Download table used to calculate Project Financials."
+    },
+    "credits.inputs.net_acres": {
+      "streamlit_function": "number_input",
+      "component": "Net Acres input",
+      "help": "The total area of land enrolled in the project, measured in acres."
+    },
+    "credits.inputs.num_plots": {
+      "streamlit_function": "number_input",
+      "component": "Number of CFI plots input",
+      "help": "The number of sampling plots established to monitor and measure forest growth/carbon."
+    },
+    "credits.inputs.cost_per_cfi_plot": {
+      "streamlit_function": "number_input",
+      "component": "Cost per CFI plot input",
+      "help": "The cost of establishing and maintaining a single Continuous Forest Inventory plot."
+    },
+    "credits.inputs.price_per_ert_initial": {
+      "streamlit_function": "number_input",
+      "component": "Initial price per credit (CU) input",
+      "help": "The assumed starting market price per carbon credit unit. This can be an ERT, VCU, or other unit depending on protocol."
+    },
+    "credits.inputs.credit_price_increase": {
+      "streamlit_function": "number_input",
+      "component": "Annual credit price increase (%) input",
+      "help": "The assumed annual percentage increase in credit price over the project duration."
+    },
+    "credits.inputs.registry_fees": {
+      "streamlit_function": "number_input",
+      "component": "Registry fees input",
+      "help": "Fees charged by the carbon registry annually for project registration and maintenance."
+    },
+    "credits.inputs.validation_cost": {
+      "streamlit_function": "number_input",
+      "component": "Validation cost input",
+      "help": "One-time cost for the initial third-party validation of the project."
+    },
+    "credits.inputs.verification_cost": {
+      "streamlit_function": "number_input",
+      "component": "Verification cost input",
+      "help": "Recurring cost for independent verification of carbon credits generated."
+    },
+    "credits.inputs.issuance_fee_per_ert": {
+      "streamlit_function": "number_input",
+      "component": "Issuance fee per credit input",
+      "help": "The fee charged by the registry each time credits are issued, on a per-credit basis."
+    },
+    "credits.inputs.anticipated_inflation": {
+      "streamlit_function": "number_input",
+      "component": "Anticipated inflation (%) input",
+      "help": "The assumed annual inflation rate applied to costs over time."
+    },
+    "credits.inputs.discount_rate": {
+      "streamlit_function": "number_input",
+      "component": "Discount rate (%) input",
+      "help": "The rate used in NPV calculations to account for the time value of money and investment risk."
+    },
+    "credits.inputs.planting_cost": {
+      "streamlit_function": "number_input",
+      "component": "Initial planting cost input",
+      "help": "Upfront cost of planting, including site preparation and labor."
+    },
+    "credits.inputs.seedling_cost": {
+      "streamlit_function": "number_input",
+      "component": "Initial seedling cost input",
+      "help": "Upfront cost of purchasing seedlings used for planting."
+    }
+  }
+  
