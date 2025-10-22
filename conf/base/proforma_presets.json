@@ -1,5 +1,4 @@
 {
-    "net_acres": 10000,
     "num_plots": 250,
     "cost_per_cfi_plot": 150,
     "price_per_ert_initial": 25.0,

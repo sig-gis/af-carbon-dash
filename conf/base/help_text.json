@@ -137,7 +137,7 @@
     "toggle.inputs.acres": {
       "streamlit_function": "toggle",
       "component": "Toggle for either calculating per project or per acre.",
-      "help": "On/Default: Per Project, Off: Per Acre"
+      "help": "On: Per Project (Default), Off: Per Acre"
     },
     "number.inputs.acres": {
       "streamlit_function": "number_input",

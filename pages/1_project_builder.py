@@ -185,7 +185,7 @@ def _planting_keys():
     """
     Return list of planting session state keys
     """
-    return [k for k in list(st.session_state.keys()) if k.startswith("tpa_") or k in ("survival", "si")]
+    return [k for k in list(st.session_state.keys()) if k.startswith("tpa_") or k in ("survival", "si", "net_acres")]
 
 def _carbon_units_keys() -> list[str]:
     """
@@ -217,6 +217,8 @@ def _init_planting_state(variant: str, preset: dict):
     # Seed base defaults if missing
     st.session_state["survival"] = preset.get("survival", st.session_state.get("survival", 70))
     st.session_state["si"]       = preset.get("si",       st.session_state.get("si", 120))
+    # net_acres input in planting params for organization (top of page), but not in FVSVariant_presets.json
+    st.session_state["net_acres"] = st.session_state.get("net_acres", 10000)
 
     # Seed species defaults if missing
     for spk in _species_keys(preset):
@@ -307,12 +309,20 @@ def planting_sliders():
     species_keys = _species_keys(preset)
     
     # restore any missing keys from previous interaction with page (in case widgets were unmounted on the other page)
-    _restore_backup(["survival", "si", *species_keys])
+    _restore_backup(["survival", "si", "net_acres", *species_keys])
 
     # Initialize presets ONLY if the variant truly changed
     _init_planting_state(variant, preset)  # must not overwrite existing keys unless variant changed
 
     # Render widgets (key only; no value) so existing state is used
+    # net_acres input in planting params for organization (top of page), but not in FVSVariant_presets.json
+    st.number_input(
+    "Net Acres:",
+    min_value=1,
+    step=100,
+    key="net_acres",
+    help=H("number.inputs.acres")
+    )
     st.slider("Survival Percentage", 40, 90, key="survival", help=H("planting.slider_survival"))
     st.slider("Site Index", 96, 137, key="si", help=H("planting.slider_si"))
 
@@ -330,11 +340,11 @@ def planting_sliders():
     st.session_state["species_mix"] = {k: int(st.session_state.get(k, 0)) for k in species_keys}
 
     # Backup latest values so they're available if user navigates away and back
-    _backup_keys(["survival", "si", *species_keys])
+    _backup_keys(["survival", "si", "net_acres", *species_keys])
 
 def carbon_chart():
     # Ensure the sliders have been set
-    if not all(k in st.session_state for k in ["tpa_df", "tpa_rc", "tpa_wh", "survival", "si"]):
+    if not all(k in st.session_state for k in ["tpa_df", "tpa_rc", "tpa_wh", "survival", "si", "net_acres"]):
         st.info("Adjust Planting Design sliders to see the carbon output.")
         return
 
@@ -368,39 +378,15 @@ def carbon_chart():
     df = pd.concat([year_0, df])
     st.session_state.carbon_df = df
 
-    container = st.container()
-    col1, col2, col3, col4, col5, col6 = st.columns([1, 1, 1, 1, 1, 1])  # adjust ratio as needed
- 
-    with container:
-        with col1:
-             toggle_oc = st.toggle('Acreage Toggle', True, 'toggle_oc', H("toggle.inputs.acres"))
-        with col2:
-            # This creates a number input and stores it in session_state automatically
-            acres = st.number_input(
-                "Net Acres:",
-                min_value=1,
-                value=10000,
-                step=100,
-                key="oc_net_acres",
-                help=H("number.inputs.acres")
-            )
-
-        with col3:
-            st.empty()
-        with col4:
-            st.empty()
-        with col5:
-            st.empty()
-        with col6:
-            st.empty()
+    toggle_oc = st.toggle('Show Project Acreage', True, 'toggle_oc', H("toggle.inputs.acres"))
 
     chart_title = "Onsite Carbon (tons/project)" if toggle_oc else "Onsite Carbon (tons/acre)"
 
      # Determine chart data
     plot_df = df.copy()
     if toggle_oc:
-        plot_df["C_Score"] = plot_df["C_Score"] * acres
-        plot_df["Annual_C_Score"] = plot_df["Annual_C_Score"] * acres
+        plot_df["C_Score"] = plot_df["C_Score"] * st.session_state["net_acres"]
+        plot_df["Annual_C_Score"] = plot_df["Annual_C_Score"] * st.session_state["net_acres"]
 
     # Determine chart title
     chart_title = "Onsite Carbon (tons/project)" if toggle_oc else "Onsite Carbon (tons/acre)"
@@ -516,36 +502,12 @@ def carbon_units():
         st.error("No protocols selected or no data available to plot.")
         return
 
-    container = st.container()
-    col1, col2, col3, col4, col5, col6 = st.columns([1, 1, 1, 1, 1, 1])  # adjust ratio as needed
-
-    with container:
-        with col1:
-             toggle_ce = st.toggle('Acreage Toggle', True, 'toggle_ce', H("toggle.inputs.acres"))
-        with col2:
-            # This creates a number input and stores it in session_state automatically
-            acres = st.number_input(
-                "Net Acres:",
-                min_value=1,
-                value=10000,
-                step=100,
-                key="ce_net_acres",
-                help=H("number.inputs.acres")
-            )
-
-        with col3:
-            st.empty()
-        with col4:
-            st.empty()
-        with col5:
-            st.empty()
-        with col6:
-            st.empty()
+    toggle_ce = st.toggle('Show Project Acreage', True, 'toggle_ce', H("toggle.inputs.acres"))
 
     # Adjust chart values based on toggle
     plot_df = final_df.copy()
     if toggle_ce:
-        plot_df['CU'] = plot_df['CU'] * acres
+        plot_df['CU'] = plot_df['CU'] * st.session_state["net_acres"]
 
     chart_title = "(tons/project)" if toggle_ce else "(tons/acre)"
 
@@ -608,7 +570,7 @@ def credits_inputs(prefix: str = "credits_") -> dict:
     # constants (constrained by modeling backend)
     year_start     = 2024
     years_advance  = 35
-    net_acres = st.session_state[prefix + "net_acres"]
+    net_acres = st.session_state["net_acres"]
 
     return {
         "net_acres": net_acres,
@@ -718,36 +680,13 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
 
     plot_df = df_chart.copy()
 
-    container = st.container()
-    col1, col2, col3, col4, col5, col6 = st.columns([1, 1, 1, 1, 1, 1])  # adjust ratio as needed
-
-    with container:
-        with col1:
-             toggle_nr = st.toggle('Acreage Toggle', True, 'toggle_nr', H("toggle.inputs.acres"))
-        with col2:
-            # This creates a number input and stores it in session_state automatically
-            acres = st.number_input(
-                "Net Acres:",
-                min_value=1,
-                step=100,
-                key=prefix + "net_acres",
-                help=H("number.inputs.acres")
-            )
-
-        with col3:
-            st.empty()
-        with col4:
-            st.empty()
-        with col5:
-            st.empty()
-        with col6:
-            st.empty()
+    toggle_nr = st.toggle('Show Project Acreage', True, 'toggle_nr', H("toggle.inputs.acres"))
 
     # Apply toggle logic
     if toggle_nr:
         plot_df['Net_Revenue'] = plot_df['Net_Revenue']
     else :
-        plot_df['Net_Revenue'] = plot_df['Net_Revenue'] / acres
+        plot_df['Net_Revenue'] = plot_df['Net_Revenue'] / params["net_acres"]
 
     chart_title = "Total" if toggle_nr else "Per Acre"
 
@@ -761,7 +700,7 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
             tooltip=['Year', 'Net_Revenue', 'Protocol']
         )
         .properties(
-            title= chart_title + f' Estimated Credits for {acres} Acre Project',
+            title= chart_title + f' Estimated Credits for {params["net_acres"]} Acre Project',
             width=600,
             height=400
         )
@@ -868,7 +807,7 @@ workflow_steps = [
     {
         "label": "1. Site Selection",
         "tab": "Site Selection Map",
-        "caption": "Define your project area by selecting a FVS variant from the map.",
+        "caption": "Select the FVS Variant Location geometry which contains your project location.",
     },
     {
         "label": "2. Planting Design",
@@ -891,10 +830,10 @@ st.sidebar.markdown("""
         margin-bottom: 6px;
     }
     .active-step {
-        background-color: #e6f4ea; /* light green background */
-        border-left: 5px solid #4CAF50; /* green accent bar */
+        background-color: #dffde9; /* light green background */
+        border-left: 5px solid #177233; /* green accent bar */
         font-weight: 600;
-        color: #2e7d32;
+        color: #177233;
     }
     .inactive-step {
         color: #555;
