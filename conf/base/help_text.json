@@ -133,6 +133,16 @@
       "streamlit_function": "number_input",
       "component": "Initial seedling cost input",
       "help": "Upfront cost of purchasing seedlings used for planting."
+    },
+    "toggle.inputs.acres": {
+      "streamlit_function": "toggle",
+      "component": "Toggle for either calculating per project or per acre.",
+      "help": "On: Per Project (Default), Off: Per Acre"
+    },
+    "number.inputs.acres": {
+      "streamlit_function": "number_input",
+      "component": "Number input for per project calculation.",
+      "help": "The total area of land enrolled in the project, measured in acres."
     }
   }
   

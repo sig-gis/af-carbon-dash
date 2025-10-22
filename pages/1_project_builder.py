@@ -185,7 +185,7 @@ def _planting_keys():
     """
     Return list of planting session state keys
     """
-    return [k for k in list(st.session_state.keys()) if k.startswith("tpa_") or k in ("survival", "si")]
+    return [k for k in list(st.session_state.keys()) if k.startswith("tpa_") or k in ("survival", "si", "net_acres")]
 
 def _carbon_units_keys() -> list[str]:
     """
@@ -217,6 +217,8 @@ def _init_planting_state(variant: str, preset: dict):
     # Seed base defaults if missing
     st.session_state["survival"] = preset.get("survival", st.session_state.get("survival", 70))
     st.session_state["si"]       = preset.get("si",       st.session_state.get("si", 120))
+    # net_acres input in planting params for organization (top of page), but not in FVSVariant_presets.json
+    st.session_state["net_acres"] = st.session_state.get("net_acres", 10000)
 
     # Seed species defaults if missing
     for spk in _species_keys(preset):
@@ -293,7 +295,7 @@ def _restore_backup(keys, backup_name: str = "_planting_backup"):
             st.session_state[k] = backup[k]
 
 
-# ---------- Planting Scenario ----------
+# ---------- Planting Design ----------
 def planting_sliders():
     presets = load_variant_presets()
     variant = st.session_state.get("selected_variant", "PN")
@@ -307,12 +309,20 @@ def planting_sliders():
     species_keys = _species_keys(preset)
     
     # restore any missing keys from previous interaction with page (in case widgets were unmounted on the other page)
-    _restore_backup(["survival", "si", *species_keys])
+    _restore_backup(["survival", "si", "net_acres", *species_keys])
 
     # Initialize presets ONLY if the variant truly changed
     _init_planting_state(variant, preset)  # must not overwrite existing keys unless variant changed
 
     # Render widgets (key only; no value) so existing state is used
+    # net_acres input in planting params for organization (top of page), but not in FVSVariant_presets.json
+    st.number_input(
+    "Net Acres:",
+    min_value=1,
+    step=100,
+    key="net_acres",
+    help=H("number.inputs.acres")
+    )
     st.slider("Survival Percentage", 40, 90, key="survival", help=H("planting.slider_survival"))
     st.slider("Site Index", 96, 137, key="si", help=H("planting.slider_si"))
 
@@ -330,12 +340,12 @@ def planting_sliders():
     st.session_state["species_mix"] = {k: int(st.session_state.get(k, 0)) for k in species_keys}
 
     # Backup latest values so they're available if user navigates away and back
-    _backup_keys(["survival", "si", *species_keys])
+    _backup_keys(["survival", "si", "net_acres", *species_keys])
 
 def carbon_chart():
     # Ensure the sliders have been set
-    if not all(k in st.session_state for k in ["tpa_df", "tpa_rc", "tpa_wh", "survival", "si"]):
-        st.info("Adjust Planting Scenario sliders to see the carbon output.")
+    if not all(k in st.session_state for k in ["tpa_df", "tpa_rc", "tpa_wh", "survival", "si", "net_acres"]):
+        st.info("Adjust Planting Design sliders to see the carbon output.")
         return
 
     tpa_df = st.session_state["tpa_df"]
@@ -368,18 +378,32 @@ def carbon_chart():
     df = pd.concat([year_0, df])
     st.session_state.carbon_df = df
 
-    # Plot
-    line = alt.Chart(df).mark_line(point=True).encode(
+    toggle_oc = st.toggle('Show Project Acreage', True, 'toggle_oc', H("toggle.inputs.acres"))
+
+    chart_title = "Onsite Carbon (tons/project)" if toggle_oc else "Onsite Carbon (tons/acre)"
+
+     # Determine chart data
+    plot_df = df.copy()
+    if toggle_oc:
+        plot_df["C_Score"] = plot_df["C_Score"] * st.session_state["net_acres"]
+        plot_df["Annual_C_Score"] = plot_df["Annual_C_Score"] * st.session_state["net_acres"]
+
+    # Determine chart title
+    chart_title = "Onsite Carbon (tons/project)" if toggle_oc else "Onsite Carbon (tons/acre)"
+
+    # Plot chart
+    line = alt.Chart(plot_df).mark_line(point=True).encode(
         x=alt.X('Year:O', title='Year', axis=alt.Axis(labelAngle=30)),
-        y=alt.Y('C_Score:Q', title='Onsite Carbon (tons/acre)'),
+        y=alt.Y('C_Score:Q', title=chart_title),
         tooltip=['Year', 'C_Score']
     ).properties(
-        title="Cumulative Onsite Carbon",
+        title="Cumulative " + chart_title,
         width=600,
         height=400
     )
+
     st.altair_chart(line, use_container_width=True)
-    st.success(f"Final Carbon Output (year {max(df['Year'])}): {df['C_Score'].iloc[-1]:.2f}")
+    st.success(f"Final Carbon Output (year {max(plot_df['Year'])}): {plot_df['C_Score'].iloc[-1]:.2f}")
 
 # ---------- Carbon Units ----------
 def carbon_units():
@@ -478,13 +502,26 @@ def carbon_units():
         st.error("No protocols selected or no data available to plot.")
         return
 
+    toggle_ce = st.toggle('Show Project Acreage', True, 'toggle_ce', H("toggle.inputs.acres"))
+
+    # Adjust chart values based on toggle
+    plot_df = final_df.copy()
+    if toggle_ce:
+        plot_df['CU'] = plot_df['CU'] * st.session_state["net_acres"]
+
+    chart_title = "(tons/project)" if toggle_ce else "(tons/acre)"
+
     # Plot chart with Protocol color encoding
-    CU_chart = alt.Chart(final_df).mark_line(point=True).encode(
+    CU_chart = alt.Chart(plot_df).mark_line(point=True).encode(
         x=alt.X('Year:O', title='Year', axis=alt.Axis(labelAngle=30)),
-        y=alt.Y('CU:Q', title='CUs (tonnes CO₂e)'),
+        y=alt.Y('CU:Q', title='CUs ' + chart_title),
         color='Protocol:N',
         tooltip=['Year', 'CU', 'Protocol']
-    ).properties(title='Annual CU Estimates', width=600, height=400).configure_axis(grid=True, gridOpacity=0.3)
+    ).properties(
+        title='Annual CU Estimates ' + chart_title,
+        width=600,
+        height=400
+    ).configure_axis(grid=True, gridOpacity=0.3)
 
     st.altair_chart(CU_chart, use_container_width=True)
 
@@ -513,7 +550,7 @@ def credits_inputs(prefix: str = "credits_") -> dict:
     st.markdown("Financial Options", help=None)
     container = st.container(height=600)
     with container:
-        net_acres              = st.number_input("Net Acres:", min_value=1, step=100, key=prefix+"net_acres", help=H("credits.inputs.net_acres"))
+        # net_acres              = st.number_input("Net Acres:", min_value=1, step=100, key=prefix+"net_acres", help=H("credits.inputs.net_acres"))
         num_plots              = st.number_input("# Plots:", min_value=1, key=prefix+"num_plots", help=H("credits.inputs.num_plots"))
         cost_per_cfi_plot      = st.number_input("Cost/CFI Plot, $:", min_value=1, key=prefix+"cost_per_cfi_plot", help=H("credits.inputs.cost_per_cfi_plot"))
         price_per_ert_initial  = st.number_input("Initial Price/CU, $:", min_value=1.0, key=prefix+"price_per_ert_initial", help=H("credits.inputs.price_per_ert_initial"))
@@ -533,7 +570,7 @@ def credits_inputs(prefix: str = "credits_") -> dict:
     # constants (constrained by modeling backend)
     year_start     = 2024
     years_advance  = 35
-    net_acres = st.session_state[prefix + "net_acres"]
+    net_acres = st.session_state["net_acres"]
 
     return {
         "net_acres": net_acres,
@@ -603,7 +640,7 @@ def _compute_proforma(df_ert_ac: pd.DataFrame, p: dict) -> pd.DataFrame:
 
     return pd.concat(results, ignore_index=True)
 
-def credits_results(params: dict):
+def credits_results(params: dict, prefix: str = "credits_") -> dict:
     if "merged_df" not in st.session_state:
         st.error("No carbon data found. Please return to the Carbon Units Estimate section first.")
         st.stop()
@@ -641,18 +678,29 @@ def credits_results(params: dict):
     include_years = np.arange(year_start, year_stop + 5, 5)
     df_chart = df_pf[df_pf['Year'].isin(include_years)]
 
-    # Chart: Net Revenue per protocol
+    plot_df = df_chart.copy()
+
+    toggle_nr = st.toggle('Show Project Acreage', True, 'toggle_nr', H("toggle.inputs.acres"))
+
+    # Apply toggle logic
+    if toggle_nr:
+        plot_df['Net_Revenue'] = plot_df['Net_Revenue']
+    else :
+        plot_df['Net_Revenue'] = plot_df['Net_Revenue'] / params["net_acres"]
+
+    chart_title = "Total" if toggle_nr else "Per Acre"
+
     chart = (
-        alt.Chart(df_chart)
+        alt.Chart(plot_df)
         .mark_line(point=True)
         .encode(
             x=alt.X('Year:O', title='Year', axis=alt.Axis(labelAngle=30)), 
-            y=alt.Y('Net_Revenue:Q', title='Net Revenue'),
+            y=alt.Y('Net_Revenue:Q', title= chart_title + ' Net Revenue'),
             color=alt.Color('Protocol:N', title='Protocol'),
             tooltip=['Year', 'Net_Revenue', 'Protocol']
         )
         .properties(
-            title=f'Estimated Credits for {params["net_acres"]} Acre Project',
+            title= chart_title + f' Estimated Credits for {params["net_acres"]} Acre Project',
             width=600,
             height=400
         )
@@ -663,12 +711,12 @@ def credits_results(params: dict):
 
     # Show summary metrics
     summaries_df_display = summaries_df.copy()
-    summaries_df_display['Total Net Revenue'] = summaries_df_display['total_net'].map('${:,.2f}'.format)
+    summaries_df_display['Total Net Revenue, $'] = summaries_df_display['total_net'].map('${:,.2f}'.format)
     summaries_df_display['NPV (Year 20)'] = summaries_df_display['npv_yr20'].map('${:,.2f}'.format)
-    summaries_df_display['NPV per Acre'] = summaries_df_display['npv_per_acre'].map('${:,.2f}'.format)
+    summaries_df_display['NPV / Acre'] = summaries_df_display['npv_per_acre'].map('${:,.2f}'.format)
 
     # Keep only the columns to show
-    summaries_df_display = summaries_df_display[['Protocol', 'Total Net Revenue', 'NPV (Year 20)', 'NPV per Acre']]
+    summaries_df_display = summaries_df_display[['Protocol', 'Total Net Revenue, $', 'NPV (Year 20)', 'NPV / Acre']]
 
     # Display as a table
     st.subheader("Project Financials Summary", anchor=None, help=H("credits.summary_subheader"), divider=False, width="stretch")
@@ -750,6 +798,69 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 local_shapefile = os.path.join(BASE_DIR, "data", "FVSVariantMap20210525", "FVS_Variants_and_Locations_4326.shp")
 simplified_geojson = os.path.join(BASE_DIR, "data", "FVSVariantMap20210525", "FVS_Variants_and_Locations_4326_simplified.geojson")
 
+# -----------------------------
+# Sidebar: Workflow Overview
+# -----------------------------
+st.sidebar.markdown("## Project Workflow")
+
+workflow_steps = [
+    {
+        "label": "1. Site Selection",
+        "tab": "Site Selection Map",
+        "caption": "Select the FVS Variant Location geometry which contains your project location.",
+    },
+    {
+        "label": "2. Planting Design",
+        "tab": "Planting Design",
+        "caption": (
+            "Estimate certified carbon units under different protocols.\n\n"
+            "*1. Planting Parameters*: Design your reforestation plan and estimate FVS results in real time.\n"
+            "*2. Carbon Estimates*: Estimate carbon units (CUs)(tons CO₂e/acre) under different protocols.\n"
+            "*3. Credits*: Customize financial factors to estimate net project revenue."
+        ),
+    },
+]
+
+# Custom CSS for sidebar step styling
+st.sidebar.markdown("""
+    <style>
+    .workflow-step {
+        padding: 8px 12px;
+        border-radius: 6px;
+        margin-bottom: 6px;
+    }
+    .active-step {
+        background-color: #dffde9; /* light green background */
+        border-left: 5px solid #177233; /* green accent bar */
+        font-weight: 600;
+        color: #177233;
+    }
+    .inactive-step {
+        color: #555;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# Render each step with highlight + caption under the correct one
+for step in workflow_steps:
+    is_active = st.session_state.active_tab == step["tab"]
+    step_class = "active-step" if is_active else "inactive-step"
+
+    # Step title
+    st.sidebar.markdown(
+        f'<div class="workflow-step {step_class}">{step["label"]}</div>',
+        unsafe_allow_html=True
+    )
+
+    # Step caption (only for the active step), split by line
+    if is_active:
+        for line in step["caption"].split("\n"):
+            if line.strip():  # skip empty lines
+                st.sidebar.caption(line.strip())
+
+st.sidebar.markdown("---")
+st.sidebar.info("Having Trouble? Visit the FAQ page above for more information.")
+
 # Conditional Layout (acts like tabs)
 if st.session_state.active_tab == "Site Selection Map":
     # Site Selection Map View
@@ -767,12 +878,12 @@ if st.session_state.active_tab == "Site Selection Map":
         # Only show the "Continue" button if a variant is selected
         if st.session_state.get("selected_variant"):
             if st.button(
-                "➡️ Planting Scenario",
+                "➡️ Planting Design",
                 use_container_width=True,
                 help=H("site.button_forward_to_planting"),
                 type='primary'
             ):
-                st.session_state.active_tab = "Planting Scenario"
+                st.session_state.active_tab = "Planting Design"
                 st.rerun()
         else:
             st.empty()
@@ -808,11 +919,11 @@ if st.session_state.active_tab == "Site Selection Map":
     display_selected_info()
 
 else:
-    # Planting Scenario View
+    # Planting Design View
     col1, col2 = st.columns([8, 3])  # adjust ratio as needed
 
     with col1:
-        st.title("🌲 Planting Scenario", anchor=None, help=H("planting.title"))
+        st.title("🌲 Planting Design", anchor=None, help=H("planting.title"))
 
     with col2:
         if st.button("⬅️ Site Selection", use_container_width=True, help=H("planting.button_back_to_site"), type='primary'):
