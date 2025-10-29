@@ -5,8 +5,10 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "aiocache>=0.12.3",
     "altair>=5.5.0",
     "earthengine-api>=1.6.4",
+    "fastapi>=0.119.1",
     "folium>=0.20.0",
     "geemap>=0.36.1",
     "geopandas>=1.1.1",
