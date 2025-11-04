@@ -19,3 +19,11 @@ data/*
 
 #temp files
 tmp/*
+
+# reports
+reports/*
+!reports/.gitkeep
+
+# quarto/data
+quarto/data/*
+!quarto/data/.gitkeep
