@@ -27,8 +27,8 @@ all: $(FINAL_GEOJSON)
 $(FINAL_GEOJSON): scripts/downloadFile.py scripts/convertGeoJSON.py $(SUPPORTED_VARIANT_LOCS)
 	@echo "==> Preparing $@"
 	@mkdir -p $(dir $@) $(SHPDIR)
-	python3 scripts/downloadFile.py $(URL) $(ZIP) $(SHP)
-	python3 scripts/convertGeoJSON.py --input $(SHP) --output $(FINAL_GEOJSON) --variant-loc-yaml $(SUPPORTED_VARIANT_LOCS)
+	uv run python scripts/downloadFile.py $(URL) $(ZIP) $(SHP)
+	uv run python scripts/convertGeoJSON.py --input $(SHP) --output $(FINAL_GEOJSON) --variant-loc-yaml $(SUPPORTED_VARIANT_LOCS)
 	@echo "==> Cleaning intermediates"
 	@rm -rf $(MAKE_TMP)
 	@echo "==> Done. Kept: $(SUPPORTED_VARIANT_LOCS)"
