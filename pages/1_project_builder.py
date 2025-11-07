@@ -14,6 +14,8 @@ import numpy_financial as npf
 from shapely.geometry import shape, Point
 from shapely.geometry import shape, box
 from geopy.geocoders import Nominatim
+import tempfile
+import zipfile
 
 # -----------------------------
 # Functions
@@ -39,7 +41,7 @@ def H(key: str) -> str:
 
 # ---------- Site Selection Map ----------
 @st.fragment
-def load_geojson_fragment(simplified_geojson_path, shapefile_path, tolerance_deg=0.001, skip_keys={"Shape_Area", "Shape_Leng"}, max_tooltip_fields=3):
+def load_geojson_fragment(simplified_geojson_path, shapefile_path, tolerance_deg=0.001, skip_keys={"Shape_Area", "Shape_Leng"}, max_tooltip_fields=4):
     """
     Loads a GeoJSON (or simplifies a shapefile if GeoJSON doesn't exist),
     returns the geojson string and filtered tooltip fields.
@@ -78,27 +80,89 @@ def load_geojson_fragment(simplified_geojson_path, shapefile_path, tolerance_deg
     return geojson_str, tooltip_fields
 
 @st.cache_data
+# def load_geojson_or_shapefile(uploaded_files, tolerance_deg=0.001,
+#                               skip_keys={"Shape_Area", "Shape_Leng"}, max_tooltip_fields=3):
+#     geojson_file = next((f for f in uploaded_files if f.name.endswith(".geojson")), None)
+#     if geojson_file:
+#         geojson_str = geojson_file.getvalue().decode("utf-8")
+#     else:
+#         with tempfile.TemporaryDirectory() as tmpdir:
+#             for f in uploaded_files:
+#                 with open(os.path.join(tmpdir, f.name), "wb") as out:
+#                     out.write(f.getbuffer())
+#             shp_files = [os.path.join(tmpdir, f) for f in os.listdir(tmpdir) if f.endswith(".shp")]
+#             if not shp_files:
+#                 st.error("No .shp file found among uploaded files.")
+#                 return None, None
+#             shp_path = shp_files[0]
+#             gdf = gpd.read_file(shp_path)
+#             gdf["geometry"] = gdf.geometry.simplify(tolerance_deg, preserve_topology=True)
+#             keep = [c for c in ["FVSVariant", "FVSVarName", "FVSLocName"] if c in gdf.columns]
+#             gdf = gdf[keep + ["geometry"]] if keep else gdf[["geometry"]]
+#             geojson_str = gdf.to_json(na="drop")
+
+#     try:
+#         feat0_props = json.loads(geojson_str)["features"][0]["properties"]
+#         tooltip_fields = [k for k in feat0_props.keys() if k not in skip_keys][:max_tooltip_fields]
+#     except Exception:
+#         tooltip_fields = None
+
+#     return geojson_str, tooltip_fields
+
 def load_geojson_or_shapefile(uploaded_files, tolerance_deg=0.001,
                               skip_keys={"Shape_Area", "Shape_Leng"}, max_tooltip_fields=3):
-    geojson_file = next((f for f in uploaded_files if f.name.endswith(".geojson")), None)
+    """Load either a GeoJSON or Shapefile, supporting both Streamlit UploadedFile objects and file paths."""
+    
+    # Normalize input: if single file, wrap in list
+    if isinstance(uploaded_files, (str, bytes)):
+        uploaded_files = [uploaded_files]
+    
+    # Try to detect a GeoJSON file (either UploadedFile or path)
+    geojson_file = next(
+        (f for f in uploaded_files 
+         if (hasattr(f, "name") and f.name.lower().endswith(".geojson")) 
+         or (isinstance(f, str) and f.lower().endswith(".geojson"))),
+        None
+    )
+    
     if geojson_file:
-        geojson_str = geojson_file.getvalue().decode("utf-8")
+        if isinstance(geojson_file, str):
+            # Local path
+            with open(geojson_file, "r", encoding="utf-8") as f:
+                geojson_str = f.read()
+        else:
+            # UploadedFile object
+            geojson_str = geojson_file.getvalue().decode("utf-8")
+
     else:
+        # Handle shapefiles (UploadedFile objects or file paths)
         with tempfile.TemporaryDirectory() as tmpdir:
             for f in uploaded_files:
-                with open(os.path.join(tmpdir, f.name), "wb") as out:
-                    out.write(f.getbuffer())
-            shp_files = [os.path.join(tmpdir, f) for f in os.listdir(tmpdir) if f.endswith(".shp")]
+                if isinstance(f, str):
+                    # Copy from local path
+                    fname = os.path.basename(f)
+                    with open(os.path.join(tmpdir, fname), "wb") as out:
+                        out.write(open(f, "rb").read())
+                else:
+                    # Copy from UploadedFile
+                    with open(os.path.join(tmpdir, f.name), "wb") as out:
+                        out.write(f.getbuffer())
+            
+            # Find shapefile inside tempdir
+            shp_files = [os.path.join(tmpdir, f) for f in os.listdir(tmpdir) if f.lower().endswith(".shp")]
             if not shp_files:
                 st.error("No .shp file found among uploaded files.")
                 return None, None
+
             shp_path = shp_files[0]
             gdf = gpd.read_file(shp_path)
             gdf["geometry"] = gdf.geometry.simplify(tolerance_deg, preserve_topology=True)
+
             keep = [c for c in ["FVSVariant", "FVSVarName", "FVSLocName"] if c in gdf.columns]
             gdf = gdf[keep + ["geometry"]] if keep else gdf[["geometry"]]
             geojson_str = gdf.to_json(na="drop")
 
+    # Extract tooltip fields
     try:
         feat0_props = json.loads(geojson_str)["features"][0]["properties"]
         tooltip_fields = [k for k in feat0_props.keys() if k not in skip_keys][:max_tooltip_fields]
@@ -108,61 +172,6 @@ def load_geojson_or_shapefile(uploaded_files, tolerance_deg=0.001,
     return geojson_str, tooltip_fields
 
 @st.fragment
-# def build_map(geojson_str, points = None, upload = None, center=(37.8, -96.9), zoom=5, tooltip_fields=None, highlight_feature=None):
-#     if points:
-#         last_point = points[-1]
-#         center = (last_point.y, last_point.x)
-#         zoom = 12
-#     elif center is None:
-#         if geojson_str:
-#             try:
-#                 gjson = json.loads(geojson_str)
-#                 feat0 = gjson["features"][0]["geometry"]["coordinates"]
-#                 if isinstance(feat0[0], list):
-#                     center = (feat0[0][0][1], feat0[0][0][0])
-#                 else:
-#                     center = (feat0[1], feat0[0])
-#             except Exception:
-#                 center = (37.8, -96.9)
-#         else:
-#             center = (37.8, -96.9)
-
-#     m = folium.Map(location=center, zoom_start=zoom, tiles="CartoDB positron")
-
-#     if geojson_str:
-#         # Base layer
-#         gj = folium.GeoJson(
-#             data=geojson_str,
-#             name="FVS Variants",
-#             style_function=lambda x: {"fillColor": "blue", "color": "black", "weight": 1, "fillOpacity": 0.3},
-#             highlight_function=lambda x: {"fillColor": "yellow", "color": "red", "weight": 2, "fillOpacity": 0.6},
-#         )
-#         if tooltip_fields:
-#             gj.add_child(folium.GeoJsonTooltip(fields=tooltip_fields, aliases=tooltip_fields, sticky=True))
-#         gj.add_to(m)
-
-#     # Highlight only the last clicked feature
-#     if highlight_feature:
-#         folium.GeoJson(
-#             highlight_feature["geometry"],
-#             name="Selected Boundary",
-#             style_function=lambda x: {"fillColor": "yellow", "color": "red", "weight": 3, "fillOpacity": 0.2},
-#         ).add_to(m)
-
-#     if upload:
-#         folium.GeoJson(
-#             data=upload,
-#             name="Uploaded File",
-#             style_function=lambda x: {"fillColor": "yellow", "color": "red", "weight": 3, "fillOpacity": 0.2},
-#         ).add_to(m)
-
-#     if points:
-#         for pt in points:
-#             folium.Marker(location=[pt.y, pt.x], icon=folium.Icon(color="red")).add_to(m)
-
-#     folium.LayerControl(collapsed=True).add_to(m)
-#     return m
-
 def build_map(
     geojson_str,
     points=None,
@@ -172,26 +181,61 @@ def build_map(
     tooltip_fields=None,
     highlight_feature=None
 ):
-    # Determine map center
-    if points:
+    # Determine map center based on last added
+    last_center = None
+    last_zoom = 5
+
+    last_type = st.session_state.get("last_added_type", None)
+
+    if last_type == "upload" and upload:
+        # Center on uploaded geometry
+        try:
+            if isinstance(upload, str):
+                upload_json = json.loads(upload)
+            else:
+                upload_json = upload
+
+            # Compute bounds
+            upload_bounds = None
+            for feat in upload_json["features"]:
+                geom = shape(feat["geometry"])
+                if upload_bounds is None:
+                    upload_bounds = geom.bounds
+                else:
+                    minx, miny, maxx, maxy = upload_bounds
+                    ux_min, uy_min, ux_max, uy_max = geom.bounds
+                    upload_bounds = (
+                        min(minx, ux_min), min(miny, uy_min),
+                        max(maxx, ux_max), max(maxy, uy_max)
+                    )
+            minx, miny, maxx, maxy = upload_bounds
+            last_center = ((miny + maxy) / 2, (minx + maxx) / 2)
+            last_zoom = 10
+        except Exception:
+            pass
+
+    elif last_type == "point" and points:
+        # Center on last clicked point
         last_point = points[-1]
-        center = (last_point.y, last_point.x)
-        zoom = 12
-    elif center is None:
+        last_center = (last_point.y, last_point.x)
+        last_zoom = 12
+
+    # Fallbacks
+    if last_center is None:
         if geojson_str:
             try:
                 gjson = json.loads(geojson_str)
                 feat0 = gjson["features"][0]["geometry"]["coordinates"]
                 if isinstance(feat0[0], list):
-                    center = (feat0[0][0][1], feat0[0][0][0])
+                    last_center = (feat0[0][0][1], feat0[0][0][0])
                 else:
-                    center = (feat0[1], feat0[0])
+                    last_center = (feat0[1], feat0[0])
             except Exception:
-                center = (37.8, -96.9)
+                last_center = (37.8, -96.9)
         else:
-            center = (37.8, -96.9)
+            last_center = (37.8, -96.9)
 
-    m = folium.Map(location=center, zoom_start=zoom, tiles="CartoDB positron")
+    m = folium.Map(location=last_center, zoom_start=last_zoom, tiles="CartoDB positron")
 
     filtered_geojson = geojson_str
 
@@ -268,7 +312,7 @@ def build_map(
         folium.GeoJson(
             data=upload,
             name="Uploaded File",
-            style_function=lambda x: {"fillColor": "yellow", "color": "red", "weight": 3, "fillOpacity": 0.2},
+            style_function=lambda x: {"fillColor": "green", "color": "black", "weight": 1, "fillOpacity": 0.3},
         ).add_to(m)
 
     # Add points
@@ -317,19 +361,19 @@ def display_selected_info():
     if "clicked_props" in st.session_state:
         props = st.session_state["clicked_props"]
 
-        st.subheader("Selected Feature Info", anchor=None, help=H("site.subheader_selected_feature_info"), divider=False, width="stretch")
+        # st.subheader("Selected Feature Info", anchor=None, help=H("site.subheader_selected_feature_info"), divider=False, width="stretch")
         pretty_names = {
-            "FVSLocCode": "FVS Location Code",
-            "FVSLocName": "FVS Location Name",
-            "FVSVarName": "FVS Variant Name",
+            # "FVSLocCode": "FVS Location Code",
+            # "FVSLocName": "FVS Location Name",
+            # "FVSVarName": "FVS Variant Name",
             "FVSVariant": "FVS Variant",
         }
-        skip_keys = {"Shape_Area", "Shape_Leng", 'FVSVariantLoc'}
+        skip_keys = {"Shape_Area", "Shape_Leng", 'FVSVariantLoc', 'FVSLocCode', 'FVSLocName', 'FVSVarName'}
 
         for key, value in props.items():
             if key not in skip_keys:
                 display_key = pretty_names.get(key, key)
-                st.markdown(f"**{display_key}:** {value}")
+                st.success(f"Successfully selected **{display_key}:** {value}")
 
 @st.fragment
 def submit_map(map_data):
@@ -1098,7 +1142,12 @@ if st.session_state.active_tab == "Site Selection Map":
         go_address_button = st.button("Go to Address")
 
     if add_point_button:
-        st.session_state.points.append(Point(lon, lat))
+        new_pt = Point(lon, lat)
+        st.session_state.points.append(new_pt)
+
+        # Track this as the last added type
+        st.session_state["last_added_type"] = "point"
+        st.session_state["last_point"] = new_pt
 
     # Geocode address if button pressed
     if go_address_button:
@@ -1107,7 +1156,12 @@ if st.session_state.active_tab == "Site Selection Map":
             geolocator = Nominatim(user_agent="streamlit_map_app")
             location = geolocator.geocode(full_address)
             if location:
-                st.session_state.points.append(Point(location.longitude, location.latitude))
+                new_pt = Point(location.longitude, location.latitude)
+                st.session_state.points.append(new_pt)
+
+                # Track last added
+                st.session_state["last_added_type"] = "point"
+                st.session_state["last_point"] = new_pt
             else:
                 st.error("Address not found.")
         else:
@@ -1115,22 +1169,63 @@ if st.session_state.active_tab == "Site Selection Map":
 
     with st.expander(label="Upload GeoJSON/Shapefile", expanded=False):
         uploaded_files = st.file_uploader(
-            "Upload GeoJSON or all shapefile components (.shp, .shx, .dbf, .prj, etc.)",
+            "Upload GeoJSON or all shapefile components seperatly (.shp, .shx, .dbf, .prj, .cpg) or zipped (.zip)",
             accept_multiple_files=True,
-            type=["geojson", "shp", "shx", "dbf", "prj", "cpg"],
+            type=["geojson", "shp", "shx", "dbf", "prj", "cpg", "zip"],
             width = 600
         )
 
         upload_button = st.button("Upload file to map")
+        reset_button = st.button("Reset file uploads")
 
     if upload_button:
-        st.session_state.upload_file = uploaded_files
+        for key in ["upload_file", "uploaded_geojson_str", "uploaded_tooltip_fields"]:
+            if key in st.session_state:
+                del st.session_state[key]
 
+        if uploaded_files:
+            if len(uploaded_files) == 1 and uploaded_files[0].name.lower().endswith(".zip"):
+                st.write("ZIP file detected!")
+                uploaded_file = uploaded_files[0]
+
+                # Create a temp directory outside the "with" block so it persists
+                tmpdir = tempfile.mkdtemp()
+
+                # Save the uploaded ZIP
+                zip_path = os.path.join(tmpdir, uploaded_file.name)
+                with open(zip_path, "wb") as f:
+                    f.write(uploaded_file.getbuffer())
+
+                # Extract in place
+                with zipfile.ZipFile(zip_path, "r") as zip_ref:
+                    zip_ref.extractall(tmpdir)
+
+                # Find shapefile or geojson inside
+                extracted_files = os.listdir(tmpdir)
+                print("Extracted files:", extracted_files)
+
+                # Build full paths
+                extracted_full_paths = [os.path.join(tmpdir, f) for f in extracted_files]
+
+                # Find the shapefile or geojson
+                target = next((f for f in extracted_full_paths if f.lower().endswith((".shp", ".geojson"))), None)
+                if target:
+                    st.session_state.upload_file = [target]  # Wrap in list to match function signature
+                else:
+                    st.error("No .shp or .geojson file found inside ZIP.")
+            else:
+                st.write("Not a ZIP file or multiple files uploaded.")
+                st.session_state.upload_file = uploaded_files
+        
     uploaded_geojson_str, uploaded_tooltip_fields = None, None
     if st.session_state.upload_file:
         uploaded_geojson_str, uploaded_tooltip_fields = load_geojson_or_shapefile(
             st.session_state.upload_file
         )
+
+        # Track last added
+        st.session_state["last_added_type"] = "upload"
+        st.session_state["last_upload"] = uploaded_geojson_str
 
     st.subheader(
         "Select FVS Variant",
@@ -1167,6 +1262,13 @@ if st.session_state.active_tab == "Site Selection Map":
     show_clicked_variant(map_data)
     display_selected_info()
 
+    if reset_button:
+        # Remove from session state
+        for key in ["upload_file", "uploaded_geojson_str", "uploaded_tooltip_fields"]:
+            if key in st.session_state:
+                del st.session_state[key]
+        
+        st.rerun()
 else:
     # Planting Design View
     col1, col2 = st.columns([8, 3])  # adjust ratio as needed
