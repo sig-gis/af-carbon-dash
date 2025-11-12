@@ -88,7 +88,7 @@ st.set_page_config(layout="wide", page_title="Dynamic COG Viewer")
 st.sidebar.header("🛰️ COG Layer Controls")
 
 # Year selector (only part being varied)
-utm = st.sidebar.selectbox("Select UTM", [36, 37, 38], index=2)
+utm = st.sidebar.selectbox("Select UTM", [36], index=0)
 add_layer = st.sidebar.button("Add Sentinel-2 Layer")
 
 # -------------------------------
@@ -136,87 +136,87 @@ if add_layer:
         st.session_state.map.location = [center_lat, center_lon]
         st.session_state.map.zoom_start = 10
 
-        legend_template_cat = """
-            {% macro html(this, kwargs) %}
-            <div id='maplegend_cat' class='maplegend' 
-                style='position: absolute; z-index: 9999; background-color: rgba(255, 255, 255, 0.5);
-                border-radius: 6px; padding: 10px; font-size: 10.5px; right: 20px; top: 20px;'>     
-            <div class='legend-scale'>
-            <ul class='legend-labels'>
-                <li><span style='background: green; opacity: 0.75;'></span>Wind speed <= 55.21</li>
-                <li><span style='background: yellow; opacity: 0.75;'></span>55.65 <= Wind speed <= 64.29</li>
-                <li><span style='background: orange; opacity: 0.75;'></span>64.50 <= Wind speed <= 75.76</li>
-                <li><span style='background: red; opacity: 0.75;'></span>75.90 <= Wind speed <= 90.56</li>
-                <li><span style='background: purple; opacity: 0.75;'></span>Wind speed >= 91.07</li>
-            </ul>
-            </div>
-            </div> 
-            <style type='text/css'>
-            .maplegend .legend-scale ul {margin: 0; padding: 0; color: #0f0f0f;}
-            .maplegend .legend-scale ul li {list-style: none; line-height: 18px; margin-bottom: 1.5px;}
-            .maplegend ul.legend-labels li span {float: left; height: 16px; width: 16px; margin-right: 4.5px;}
-            </style>
-            {% endmacro %}
-            """
+        # legend_template_cat = """
+        #     {% macro html(this, kwargs) %}
+        #     <div id='maplegend_cat' class='maplegend' 
+        #         style='position: absolute; z-index: 9999; background-color: rgba(255, 255, 255, 0.5);
+        #         border-radius: 6px; padding: 10px; font-size: 10.5px; right: 20px; top: 20px;'>     
+        #     <div class='legend-scale'>
+        #     <ul class='legend-labels'>
+        #         <li><span style='background: green; opacity: 0.75;'></span>Wind speed <= 55.21</li>
+        #         <li><span style='background: yellow; opacity: 0.75;'></span>55.65 <= Wind speed <= 64.29</li>
+        #         <li><span style='background: orange; opacity: 0.75;'></span>64.50 <= Wind speed <= 75.76</li>
+        #         <li><span style='background: red; opacity: 0.75;'></span>75.90 <= Wind speed <= 90.56</li>
+        #         <li><span style='background: purple; opacity: 0.75;'></span>Wind speed >= 91.07</li>
+        #     </ul>
+        #     </div>
+        #     </div> 
+        #     <style type='text/css'>
+        #     .maplegend .legend-scale ul {margin: 0; padding: 0; color: #0f0f0f;}
+        #     .maplegend .legend-scale ul li {list-style: none; line-height: 18px; margin-bottom: 1.5px;}
+        #     .maplegend ul.legend-labels li span {float: left; height: 16px; width: 16px; margin-right: 4.5px;}
+        #     </style>
+        #     {% endmacro %}
+        #     """
         
-        legend_template_con = """
-            {% macro html(this, kwargs) %}
-            <div id='maplegend-con' class='maplegend'
-                style='position: absolute; z-index:9999; background-color: rgba(255,255,255,0.7);
-                border-radius:6px; padding:5px; font-size:10.5px; right:20px; top:140px;'>     
+        # legend_template_con = """
+        #     {% macro html(this, kwargs) %}
+        #     <div id='maplegend-con' class='maplegend'
+        #         style='position: absolute; z-index:9999; background-color: rgba(255,255,255,0.7);
+        #         border-radius:6px; padding:5px; font-size:10.5px; right:20px; top:140px;'>     
 
-            <div class='legend-title'>Wind Speed (m/s)</div>
+        #     <div class='legend-title'>Wind Speed (m/s)</div>
 
-            <!-- Legend container -->
-            <div class='legend-row'>
-            <span class='legend-min'>≤ 55</span>
-            <div class='legend-bar'></div>
-            <span class='legend-max'>90+</span>
-            </div>
+        #     <!-- Legend container -->
+        #     <div class='legend-row'>
+        #     <span class='legend-min'>≤ 55</span>
+        #     <div class='legend-bar'></div>
+        #     <span class='legend-max'>90+</span>
+        #     </div>
 
-            </div>
+        #     </div>
 
-            <style type='text/css'>
-            .maplegend .legend-title {
-                text-align: left;
-                margin-bottom: 5px;
-                font-weight: bold;
-                font-size: 11px;
-            }
+        #     <style type='text/css'>
+        #     .maplegend .legend-title {
+        #         text-align: left;
+        #         margin-bottom: 5px;
+        #         font-weight: bold;
+        #         font-size: 11px;
+        #     }
 
-            .maplegend .legend-row {
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                gap: 6px;
-            }
+        #     .maplegend .legend-row {
+        #         display: flex;
+        #         align-items: center;
+        #         justify-content: center;
+        #         gap: 6px;
+        #     }
 
-            .maplegend .legend-bar {
-                height: 12px;
-                width: 120px;
-                background: linear-gradient(to right, green, yellow, orange, red, purple);
-                border-radius: 3px;
-            }
+        #     .maplegend .legend-bar {
+        #         height: 12px;
+        #         width: 120px;
+        #         background: linear-gradient(to right, green, yellow, orange, red, purple);
+        #         border-radius: 3px;
+        #     }
 
-            .maplegend .legend-min,
-            .maplegend .legend-max {
-                font-size: 10px;
-                color: #0f0f0f;
-                min-width: 25px;
-                text-align: center;
-            }
-            </style>
-            {% endmacro %}
-            """
+        #     .maplegend .legend-min,
+        #     .maplegend .legend-max {
+        #         font-size: 10px;
+        #         color: #0f0f0f;
+        #         min-width: 25px;
+        #         text-align: center;
+        #     }
+        #     </style>
+        #     {% endmacro %}
+        #     """
 
-        macro_cat = MacroElement()
-        macro_cat._template = Template(legend_template_cat)
+        # macro_cat = MacroElement()
+        # macro_cat._template = Template(legend_template_cat)
 
-        macro_con = MacroElement()
-        macro_con._template = Template(legend_template_con)
+        # macro_con = MacroElement()
+        # macro_con._template = Template(legend_template_con)
 
-        st.session_state.map.get_root().add_child(macro_cat)
-        st.session_state.map.get_root().add_child(macro_con)
+        # st.session_state.map.get_root().add_child(macro_cat)
+        # st.session_state.map.get_root().add_child(macro_con)
 # -------------------------------
 # Display the map
 # -------------------------------
