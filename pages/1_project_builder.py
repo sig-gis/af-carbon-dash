@@ -274,18 +274,30 @@ def build_map(
             if not filtered_features:
                 # No intersection: show full geojson and display a warning
                 st.warning(
-                    "Uploaded shapefile boundaries do not intersect any of the FVS variants. Showing full dataset."
+                    "Uploaded file geometry does not intersect any of the currently supported FVS variants."
                 )
                 filtered_geojson = geojson_str
             else:
                 filtered_geojson = json.dumps({"type": "FeatureCollection", "features": filtered_features})
                 st.success(
-                    f"Uploaded shapefile successfully filtered {len(filtered_features)} FVS variant(s) within bounds."
+                    f"{len(filtered_features)} FVS variant(s) within bounds of uploaded geometry."
+                )
+                st.success(
+                    f"Select the FVS variant that is best suited for your project and continue to the Planting Design."
                 )
 
         except Exception as e:
-            st.warning(f"Error filtering GeoJSON: {e}. Showing full dataset.")
+            st.warning(f"Error: {e}.")
+            st.warning(f"Showing currently supported FVS variants.")
             filtered_geojson = geojson_str
+
+    # Add uploaded file
+    if upload:
+        folium.GeoJson(
+            data=upload,
+            name="Uploaded File",
+            style_function=lambda x: {"fillColor": "green", "color": "black", "weight": 1, "fillOpacity": 0.3},
+        ).add_to(m)
 
     # Add filtered base layer
     if filtered_geojson:
@@ -305,14 +317,6 @@ def build_map(
             highlight_feature["geometry"],
             name="Selected Boundary",
             style_function=lambda x: {"fillColor": "yellow", "color": "red", "weight": 3, "fillOpacity": 0.2},
-        ).add_to(m)
-
-    # Add uploaded file
-    if upload:
-        folium.GeoJson(
-            data=upload,
-            name="Uploaded File",
-            style_function=lambda x: {"fillColor": "green", "color": "black", "weight": 1, "fillOpacity": 0.3},
         ).add_to(m)
 
     # Add points
@@ -374,6 +378,7 @@ def display_selected_info():
             if key not in skip_keys:
                 display_key = pretty_names.get(key, key)
                 st.success(f"Successfully selected **{display_key}:** {value}")
+                # st.success(f"Please continue to Planting Design, or select a different variant.")
 
 @st.fragment
 def submit_map(map_data):
@@ -632,7 +637,7 @@ def carbon_chart():
 # ---------- Carbon Units ----------
 def carbon_units():
     if "carbon_df" not in st.session_state:
-            st.error("No carbon data found. Please adjust sliders first.")
+            st.error("No carbon data found. Adjust sliders first.")
             st.stop()
 
     df = st.session_state.carbon_df.copy()
@@ -866,7 +871,7 @@ def _compute_proforma(df_ert_ac: pd.DataFrame, p: dict) -> pd.DataFrame:
 
 def credits_results(params: dict, prefix: str = "credits_") -> dict:
     if "merged_df" not in st.session_state:
-        st.error("No carbon data found. Please return to the Carbon Units Estimate section first.")
+        st.error("No carbon data found. Return to the Carbon Units Estimate section first.")
         st.stop()
 
     # Extract merged CU data per protocol
@@ -1165,7 +1170,7 @@ if st.session_state.active_tab == "Site Selection Map":
             else:
                 st.error("Address not found.")
         else:
-            st.error("Please enter at least one field for address, city, or state.")
+            st.error("Enter at least one field for address, city, or state.")
 
     with st.expander(label="Upload GeoJSON/Shapefile", expanded=False):
         uploaded_files = st.file_uploader(
