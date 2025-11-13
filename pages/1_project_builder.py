@@ -1,15 +1,19 @@
 import streamlit as st
 import json
+from collections import OrderedDict
 import pandas as pd
 import os
 import numpy as np
 import geopandas as gpd
 import folium
+import pickle
 from pathlib import Path
 from streamlit_folium import st_folium
 from scipy.interpolate import make_interp_spline
 import altair as alt
 import numpy_financial as npf
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import PolynomialFeatures
 
 # -----------------------------
 # Functions
@@ -171,11 +175,11 @@ SPECIES_LABELS = {
 @st.cache_data
 def load_variant_presets(path: str = "conf/base/FVSVariant_presets.json"):
     with open(path, "r") as f:
-        return json.load(f)
+        return json.load(f, object_pairs_hook=OrderedDict) # ensure spp order is preserved
     
 def _species_keys(preset: dict):
     # any key that starts with tpa_ is treated as a species slider
-    return [k for k in preset.keys() if k.startswith("tpa_")]
+    return tuple(k for k in preset.keys() if k.startswith("tpa_")) # ensure spp order is preserved
 
 def _label_for(key: str) -> str:
     return SPECIES_LABELS.get(key, key.replace("tpa_", "TPA_").upper())
@@ -296,6 +300,32 @@ def _restore_backup(keys, backup_name: str = "_planting_backup"):
 
 
 # ---------- Planting Design ----------
+def build_input_vector(survival: int, total_tpa: int, sp1: int, sp2: int, sp3: int, sp4: int, si: int) -> np.ndarray:
+    """
+    Expected species order for supported variants:
+    - PN: DF, WH, RC, SS
+    - EC: PP, DF, WL, PM
+    """
+    arr = np.array([[float(survival), float(total_tpa), float(sp1), float(sp2), float(sp3), float(sp4), float(si)]], dtype=float)
+    return arr
+def pick_fvs_models(base, variant, loccode) -> str:
+    """
+    Pick the right models to load based on user-selected Variant and loc code. 
+
+    Returns: (str) path to the model to load
+    """
+    return f"{base}/{variant}_v3_{loccode}_models.pkl"
+
+def load_fvs_models(path) -> dict:
+    """
+    Load the models from the path determined in pick_fvs_modes. 
+
+    Returns: (dict) models for correct variant-location with keys: (year, variable)
+    """
+    with open(path, 'rb') as f: 
+        models = pickle.load(f)
+    return models
+
 def planting_sliders():
     presets = load_variant_presets()
     variant = st.session_state.get("selected_variant", "PN")
@@ -307,6 +337,7 @@ def planting_sliders():
     st.markdown(f"**FVS Variant:** {variant}", unsafe_allow_html=False, help=H("planting.variant_label"), width="stretch")
 
     species_keys = _species_keys(preset)
+    st.session_state["species_keys"] = species_keys
     
     # restore any missing keys from previous interaction with page (in case widgets were unmounted on the other page)
     _restore_backup(["survival", "si", "net_acres", *species_keys])
@@ -343,6 +374,16 @@ def planting_sliders():
     _backup_keys(["survival", "si", "net_acres", *species_keys])
 
 def carbon_chart():
+    """
+    Predict carbon and FVS outputs from regression models based on user planting scenario inputs. 
+
+    Parameters: 
+    -----------
+    models: dict
+        dictionary of models with (year, variable) tuples as keys
+
+    """
+
     # Ensure the sliders have been set
     if not all(k in st.session_state for k in ["tpa_df", "tpa_rc", "tpa_wh", "survival", "si", "net_acres"]):
         st.info("Adjust Planting Design sliders to see the carbon output.")
@@ -372,10 +413,54 @@ def carbon_chart():
         c_scores.append(c_score)
         ann_c_scores.append(ann_c_score)
         years.append(int(year))
-    
     year_0 = pd.DataFrame({"Year": [2024], "C_Score": [0], "Annual_C_Score": [0]})
     df = pd.DataFrame({"Year": years, "C_Score": c_scores, "Annual_C_Score": ann_c_scores})
     df = pd.concat([year_0, df])
+    st.session_state.carbon_df_coefs = df
+
+    
+    # calculate total_tpa
+    if "species_keys" in st.session_state:
+        species_keys = st.session_state["species_keys"]
+    else:
+        presets = load_variant_presets()
+        variant = st.session_state.get("selected_variant", "PN")
+        if variant not in presets:
+            st.warning(f"Variant '{variant}' not found in presets. Falling back to 'PN'.")
+        preset = presets.get(variant, presets.get("PN", {}))
+        species_keys = _species_keys(preset)
+    total_tpa = sum(int(st.session_state.get(k, 0)) for k in species_keys)
+    
+    # load fvs models
+    models_path = pick_fvs_models(base='data/',
+                                             variant=st.session_state.get("selected_variant", "PN"),
+                                             loccode=st.session_state.get("FVSLocCode"))
+    models = load_fvs_models(models_path)
+
+    # create model input vector from user inputs
+    X = build_input_vector(
+        survival=st.session_state["survival"],
+        total_tpa=total_tpa,
+        sp1=st.session_state[species_keys[0]], # indexing this way works because spp order is preserved from JSON w/ tuple
+        sp2=st.session_state[species_keys[1]], # see _species_keys function
+        sp3=st.session_state[species_keys[2]],
+        sp4=st.session_state[species_keys[3]],
+        si=st.session_state["si"]
+    )
+    years, c_scores, ann_c_scores = [], [], []
+    model_years = np.sort(np.unique([int(k[0]) for k in models.keys()]))
+    poly = PolynomialFeatures(degree=3, include_bias=False)
+    for year in model_years:
+        m = models[(year, "ABLD_C")]
+        X_poly = poly.fit_transform(X)
+        c_score = max(m.predict(X_poly)[0], 0) # never less than 0
+        ann_c_score = c_score - c_scores[-1] if c_scores else c_score
+        ann_c_score = max(ann_c_score, 0) # never less than 0
+        c_scores.append(c_score)
+        ann_c_scores.append(ann_c_score)
+        years.append(int(year))
+    
+    df = pd.DataFrame({"Year": years, "C_Score": c_scores, "Annual_C_Score": ann_c_scores})
     st.session_state.carbon_df = df
 
     toggle_oc = st.toggle('Show Project Acreage', True, 'toggle_oc', H("toggle.inputs.acres"))
@@ -383,7 +468,7 @@ def carbon_chart():
     chart_title = "Onsite Carbon (tons/project)" if toggle_oc else "Onsite Carbon (tons/acre)"
 
      # Determine chart data
-    plot_df = df.copy()
+    plot_df = st.session_state.carbon_df.copy()
     if toggle_oc:
         plot_df["C_Score"] = plot_df["C_Score"] * st.session_state["net_acres"]
         plot_df["Annual_C_Score"] = plot_df["Annual_C_Score"] * st.session_state["net_acres"]
@@ -403,7 +488,38 @@ def carbon_chart():
     )
 
     st.altair_chart(line, use_container_width=True)
+    st.success(f"Final Carbon Output (year 2064): {plot_df.loc[plot_df['Year']==2064, 'C_Score'].iloc[-1]:.2f}")
     st.success(f"Final Carbon Output (year {max(plot_df['Year'])}): {plot_df['C_Score'].iloc[-1]:.2f}")
+
+    # CSV download
+    debug_carbon_df = plot_df.copy().rename(
+        columns={
+        "C_Score": "ABLD_C_cumulative",
+        "Annual_C_Score": "ABLD_C_annual"
+        }).assign(
+            model=os.path.basename(models_path),
+            survival=st.session_state["survival"],
+            total_tpa=total_tpa,
+            sp1=st.session_state[species_keys[0]],
+            sp2=st.session_state[species_keys[1]], 
+            sp3=st.session_state[species_keys[2]],
+            sp4=st.session_state[species_keys[3]],
+            si=st.session_state["si"]
+        ).merge(st.session_state.carbon_df_coefs,
+                how="left"
+        ).rename(
+            columns={
+                "C_Score": "ABLD_C_cumulative_coefs",
+                "Annual_C_Score": "ABLD_C_annual_coefs"
+                }
+        )
+    st.download_button(
+        label="⬇️ Download Onsite Carbon table (CSV)",
+        data=debug_carbon_df.to_csv(index=False).encode("utf-8"),
+        file_name="onsite_carbon.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
 
 # ---------- Carbon Units ----------
 def carbon_units():
