@@ -1,0 +1,10 @@
+https://quarto.org/docs/output-formats/typst.html
+https://quarto.org/docs/authoring/brand.html
+https://posit-dev.github.io/brand-yml/
+https://www.youtube.com/watch?v=mTuhQ64P3qc
+https://www.linkedin.com/posts/claritydatastudio_datascience-rstats-parameterizedreporting-activity-7382067392237105152-Nhd4?utm_source=social_share_send&utm_medium=member_desktop_web&rcm=ACoAABFmRBMBO_3dAM8nKRaiGQRQH4rX31n6MrU
+https://cwickham.github.io/one-notebook-many-reports/#/from-one-notebook-to-many-reports-automating-with-quarto
+https://cwickham.github.io/one-notebook-many-reports/#/quarto-will-detect-_brand.yml
+https://cwickham.github.io/one-notebook-many-reports/#/consider-using-the-quarto-document-format-.qmd
+https://www.youtube.com/watch?v=ZERDZ5JtP50&t=1s
+https://github.com/cwickham/one-notebook-many-reports/tree/main

@@ -1,0 +1,40 @@
+project:
+  type: default
+  output-dir: reports
+
+execute:
+  echo: false       # hide all code
+  warning: false    # hide warnings
+  message: false    # hide messages
+  freeze: false     # always re-run notebook
+
+
+extensions:
+  - _extension.yml
+
+# # keeping the HTML format here in case we need it in future
+# format:
+#   html:
+#     theme: flatly
+#     toc: true
+#     css: styles.css
+
+  # # typst-based pdf format to be accessed through html
+  # typst-pdf:
+  #   template: templates/template.typ
+  #   typography: templates/style.typ
+  #   toc: true
+  #   page-size: a4
+  #   number-sections: true
+  #   colorlinks: true
+  #   titlepage: true
+
+
+format:
+  html:
+    theme: flatly
+    toc: true
+  typst-pdf:
+    template: typst_template.typ   
+    toc: true
+    number-sections: true
