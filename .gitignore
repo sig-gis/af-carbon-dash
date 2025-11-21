@@ -19,3 +19,9 @@ data/*
 
 #temp files
 tmp/*
+
+# _archive
+pages/_archive/*
+
+# scripts
+scripts/*
