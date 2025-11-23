@@ -58,7 +58,7 @@ def _init_carbon_units_state():
 def _backup_keys(keys, backup_name: str = "_planting_backup"):
     """
     Persist the current values for the given session-state keys to a small
-    backup dict stored under `backup_name` in `st.session_state`.
+    backup dict stored under `backup_name` in session_state.
     Helpful when Streamlit drops a widget's state when navigating back and forth between content. 
 
     Parameters

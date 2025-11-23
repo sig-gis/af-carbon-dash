@@ -108,6 +108,11 @@ def load_geojson_or_shapefile(uploaded_files, tolerance_deg=0.001,
 
 @st.fragment
 def build_map(geojson_str, points=None, upload=None, center=(37.8, -96.9), zoom=5, tooltip_fields=None, highlight_feature=None):
+    """
+    Build and return a Folium map. Determines center/zoom based on user
+    interactions, filters base GeoJSON to uploaded geometry bounds, renders
+    uploaded layers, highlights selected features, and places point markers.
+    """
     # Determine map center based on last added
     last_center = None
     last_zoom = 5
@@ -252,6 +257,10 @@ def build_map(geojson_str, points=None, upload=None, center=(37.8, -96.9), zoom=
 
 @st.fragment
 def get_tooltip_fields(geojson_str, skip_keys={"Shape_Area", "Shape_Leng"}, max_fields=4):
+    """
+    Extract tooltip fields from a GeoJSON string, filtering out unwanted keys
+    and limiting the number of fields displayed.
+    """
     try:
         feat0_props = json.loads(geojson_str)["features"][0]["properties"]
         # Filter out unwanted keys
@@ -283,6 +292,10 @@ def show_clicked_variant(map_data):
 
 @st.fragment
 def display_selected_info():
+    """
+    Display the selected variant's properties in the UI, filtering out internal
+    fields and formatting readable labels.
+    """
     if "clicked_props" in st.session_state:
         props = st.session_state["clicked_props"]
 
@@ -303,6 +316,10 @@ def display_selected_info():
 
 @st.fragment
 def submit_map(map_data):
+    """
+    Update session state with the variant selected from the map and store its
+    FVS variant code.
+    """
     if map_data and map_data.get("last_active_drawing"):
         clicked = map_data["last_active_drawing"].get("properties", {})
         if clicked:

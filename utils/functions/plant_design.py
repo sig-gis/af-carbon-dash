@@ -12,6 +12,10 @@ from utils.functions.statefulness import  _carbon_units_keys, _init_planting_sta
 
 @st.cache_data
 def load_variant_presets(path: str = "conf/base/FVSVariant_presets.json"):
+    """
+    Load FVS variant preset values from a JSON file and return them as a
+    dictionary. Cached by Streamlit to avoid repeated disk access.
+    """
     with open(path, "r") as f:
         return json.load(f)
 
@@ -24,6 +28,11 @@ def _credits_keys(prefix: str = "credits_") -> list[str]:
     return [prefix + k for k in defaults.keys()]
 
 def planting_sliders():
+    """
+    Render all planting-related Streamlit sliders. Restores saved state, seeds
+    defaults, renders species sliders, computes species mix values, and stores
+    all planting parameters in session state. 
+    """
     presets = load_variant_presets()
     variant = st.session_state.get("selected_variant", "PN")
 
@@ -70,6 +79,11 @@ def planting_sliders():
     _backup_keys(["survival", "si", "net_acres", *species_keys])
 
 def carbon_chart():
+    """
+    Compute cumulative and annual carbon scores using regression coefficients and
+    current planting inputs. Build a DataFrame and render an Altair time-series
+    carbon chart. Store intermediate data in session state.
+    """
     # Ensure the sliders have been set
     if not all(k in st.session_state for k in ["tpa_df", "tpa_rc", "tpa_wh", "survival", "si", "net_acres"]):
         st.info("Adjust Planting Design sliders to see the carbon output.")
@@ -131,6 +145,11 @@ def carbon_chart():
     st.success(f"Final Carbon Output (year {max(plot_df['Year'])}): {plot_df['C_Score'].iloc[-1]:.2f}")
 
 def carbon_units():
+    """
+    Convert annual carbon scores into carbon units (CUs) for each selected
+    protocol. Apply buffers, rules, and interpolation. Store results in session
+    state and render the CU chart.
+    """
     if "carbon_df" not in st.session_state:
             st.error("No carbon data found. Adjust sliders first.")
             st.stop()
@@ -246,10 +265,17 @@ def carbon_units():
 
 @st.cache_data
 def _load_proforma_defaults() -> dict:
+    """
+    Load the default proforma economic and financial parameters from conf/base/proforma_presets.json. Cached by Streamlit.
+    """
     with open("conf/base/proforma_presets.json") as f:
         return json.load(f)
 
 def _seed_defaults(prefix: str = "credits_"):
+    """
+    Seed Streamlit session state with default financial and credit parameters
+    based on proforma defaults. Only sets missing keys.
+    """
     defaults = _load_proforma_defaults()
     for k, v in defaults.items():
         st.session_state.setdefault(prefix + k, v)
@@ -358,6 +384,10 @@ def _compute_proforma(df_ert_ac: pd.DataFrame, p: dict) -> pd.DataFrame:
     return pd.concat(results, ignore_index=True)
 
 def credits_results(params: dict, prefix: str = "credits_") -> dict:
+    """
+    Execute the proforma model, summarize financial outputs, render revenue
+    charts, generate summary tables, and provide formatted CSV export.
+    """
     if "merged_df" not in st.session_state:
         st.error("No carbon data found. Return to the Carbon Units Estimate section first.")
         st.stop()
@@ -448,6 +478,10 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
 
 @st.fragment
 def run_chart():
+    """
+    Top-level workflow controller. Runs planting sliders, carbon chart, 
+    carbon unit chart, financial inputs, financial results.
+    """
     # Row 1: Planting sliders | Carbon chart
     with st.expander(label="Planting Parameters", expanded=True):
         col1, col2 = st.columns([1,2], gap="large")
