@@ -50,13 +50,13 @@ def load_geojson_fragment(simplified_geojson_path, shapefile_path, tolerance_deg
 @st.cache_data
 def load_geojson_or_shapefile(uploaded_files, tolerance_deg=0.001,
                               skip_keys={"Shape_Area", "Shape_Leng"}, max_tooltip_fields=3):
-    """Load either a GeoJSON or Shapefile, supporting both Streamlit UploadedFile objects and file paths."""
+    """Load either a GeoJSON or Shapefile, supporting both uploaded filess and file paths."""
     
     # Normalize input: if single file, wrap in list
     if isinstance(uploaded_files, (str, bytes)):
         uploaded_files = [uploaded_files]
     
-    # Try to detect a GeoJSON file (either UploadedFile or path)
+    # Try to detect a GeoJSON file (either uploaded file or path)
     geojson_file = next(
         (f for f in uploaded_files 
          if (hasattr(f, "name") and f.name.lower().endswith(".geojson")) 
@@ -72,7 +72,7 @@ def load_geojson_or_shapefile(uploaded_files, tolerance_deg=0.001,
             geojson_str = geojson_file.getvalue().decode("utf-8")
 
     else:
-        # Handle shapefiles (UploadedFile objects or file paths)
+        # Handle shapefiles (uploaded file or file paths)
         with tempfile.TemporaryDirectory() as tmpdir:
             for f in uploaded_files:
                 if isinstance(f, str):

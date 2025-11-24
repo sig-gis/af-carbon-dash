@@ -4,14 +4,13 @@ from utils.functions.helper import _species_keys
 
 def _planting_keys():
     """
-    Return list of planting session state keys
+    Return list of planting session state keys.
     """
     return [k for k in list(st.session_state.keys()) if k.startswith("tpa_") or k in ("survival", "si", "net_acres")]
 
 def _carbon_units_keys() -> list[str]:
     """
     Return the set of session-state keys that should persist for the Carbon Units section.
-    We keep this intentionally small to avoid backing up large result dataframes.
     """
     return ["carbon_units_protocols", "carbon_units_inputs"]
 
@@ -22,18 +21,18 @@ def _init_planting_state(variant: str, preset: dict):
     """
     last_variant = st.session_state.get("_last_variant")
     if last_variant == variant:
-        return  # nothing to do — don't reset user inputs
+        return 
 
     for k in _planting_keys():
         st.session_state.pop(k, None)
 
-    # Seed base defaults if missing
+    # Base defaults if missing
     st.session_state["survival"] = preset.get("survival", st.session_state.get("survival", 70))
     st.session_state["si"]       = preset.get("si",       st.session_state.get("si", 120))
     # net_acres input in planting params for organization (top of page), but not in FVSVariant_presets.json
     st.session_state["net_acres"] = st.session_state.get("net_acres", 10000)
 
-    # Seed species defaults if missing
+    # Species defaults if missing
     for spk in _species_keys(preset):
         st.session_state.setdefault(spk, int(preset.get(spk, 0)))
 
@@ -42,16 +41,16 @@ def _init_planting_state(variant: str, preset: dict):
 def _init_carbon_units_state():
     """
     Initialize Carbon Units inputs ONLY if missing.
-    Does NOT overwrite existing user selections.
+    Does not overwrite existing user selections.
     """
-    # canonical default protocols
+    # default protocols
     default_protocols = ["ACR/CAR/VERRA"]
 
-    # initialize the mapping dict used downstream
+    # initialize the mapping dict
     if "carbon_units_inputs" not in st.session_state:
         st.session_state["carbon_units_inputs"] = {"protocols": default_protocols}
 
-    # ensure the widget-backed list key exists as well
+    # ensure the widget-backed list key exists
     if "carbon_units_protocols" not in st.session_state:
         st.session_state["carbon_units_protocols"] = st.session_state["carbon_units_inputs"].get("protocols", default_protocols)
 
@@ -76,7 +75,7 @@ def _backup_keys(keys, backup_name: str = "_planting_backup"):
     backup = {}
     for k in keys:
         if k in st.session_state:
-            # Cast to int for sliders; adapt if you have non-int widgets
+            # Cast to int for sliders
             val = st.session_state[k]
             backup[k] = int(val) if isinstance(val, (int, float, str)) and str(val).isdigit() else val
     st.session_state[backup_name] = backup

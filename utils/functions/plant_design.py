@@ -22,15 +22,14 @@ def load_variant_presets(path: str = "conf/base/FVSVariant_presets.json"):
 def _credits_keys(prefix: str = "credits_") -> list[str]:
     """
     Return all proforma input keys (prefixed) that should persist for the Credits section.
-    Uses the JSON defaults as the source of truth for which keys exist.
+    Uses the JSON defaults as the source for which keys exist.
     """
     defaults = _load_proforma_defaults()
     return [prefix + k for k in defaults.keys()]
 
 def planting_sliders():
     """
-    Render all planting-related Streamlit sliders. Restores saved state, seeds
-    defaults, renders species sliders, computes species mix values, and stores
+    Render all planting-related Streamlit sliders. Restores saved state, renders species sliders, computes species mix values, and stores
     all planting parameters in session state. 
     """
     presets = load_variant_presets()
@@ -266,7 +265,7 @@ def carbon_units():
 @st.cache_data
 def _load_proforma_defaults() -> dict:
     """
-    Load the default proforma economic and financial parameters from conf/base/proforma_presets.json. Cached by Streamlit.
+    Load the default proforma economic and financial parameters from conf/base/proforma_presets.json.
     """
     with open("conf/base/proforma_presets.json") as f:
         return json.load(f)
@@ -282,7 +281,7 @@ def _seed_defaults(prefix: str = "credits_"):
 
 def credits_inputs(prefix: str = "credits_") -> dict:
     """
-    Render Proforma inputs in the current container and return a dict of typed values.
+    Render Proforma inputs in the current container and return a dictionary of typed values.
     """
     # restore backup so users keep their previous values after navigation
     _restore_backup(_credits_keys(prefix), backup_name="_credits_backup")
@@ -480,7 +479,7 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
 def run_chart():
     """
     Top-level workflow controller. Runs planting sliders, carbon chart, 
-    carbon unit chart, financial inputs, financial results.
+    carbon unit chart, financial inputs, and financial results.
     """
     # Row 1: Planting sliders | Carbon chart
     with st.expander(label="Planting Parameters", expanded=True):

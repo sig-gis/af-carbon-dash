@@ -15,7 +15,7 @@ from utils.functions.helper import  H
 from utils.functions.site_select import load_geojson_fragment, load_geojson_or_shapefile, build_map, show_clicked_variant, display_selected_info
 from utils.functions.plant_design import run_chart
 
-# Page Config
+# Page Configuration
 st.set_page_config(layout="wide", page_title="Project Builder", page_icon="🌲")
 
 # Initialize Session State 
@@ -53,7 +53,7 @@ st.sidebar.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Render each step with highlight + caption under the correct one
+# Render each step with highlight plus caption under the correct one
 for step in workflow_steps:
     is_active = st.session_state.active_tab == step["tab"]
     step_class = "active-step" if is_active else "inactive-step"

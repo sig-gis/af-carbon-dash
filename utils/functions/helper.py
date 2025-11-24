@@ -16,7 +16,7 @@ def load_help(path: str = "conf/base/help_text.json"):
 HELP = load_help()
 def H(key: str) -> str:
     """
-    Safe accessor for help text loaded from conf/base/help_text.json.
+    Accessor for help text loaded from conf/base/help_text.json.
     Returns empty string if key is missing to avoid runtime errors.
     """
     entry = HELP.get(key)
@@ -26,13 +26,13 @@ def H(key: str) -> str:
 
 def _species_keys(preset: dict):
     """
-    Safe accessor for species keys loaded from conf/base/FVSVariant_presets.json.
+    Accessor for species keys loaded from conf/base/FVSVariant_presets.json.
     """
     # any key that starts with tpa_ is treated as a species slider
     return [k for k in preset.keys() if k.startswith("tpa_")]
 
 def _label_for(key: str) -> str:
     """
-    Safe accessor for species labels loaded from conf/base/species_labels.json.
+    Accessor for species labels loaded from conf/base/species_labels.json.
     """
     return SPECIES_LABELS.get(key, key.replace("tpa_", "TPA_").upper())
