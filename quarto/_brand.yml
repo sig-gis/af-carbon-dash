@@ -4,7 +4,9 @@ color:
     forest-green: "#005251"     
     charcoal-grey: "#0B193B"    
     yellow: "#F2C127"
+    green: "#26D780"
     orange: "#E94D4D"
+    turquoise: "#14E1D2"
   foreground: charcoal-grey    
   background: white            
   primary: forest-green       

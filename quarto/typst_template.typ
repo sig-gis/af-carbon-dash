@@ -285,7 +285,7 @@
 #let top-margin = 1.25in
 
 #set page(
-  background: image("reports/fig/watermark.jpg", width: 100%, height: 100%)
+  background: image("data/fig/watermark.jpg", width: 100%, height: 100%)
 )
 
 #set table(
@@ -294,12 +294,12 @@
 )
 #let brand-color = (
   background: rgb("#ffffff"),
-  charcoal-grey: rgb("#555555"),
+  charcoal-grey: rgb("#0B193B"),
   foreground: rgb("#555555"),
-  forest-green: rgb("#2d5a3d"),
-  orange: rgb("#ff6b35"),
-  primary: rgb("#2d5a3d"),
-  secondary: rgb("#ff6b35"),
+  forest-green: rgb("#005251"),
+  orange: rgb("#E94D4D"),
+  primary: rgb("#005251"),
+  secondary: rgb("#E94D4D"),
   white: rgb("#ffffff")
 )
 #set page(fill: brand-color.background)
@@ -318,9 +318,10 @@
 )
 #set text(weight: 400, )
 #set par(leading: 0.75em)
-#show heading: set text(font: ("Montserrat",), weight: 600, style: "normal", fill: rgb("#2d5a3d"), )
+#show heading: set text(font: ("Montserrat",), weight: 600, style: "normal", fill: brand-color.primary, )
 #show heading: set par(leading: 0.45em)
-#show link: set text(fill: rgb("#2d5a3d"), )
+#show link: set text(fill: brand-color.primary, baseline: -0.5pt,)
+#show link: underline.with(stroke: 0.7pt + brand-color.primary)
 
 #show: doc => article(
   margin: (top: 0in,),
@@ -334,36 +335,122 @@
 
 #set figure(numbering: none)
 #show figure.caption: set align(left)
-#block(fill: rgb("#2d5a3d"), width: 100%, height: 1.5in, outset: (x: 1.25in))[
+#block(fill: brand-color.primary, width: 100%, height: 1.5in, outset: (x: 1.25in))[
 #show heading.where(level: 1): set text(fill: white, size: 36pt)
 #place(bottom + left, dy:-0.25in)[
-= Resilient Reforestation Plan
+
+#heading(level: 1, outlined: false)[Resilient Reforestation Plan]
 <gresham>
 ]
 #place(top + right, dx: 0.8in, dy: 0.2in)[
-#box(image("report_files/figure-typst/cell-8-output-1.svg", width: 1.25in))
+#box(image("report_files/figure-typst/cell-6-output-1.svg", width: 1.25in))
 
 ]
 ]
-
-
-#align(left)[
-  #text(weight: "bold", size: 15pt)[Reforestration strategy]
-]
-
-
-#align(left)[
-  #text(weight: "bold", size: 11pt)[Here will be a table, showing: FVS variant, Project area, Date this report has been prepared, Survival, Site index, Species mix (TPA), etc.]
-]
-
 
 #figure([
-#box(image("reports/fig/PNvariant.png"))
+#box(image("data/fig/ECvariant.png", width: 80%))
+], caption: figure.caption(
+position: bottom, 
+[
+  #align(right)[
+  #text(weight: "bold", size: 11pt, fill: brand-color.primary)[Figure 1. The project area location and boundaries of the corresponding FVS #footnote[#link("https://www.fs.usda.gov/managing-land/forest-management/fvs")[Forest Vegetation Simulator]] variant.]
+]
+]), 
+kind: "quarto-float-fig", 
+supplement: "Figure", 
+)
+
+#line(length: 100%, stroke: 0.5pt + gray)
+#v(0.5cm)  // vertical gap
+
+#grid(
+  columns: 2,
+  column-gutter: 2.5cm,
+  [
+    #include "report_files/figure-typst/strategy-summary.typ"
+  ],
+  [
+    #include "report_files/figure-typst/species-mix.typ"
+  ]
+)
+
+#pagebreak()
+#v(top-margin)
+
+#show outline.entry: set block(spacing: 2em)
+#outline()
+
+#pagebreak()
+#v(top-margin)
+
+#heading(level: 1)[Introduction]
+
+#v(0.5cm)  // vertical gap
+
+#align(left)[
+  #text(weight: "bold", size: 11pt)[This report was generated directly from the #link("https://nwgiebink-af-carbon-dash.share.connect.posit.cloud/")[Reforestation Financial & Carbon Dashboard]. The dashboard allows users to choose species, planting densities, site conditions, regional variants, and carbon protocols; these selections feed directly into the modeling that underlies this document.]
+]
+
+#v(0.25cm)  // vertical gap
+
+#align(left)[
+  #text(weight: "bold", size: 11pt)[The report uses the Forest Vegetation Simulator (FVS) - a widely applied, publicly available forest growth and yield model used across the United States. Each FVS variant represents a specific geographic region and contains its own calibrated parameters, species list, growth equations, and ecological assumptions. Selecting a variant ensures that tree growth, mortality, and carbon accumulation are modeled in a way that reflects the environmental conditions of the project location.]
+]
+
+#v(0.25cm)  // vertical gap
+
+#align(left)[
+  #text(weight: "bold", size: 11pt)[The chosen variant for this report is based on the spatial location of the project (Figure 1). Each variant includes its own set of species capable of growing within that region; this report uses those built-in species definitions to generate growth and carbon estimates. Only the species selected in the dashboard (shown on page 1) were used to simulate future stand development.]
+]
+
+#v(0.25cm)  // vertical gap
+
+#align(left)[
+  #text(weight: "bold", size: 11pt)[The dashboard supports multiple carbon accounting protocols, but only the accounting protocols selected by the user in the dashboard are included in the carbon and financial projections below.]
+]
+
+#pagebreak()
+#v(top-margin)
+
+#heading(level: 1)[Carbon Projections]
+
+#v(0.25cm)  // vertical gap
+
+#align(left)[
+  #text(weight: "bold", size: 11pt)[The carbon projections presented here are generated using the FVS growth model for the selected species, planting density, and site conditions. FVS simulates tree- and stand-level carbon accumulation over time, including live biomass, mortality, and structural changes in the forest. The dashboard combines these raw five-year outputs and interpolates them to produce annual estimates of on-site carbon storage. This approach preserves the long-term growth trends modeled by FVS while providing more continuous year-by-year results.]
+]
+
+#v(0.15cm)  // vertical gap
+
+#figure([
+#box(image("report_files/figure-typst/cell-11-output-1.svg", width: 70%))
 ], caption: figure.caption(
 position: bottom, 
 [
   #align(center)[
-  #text(weight: "bold", size: 11pt)[This map will show the coordinate that was input in the beginning and the corresponding PN variant.]
+  #text(weight: "bold", size: 11pt, fill: brand-color.primary)[Figure 2. Annual cummulative onsite Carbon per acre (tons CO₂ per acre).]
+]
+]), 
+kind: "quarto-float-fig", 
+supplement: "Figure", 
+)
+
+#v(0.25cm)  // vertical gap
+
+#align(left)[
+  #text(weight: "bold", size: 11pt)[Figure 2 shows the total net carbon stored over time within one acre, accounting for all modeled growth and mortality. The shape of the curve reflects the selected species' biological growth pattern and the productivity defined by the site index.]
+]
+
+#v(0.05cm)  // vertical gap
+
+#figure([
+#box(image("report_files/figure-typst/cell-12-output-1.svg", width: 70%))
+], caption: figure.caption(
+position: bottom, 
+[
+  #align(center)[
+  #text(weight: "bold", size: 11pt, fill: brand-color.primary)[Figure 3. Annual cummulative onsite Carbon for the full project area (tons CO₂).]
 ]
 ]), 
 kind: "quarto-float-fig", 
@@ -374,97 +461,219 @@ supplement: "Figure",
 #v(top-margin)
 
 #align(left)[
-  #text(weight: "bold", size: 15pt)[Carbon Projections]
+  #text(weight: "bold", size: 11pt)[Different carbon protocols apply unique sets of rules related to risk buffers, leakage deductions, and measurement requirements. Because the same biological growth can be credited differently depending on these rules, different protocols may yield different carbon units (CUs) over time, even for the same underlying forest scenario.]
 ]
 
-#align(left)[
-  #text(weight: "bold", size: 11pt)[Here will be a text explaining how the carbon graph is generated and what goes into calculating this output.]
-]
-
+#v(0.25cm)  // vertical gap
 
 #figure([
-#box(image("report_files/figure-typst/cell-12-output-1.svg"))
+#box(image("report_files/figure-typst/cell-13-output-1.svg", width: 70%))
 ], caption: figure.caption(
 position: bottom, 
 [
   #align(center)[
-  #text(weight: "bold", size: 11pt)[Here we can include a description or details on this figure.]
+  #text(weight: "bold", size: 11pt, fill: brand-color.primary)[Figure 4. Figure caption.]
 ]
 ]), 
 kind: "quarto-float-fig", 
 supplement: "Figure", 
 )
 
+#v(0.35cm)  // vertical gap
 
+#align(left)[
+  #text(weight: "bold", size: 11pt)[The dashboard standardizes biological modeling by using FVS for all protocols (see FAQs), and then applies protocol-specific rules to calculate eligible credits. This ensures that differences shown in the graphs reflect accounting rules, not differences in forest growth modeling.]
+]
 
 #pagebreak()
 #v(top-margin)
 
-#align(left)[
-  #text(weight: "bold", size: 14pt)[Financial Projections]
-]
+#heading(level: 1)[Financial Projections]
+#v(0.5cm)  // vertical gap
 
 #align(left)[
-  #text(weight: "bold", size: 11pt)[Here will be a text explaining how the financial projections are generated and what goes into calculating this output.]
+  #text(weight: "bold", size: 11pt)[The financial projections integrate user-selected financial inputs with modeled carbon outputs to estimate annual and cumulative revenues and costs for the project.]
 ]
 
-#figure([
-#box(image("report_files/figure-typst/cell-15-output-1.svg", width: 7in))
-], caption: figure.caption(
-position: top, 
-[
-  #align(center)[
-      Financial projections by Net Revenue in order from highest to lowest.
-    ]
-]), 
-kind: "quarto-float-fig", 
-supplement: "Figure", 
+#v(0.25cm)  // vertical gap
+
+#heading(level: 3, outlined: false)[Selected Financial Options:]
+
+#grid(
+  columns: 2,
+  column-gutter: 2.5cm,
+  [
+    #include "report_files/figure-typst/financial-options1.typ"
+  ],
+  [
+    #include "report_files/figure-typst/financial-options2.typ"
+  ]
 )
 
+#v(0.25cm)  // vertical gap
+
+#heading(level: 3, outlined: false)[Carbon Revenue]
+
+Annual carbon revenues are calculated by multiplying the annual number of carbon units
+(CUs) generated under each protocol by the assumed market price in that year. The initial
+price per CU and the annual price increase rate are set by the user. These annual revenues
+are summed across the project period to produce the total revenue values.
+
+#v(0.25cm)  // vertical gap
 #align(left)[
-  #text(weight: "bold", size: 11pt)[More text.]
+  #text(weight: "bold", size: 11pt, fill: brand-color.primary)[Table 1. Per-protocol financial projections sorted by Net Revenue (USD), from highest to lowest.]
 ]
 
+#align(center)[
+  #include "report_files/figure-typst/protocol-summary.typ"
+]
+
+#v(0.15cm)  // vertical gap
+
+The following cost categories are included in the projection:
+
+- CFI plot costs and number of plots, which determine sampling and field verification
+  costs.
+- Validation and verification costs, which occur at fixed intervals according to
+  protocol rules.
+- Registry fees and issuance fees per CU, which apply during the credit registration
+  and issuance process.
+- Initial planting costs and seedling costs, applied at the start of the project.
+- Anticipated inflation, applied to verification-related and registry-related expenses.
+- Discount rate, which is used in calculation of the 20-year net present-value.
+
+Net revenue represents the difference between Total Revenue and Total Costs.
+
+#pagebreak()
+#v(top-margin)
+
+Table 1, Figure 5 and Figure 6 summarize the Net Revenue, including the Total Revenue and Total Costs across the project
+lifetime and compare financial performance across the selected protocols.
 
 #figure([
-#box(image("report_files/figure-typst/cell-16-output-1.svg", width: 5in))
+#box(image("report_files/figure-typst/cell-20-output-1.svg", width: 60%))
 ], caption: figure.caption(
 position: bottom, 
 [
-Here we can include a description or more details on this figure.
+  #align(center)[
+  #text(weight: "bold", size: 11pt, fill: brand-color.primary)[Figure 5. Total Revenue (in millions of USD) generated by each protocol over the full project period, including both Net Revenue and Total Costs from the selected planting scenario]
+  ]
 ]), 
 kind: "quarto-float-fig", 
 supplement: "Figure", 
 )
 
-#pagebreak()
-#v(top-margin)
+#v(0.25cm)  // vertical gap
+
+
+#align(left)[
+  #text(weight: "bold", size: 11pt)[The annual net revenue trend illustrates how project cashflow varies over time. Peaks typically correspond to verification or credit issuance years, as CUs are credited in discrete events rather than every year.]
+]
+
+#v(0.15cm)  // vertical gap
 
 #figure([
-#box(image("report_files/figure-typst/cell-17-output-1.svg", width: 5in))
+#box(image("report_files/figure-typst/cell-21-output-1.svg", width: 60%))
 ], caption: figure.caption(
 position: bottom, 
 [
   #align(center)[
-  #text(weight: "bold", size: 11pt)[Here we can include a description or details on this figure.]
+  #text(weight: "bold", size: 11pt, fill: brand-color.primary)[Figure 6. Figure 6. Annual net revenue trends by protocol for the selected planting scenario across the duration of the project]
 ]
 ]), 
 kind: "quarto-float-fig", 
 supplement: "Figure", 
 )
 
+#pagebreak()
+#v(top-margin)
 
+#heading(level: 1)[Frequently Asked Questions]
+
+#v(0.5cm)  // vertical gap
+
+#block[
+
+#align(left)[
+  #text(weight: "bold", size: 11pt, fill: brand-color.primary)[What does "Cumulative Onsite Carbon" mean?]
+]
+
+Cumulative Onsite Carbon is the net amount of carbon stored within project area over time, adding up all eligible carbon.  
+It reflects everything that happens within each acre in the selected variant.
+]
+#v(0.5cm)  // vertical gap
+
+#block[
+#align(left)[
+  #text(weight: "bold", size: 11pt, fill: brand-color.primary)[What is the baseline scenario assumption?]
+]
+
+The baseline scenario in the current version of the dashboard assumes bare ground with no natural regeneration.
+]
+#v(0.5cm)  // vertical gap
+
+#block[
+#align(left)[
+  #text(weight: "bold", size: 11pt, fill: brand-color.primary)[What Forest Vegetation Simulator (FVS) modeling approach is applied?]
+]
+
+The current version of the dashboard applies a let-grow simulation for the duration of the project, with a growth/reporting interval of 5 years.
+]
+#v(0.5cm)  // vertical gap
+
+#block[
+#align(left)[
+  #text(weight: "bold", size: 11pt, fill: brand-color.primary)[How are the five-year outputs converted to annual CO₂e/ac stocking values?]
+]
+
+We apply a cubic spline interpolation to create continuous annual stocking values from 5-year intervals.
+]
+#v(0.5cm)  // vertical gap
+
+#block[
+#align(left)[
+  #text(weight: "bold", size: 11pt, fill: brand-color.primary)[What is the difference between the carbon protocols?]
+]
+
+The same project scenario can yield different credit numbers across protocols because of differences in accounting rules #footnote[To isolate protocol-rule effects, the dashboard uses FVS modules for all protocols (we do not switch between Jenkins and FVS).].  
+Below are the protocols currently supported in the dashboard and the modeled assumptions for risk/buffer #footnote[The 25% risk buffer for Isometric reflects a valid value within their allowed range. Because the dashboard compares default assumptions, 20% would be most consistent across protocols. However, the current 25% value serves as a placeholder until the financial verification cost step is implemented, which will further differentiate Isometric from the others. This value will be updated in future versions.], leakage, uncertainty, and measurement.
+
+#table(
+  columns: 5,
+  align: (left, center, center, center, center),
+  table.header(
+    [Protocol],
+    [Risk/Buffer],
+    [Leakage],
+    [Uncertainty],
+    [Measurement],
+  ),
+  [#link("https://verra.org/methodologies/vm0047-afforestation-reforestation-and-revegetation-v1-0/")[Verra (VCS)]], [20%], [0%], [0%], [FVS],
+  [#link("https://acrcarbon.org/methodology/afforestation-and-reforestation-of-degraded-lands/")[ACR]], [20%], [0%], [0%], [FVS],
+  [#link("https://www.climateactionreserve.org/wp-content/uploads/2023/07/Final_Forest_Protocol_V5.1_7.14.2023.pdf")[CAR]], [20%], [0%], [0%], [FVS],
+  [#link("https://registry.isometric.com/protocol/reforestation/1.0")[Isometric]], [25%], [0%], [0%], [FVS],
+  [#link("https://globalgoals.goldstandard.org/403-luf-ar-methodology-ghgs-emission-reduction-and-sequestration-methodology/")[Gold Standard]], [0%], [0%], [0%], [FVS],
+)
+
+]
 
 #pagebreak()
 #v(top-margin)
 
+#block[
 #align(left)[
-  #text(weight: "bold", size: 14pt)[Frequently Asked Questions]
+  #text(weight: "bold", size: 11pt, fill: brand-color.primary)[How are FVS simulations approximated for real-time analysis in the dashboard?]
 ]
 
+Coming soon.
+]
+#v(0.5cm)  // vertical gap
+
+#block[
 #align(left)[
-  #text(weight: "bold", size: 11pt)[Here we can append the list FAQs. That way, when the older report is shared, they can access the information, such as what version of protocols was used, etc.]
+  #text(weight: "bold", size: 11pt, fill: brand-color.primary)[Is it possible to model an unrealistic scenario?]
 ]
 
-
-
+Yes.  
+The dashboard would have warned you if the total TPA (trees per acre) for either of the tree species exceeded a cap, but extreme inputs can still produce unrealistic scenarios.
+]

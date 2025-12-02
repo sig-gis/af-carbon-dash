@@ -15,17 +15,17 @@ import subprocess
 import re
 import datetime
 
-# --- Generate timestamp string ---
+# timestamp string
 timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
 
-# Load the dataset
+# the dataset
 df = pd.read_csv("data/credits_proforma.csv")
 
-# Column to loop over
+# column to loop over
 group_col = "Protocol"
 group_values = df[group_col].unique()
 
-# Ensure reports folder exists
+# ensure reports folder exists
 os.makedirs("reports", exist_ok=True)
 
 print("Rendering combined report...")

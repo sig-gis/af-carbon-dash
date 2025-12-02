@@ -2,6 +2,7 @@ project:
   type: default
   output-dir: reports
 
+
 execute:
   echo: false       # hide all code
   warning: false    # hide warnings
@@ -11,6 +12,16 @@ execute:
 
 extensions:
   - _extension.yml
+
+format:
+  html:
+    theme: flatly
+    toc: true
+  typst-pdf:
+    template: typst_template.typ   
+    toc: true
+    number-sections: true
+
 
 # # keeping the HTML format here in case we need it in future
 # format:
@@ -30,11 +41,4 @@ extensions:
   #   titlepage: true
 
 
-format:
-  html:
-    theme: flatly
-    toc: true
-  typst-pdf:
-    template: typst_template.typ   
-    toc: true
-    number-sections: true
+
