@@ -8,14 +8,12 @@
 
 ## 3. Virtual environment
 ### Activate the af-carbon-dash virtual environment by running: 
-SSH: 
 ```
 .\.venv\Scripts\activate
 ```
 
 ## 4. Run
 ### Run the following the code: 
-SSH: 
 ```
 python gen-reports.py
 ```
