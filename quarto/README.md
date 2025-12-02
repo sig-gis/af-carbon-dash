@@ -1,6 +1,22 @@
-# 🚀 Getting Started
+# 🚀 Stand alone reporting tool
 
-## 1. change directory to your local af-carbon-dash\quarto folder
-## 2. make sure you have pasted the data files in the quarto\data folder:https://drive.google.com/file/d/1eYgHPhtiD5uwgqtkWNrU7m6RPq6JWsz_/view?usp=drive_link
-## 3. start the af-carbon-dash virtual environment by running: .\.venv\Scripts\activate
-## 4. run the code: python gen-reports.py
+## 1. Directory
+### Access command line and change directory to your local af-carbon-dash\quarto folder
+
+## 2. Data
+### [Download](https://drive.google.com/file/d/1eYgHPhtiD5uwgqtkWNrU7m6RPq6JWsz_/view?usp=drive_link) the files into your quarto\data folder
+
+## 3. Virtual environment
+### Activate the af-carbon-dash virtual environment by running: 
+SSH: 
+```
+.\.venv\Scripts\activate
+```
+
+## 4. Run
+### Run the following the code: 
+SSH: 
+```
+python gen-reports.py
+```
+
