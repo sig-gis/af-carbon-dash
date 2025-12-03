@@ -373,6 +373,189 @@ def planting_sliders():
     # Backup latest values so they're available if user navigates away and back
     _backup_keys(["survival", "si", "net_acres", *species_keys])
 
+# def carbon_chart():
+#     """
+#     Predict carbon and FVS outputs from regression models based on user planting scenario inputs. 
+
+#     Parameters: 
+#     -----------
+#     models: dict
+#         dictionary of models with (year, variable) tuples as keys
+
+#     """
+
+#     # Ensure the sliders have been set
+#     if not all(k in st.session_state for k in ["tpa_df", "tpa_rc", "tpa_wh", "survival", "si", "net_acres"]):
+#         st.info("Adjust Planting Design sliders to see the carbon output.")
+#         return
+
+#     tpa_df = st.session_state["tpa_df"]
+#     tpa_rc = st.session_state["tpa_rc"]
+#     tpa_wh = st.session_state["tpa_wh"]
+#     tpa_total = tpa_df + tpa_rc + tpa_wh
+#     survival = st.session_state["survival"]
+#     si = st.session_state["si"]
+
+#     # Load coefficients
+#     with open("conf/base/carbon_model_coefficients.json", "r") as file:
+#         coefficients = json.load(file)
+
+#     years, c_scores, ann_c_scores = [], [], []
+#     for year in coefficients.keys():
+#         c_score = (coefficients[year]['TPA_DF'] * tpa_df 
+#                    + coefficients[year]['TPA_RC'] * tpa_rc 
+#                    + coefficients[year]['TPA_WH'] * tpa_wh
+#                    + coefficients[year]['TPA_total'] * tpa_total
+#                    + coefficients[year]['Survival'] * survival
+#                    + coefficients[year]['SI'] * si
+#                    + coefficients[year]['Intercept'])
+#         ann_c_score = c_score - c_scores[-1] if c_scores else c_score
+#         c_scores.append(c_score)
+#         ann_c_scores.append(ann_c_score)
+#         years.append(int(year))
+#     year_0 = pd.DataFrame({"Year": [2024], "C_Score": [0], "Annual_C_Score": [0]})
+#     df = pd.DataFrame({"Year": years, "C_Score": c_scores, "Annual_C_Score": ann_c_scores})
+#     df = pd.concat([year_0, df])
+#     st.session_state.carbon_df_coefs = df
+
+    
+#     # calculate total_tpa
+#     if "species_keys" in st.session_state:
+#         species_keys = st.session_state["species_keys"]
+#     else:
+#         presets = load_variant_presets()
+#         variant = st.session_state.get("selected_variant", "PN")
+#         if variant not in presets:
+#             st.warning(f"Variant '{variant}' not found in presets. Falling back to 'PN'.")
+#         preset = presets.get(variant, presets.get("PN", {}))
+#         species_keys = _species_keys(preset)
+#     total_tpa = sum(int(st.session_state.get(k, 0)) for k in species_keys)
+    
+#     # load fvs models
+#     models_path = pick_fvs_models(base='data/',
+#                                              variant=st.session_state.get("selected_variant", "PN"),
+#                                              loccode=st.session_state.get("FVSLocCode"))
+#     models = load_fvs_models(models_path)
+
+#     # create model input vector from user inputs
+#     X = build_input_vector(
+#         survival=st.session_state["survival"],
+#         total_tpa=total_tpa,
+#         sp1=st.session_state[species_keys[0]], # indexing this way works because spp order is preserved from JSON w/ tuple
+#         sp2=st.session_state[species_keys[1]], # see _species_keys function
+#         sp3=st.session_state[species_keys[2]],
+#         sp4=st.session_state[species_keys[3]],
+#         si=st.session_state["si"]
+#     )
+#     rows = []
+#     poly = PolynomialFeatures(degree=3, include_bias=False)
+#     X_poly = poly.fit_transform(X)
+
+#     for (year, var), m in models.items():
+#         y_pred = max(m.predict(X_poly)[0], 0)  # never less than 0
+#         rows.append(
+#             {
+#                 "Year": int(year),
+#                 "Variable": var,   # e.g. "ABLD_C", "BA", "QMD", "Tpa", "DF_TPA", ...
+#                 "Value": y_pred,
+#             }
+#         )
+    
+#     # df = pd.DataFrame({"Year": years, "C_Score": c_scores, "Annual_C_Score": ann_c_scores})
+#     metrics_df = pd.DataFrame(rows)
+#     metrics_wide = (
+#         metrics_df
+#         .pivot(index="Year", columns="Variable", values="Value").reset_index()
+#     )
+#     st.session_state.carbon_df = metrics_wide 
+
+
+#     toggle_oc = st.toggle('Show Project Acreage', True, 'toggle_oc', H("toggle.inputs.acres"))
+#     # Determine chart title
+#     chart_title = "Onsite Carbon (tons/project)" if toggle_oc else "Onsite Carbon (tons/acre)"
+
+#     # Determine if outputs are single-acre or project acreage
+#     plot_df = st.session_state.carbon_df.copy()
+#     plot_df_vars = [v for v in plot_df.columns.values if v!='Year']
+#     if toggle_oc:
+#         for v in plot_df_vars:
+#             plot_df[v] = plot_df[v] * st.session_state["net_acres"]
+
+#     single_metric_vars = {
+#         "Aboveground live biomass carbon (ABLD_C)": "ABLD_C",
+#         "Basal area (BA)": "BA",
+#         "Quadratic mean diameter (QMD)": "QMD",
+#         "Stand density index (SDI)": "SDI",
+#         "Total cubic volume (TCuFt)": "TCuFt",
+#     }
+
+#     tpa_group = ["Tpa", "DF_TPA", "WH_TPA", "RC_TPA", "SS_TPA"]
+#     metric_options = list(single_metric_vars.keys()) + ["Stocking by species (TPA)"]
+
+#     selected_metric_label = st.selectbox(
+#         "Select a secondary variable to display",
+#         metric_options,
+#         index=0,
+#     )
+
+#     # Always plot ABLD_C chart 
+#     line = alt.Chart(plot_df).mark_line(point=True).encode(
+#         x=alt.X('Year:O', title='Year', axis=alt.Axis(labelAngle=30)),
+#         y=alt.Y('ABLD_C:Q', title=chart_title),
+#         tooltip=['Year', 'ABLD_C']
+#         ).properties(
+#             title="Cumulative " + chart_title,
+#             width=600,
+#             height=400
+#             )
+#     st.altair_chart(line, use_container_width=True)
+
+#     if selected_metric_label == "Stocking by species (TPA)":
+#         available_tpa_cols = [c for c in tpa_group if c in plot_df.columns]
+#         if not available_tpa_cols:
+#             st.warning("TPA metrics are not available in the current model outputs.")
+#             return
+#         tpa_long = plot_df[["Year"] + available_tpa_cols].melt(
+#             "Year", var_name="Metric", value_name="Value"
+#         )
+#         tpa_chart = (
+#             alt.Chart(tpa_long)
+#             .mark_line(point=True)
+#             .encode(
+#                 x=alt.X("Year:O", title="Year", axis=alt.Axis(labelAngle=30)),
+#                 y=alt.Y("Value:Q", title="Trees per acre"),
+#                 color=alt.Color("Metric:N", title="Metric"),
+#                 tooltip=["Year", "Metric", "Value"],
+#             )
+#             .properties(
+#                 title="Stocking by species (trees per acre)",
+#                 height=350,
+#             )
+#         )
+#         st.altair_chart(tpa_chart, use_container_width=True)
+#     else:
+#         var_name = single_metric_vars[selected_metric_label]
+#         if var_name not in plot_df.columns:
+#             st.warning(f"Metric '{selected_metric_label}' is not available in the current model outputs.")
+#             return
+#         metric_chart = (
+#             alt.Chart(plot_df[["Year", var_name]])
+#             .mark_line(point=True)
+#             .encode(
+#                 x=alt.X("Year:O", title="Year", axis=alt.Axis(labelAngle=30)),
+#                 y=alt.Y(f"{var_name}:Q", title=selected_metric_label),
+#                 tooltip=["Year", var_name],
+#             )
+#             .properties(
+#                 title=selected_metric_label,
+#                 height=350,
+#             )
+#         )
+#         st.altair_chart(metric_chart, use_container_width=True)
+
+#     st.success(f"Final Carbon Output (year 2064): {plot_df.loc[plot_df['Year']==2064, 'ABLD_C'].iloc[-1]:.2f}")
+#     st.success(f"Final Carbon Output (year {max(plot_df['Year'])}): {plot_df['ABLD_C'].iloc[-1]:.2f}")
+
 def carbon_chart():
     """
     Predict carbon and FVS outputs from regression models based on user planting scenario inputs. 
@@ -384,41 +567,43 @@ def carbon_chart():
 
     """
 
-    # Ensure the sliders have been set
-    if not all(k in st.session_state for k in ["tpa_df", "tpa_rc", "tpa_wh", "survival", "si", "net_acres"]):
-        st.info("Adjust Planting Design sliders to see the carbon output.")
-        return
+    # # Ensure the sliders have been set
+    # if not all(k in st.session_state for k in ["tpa_df", "tpa_rc", "tpa_wh", "survival", "si", "net_acres"]):
+    #     st.info("Adjust Planting Design sliders to see the carbon output.")
+    #     return
 
-    tpa_df = st.session_state["tpa_df"]
-    tpa_rc = st.session_state["tpa_rc"]
-    tpa_wh = st.session_state["tpa_wh"]
-    tpa_total = tpa_df + tpa_rc + tpa_wh
-    survival = st.session_state["survival"]
-    si = st.session_state["si"]
+    # tpa_df = st.session_state["tpa_df"]
+    # tpa_rc = st.session_state["tpa_rc"]
+    # tpa_wh = st.session_state["tpa_wh"]
+    # tpa_total = tpa_df + tpa_rc + tpa_wh
+    # survival = st.session_state["survival"]
+    # si = st.session_state["si"]
 
-    # Load coefficients
-    with open("conf/base/carbon_model_coefficients.json", "r") as file:
-        coefficients = json.load(file)
+    # # Load coefficients (C_Score from coefficients JSON)
+    # with open("conf/base/carbon_model_coefficients.json", "r") as file:
+    #     coefficients = json.load(file)
 
-    years, c_scores, ann_c_scores = [], [], []
-    for year in coefficients.keys():
-        c_score = (coefficients[year]['TPA_DF'] * tpa_df 
-                   + coefficients[year]['TPA_RC'] * tpa_rc 
-                   + coefficients[year]['TPA_WH'] * tpa_wh
-                   + coefficients[year]['TPA_total'] * tpa_total
-                   + coefficients[year]['Survival'] * survival
-                   + coefficients[year]['SI'] * si
-                   + coefficients[year]['Intercept'])
-        ann_c_score = c_score - c_scores[-1] if c_scores else c_score
-        c_scores.append(c_score)
-        ann_c_scores.append(ann_c_score)
-        years.append(int(year))
-    year_0 = pd.DataFrame({"Year": [2024], "C_Score": [0], "Annual_C_Score": [0]})
-    df = pd.DataFrame({"Year": years, "C_Score": c_scores, "Annual_C_Score": ann_c_scores})
-    df = pd.concat([year_0, df])
-    st.session_state.carbon_df_coefs = df
+    # years, c_scores, ann_c_scores = [], [], []
+    # for year in coefficients.keys():
+    #     c_score = (
+    #         coefficients[year]['TPA_DF'] * tpa_df 
+    #         + coefficients[year]['TPA_RC'] * tpa_rc 
+    #         + coefficients[year]['TPA_WH'] * tpa_wh
+    #         + coefficients[year]['TPA_total'] * tpa_total
+    #         + coefficients[year]['Survival'] * survival
+    #         + coefficients[year]['SI'] * si
+    #         + coefficients[year]['Intercept']
+    #     )
+    #     ann_c_score = c_score - c_scores[-1] if c_scores else c_score
+    #     c_scores.append(c_score)
+    #     ann_c_scores.append(ann_c_score)
+    #     years.append(int(year))
 
-    
+    # year_0 = pd.DataFrame({"Year": [2024], "C_Score": [0], "Annual_C_Score": [0]})
+    # df_c = pd.DataFrame({"Year": years, "C_Score": c_scores, "Annual_C_Score": ann_c_scores})
+    # df_c = pd.concat([year_0, df_c])
+    # st.session_state.carbon_df_coefs = df_c
+
     # calculate total_tpa
     if "species_keys" in st.session_state:
         species_keys = st.session_state["species_keys"]
@@ -429,97 +614,171 @@ def carbon_chart():
             st.warning(f"Variant '{variant}' not found in presets. Falling back to 'PN'.")
         preset = presets.get(variant, presets.get("PN", {}))
         species_keys = _species_keys(preset)
+
     total_tpa = sum(int(st.session_state.get(k, 0)) for k in species_keys)
     
     # load fvs models
-    models_path = pick_fvs_models(base='data/',
-                                             variant=st.session_state.get("selected_variant", "PN"),
-                                             loccode=st.session_state.get("FVSLocCode"))
+    models_path = pick_fvs_models(
+        base='data/',
+        variant=st.session_state.get("selected_variant", "PN"),
+        loccode=st.session_state.get("FVSLocCode"),
+    )
     models = load_fvs_models(models_path)
 
     # create model input vector from user inputs
     X = build_input_vector(
         survival=st.session_state["survival"],
         total_tpa=total_tpa,
-        sp1=st.session_state[species_keys[0]], # indexing this way works because spp order is preserved from JSON w/ tuple
-        sp2=st.session_state[species_keys[1]], # see _species_keys function
+        sp1=st.session_state[species_keys[0]],  # indexing this way works because spp order is preserved from JSON w/ tuple
+        sp2=st.session_state[species_keys[1]],  # see _species_keys function
         sp3=st.session_state[species_keys[2]],
         sp4=st.session_state[species_keys[3]],
-        si=st.session_state["si"]
+        si=st.session_state["si"],
     )
-    years, c_scores, ann_c_scores = [], [], []
-    model_years = np.sort(np.unique([int(k[0]) for k in models.keys()]))
-    poly = PolynomialFeatures(degree=3, include_bias=False)
-    for year in model_years:
-        m = models[(year, "ABLD_C")]
-        X_poly = poly.fit_transform(X)
-        c_score = max(m.predict(X_poly)[0], 0) # never less than 0
-        ann_c_score = c_score - c_scores[-1] if c_scores else c_score
-        ann_c_score = max(ann_c_score, 0) # never less than 0
-        c_scores.append(c_score)
-        ann_c_scores.append(ann_c_score)
-        years.append(int(year))
-    
-    df = pd.DataFrame({"Year": years, "C_Score": c_scores, "Annual_C_Score": ann_c_scores})
-    st.session_state.carbon_df = df
 
+    # Predict all FVS model outputs
+    rows = []
+    poly = PolynomialFeatures(degree=3, include_bias=False)
+    X_poly = poly.fit_transform(X)
+
+    for (year, var), m in models.items():
+        y_pred = max(m.predict(X_poly)[0], 0)  # never less than 0
+        rows.append(
+            {
+                "Year": int(year),
+                "Variable": var,   # e.g. "ABLD_C", "BA", "QMD", "Tpa", "DF_TPA", ...
+                "Value": y_pred,
+            }
+        )
+    
+    metrics_df = pd.DataFrame(rows)
+    metrics_wide = (
+        metrics_df
+        .pivot(index="Year", columns="Variable", values="Value")
+        .reset_index()
+    )
+    st.session_state.carbon_df = metrics_wide 
+
+    # Toggle: per-acre vs project-scale
     toggle_oc = st.toggle('Show Project Acreage', True, 'toggle_oc', H("toggle.inputs.acres"))
 
     chart_title = "Onsite Carbon (tons/project)" if toggle_oc else "Onsite Carbon (tons/acre)"
 
-     # Determine chart data
+    # Scale outputs if project acreage selected
     plot_df = st.session_state.carbon_df.copy()
+    plot_df_vars = [v for v in plot_df.columns.values if v != 'Year']
     if toggle_oc:
-        plot_df["C_Score"] = plot_df["C_Score"] * st.session_state["net_acres"]
-        plot_df["Annual_C_Score"] = plot_df["Annual_C_Score"] * st.session_state["net_acres"]
+        for v in plot_df_vars:
+            plot_df[v] = plot_df[v] * st.session_state["net_acres"]
 
-    # Determine chart title
-    chart_title = "Onsite Carbon (tons/project)" if toggle_oc else "Onsite Carbon (tons/acre)"
+    # Mapping from friendly labels to variable names
+    single_metric_vars = {
+        "Aboveground live biomass carbon": "ABLD_C",
+        "Basal area": "BA",
+        "Quadratic mean diameter": "QMD",
+        "Stand density index": "SDI",
+        "Total cubic volume": "TCuFt",
+    }
 
-    # Plot chart
-    line = alt.Chart(plot_df).mark_line(point=True).encode(
-        x=alt.X('Year:O', title='Year', axis=alt.Axis(labelAngle=30)),
-        y=alt.Y('C_Score:Q', title=chart_title),
-        tooltip=['Year', 'C_Score']
-    ).properties(
-        title="Cumulative " + chart_title,
-        width=600,
-        height=400
-    )
+    # TPA group for combined chart
+    tpa_group = ["DF_TPA", "WH_TPA", "RC_TPA", "SS_TPA"]
+    metric_options = list(single_metric_vars.keys()) + ["Stocking by species (TPA)"]
 
-    st.altair_chart(line, use_container_width=True)
-    st.success(f"Final Carbon Output (year 2064): {plot_df.loc[plot_df['Year']==2064, 'C_Score'].iloc[-1]:.2f}")
-    st.success(f"Final Carbon Output (year {max(plot_df['Year'])}): {plot_df['C_Score'].iloc[-1]:.2f}")
+    # --- Two selectors: primary & secondary ---
 
-    # CSV download
-    debug_carbon_df = plot_df.copy().rename(
-        columns={
-        "C_Score": "ABLD_C_cumulative",
-        "Annual_C_Score": "ABLD_C_annual"
-        }).assign(
-            model=os.path.basename(models_path),
-            survival=st.session_state["survival"],
-            total_tpa=total_tpa,
-            sp1=st.session_state[species_keys[0]],
-            sp2=st.session_state[species_keys[1]], 
-            sp3=st.session_state[species_keys[2]],
-            sp4=st.session_state[species_keys[3]],
-            si=st.session_state["si"]
-        ).merge(st.session_state.carbon_df_coefs,
-                how="left"
-        ).rename(
-            columns={
-                "C_Score": "ABLD_C_cumulative_coefs",
-                "Annual_C_Score": "ABLD_C_annual_coefs"
-                }
+    col_select_1, col_select_2 = st.columns(2)
+
+    with col_select_1:
+        primary_metric_label = st.selectbox(
+            "Primary variable to display",
+            metric_options,
+            index=metric_options.index("Aboveground live biomass carbon"),
+            key="primary_metric_select",
         )
-    st.download_button(
-        label="⬇️ Download Onsite Carbon table (CSV)",
-        data=debug_carbon_df.to_csv(index=False).encode("utf-8"),
-        file_name="onsite_carbon.csv",
-        mime="text/csv",
-        use_container_width=True,
-    )
+
+    with col_select_2:
+        secondary_metric_label = st.selectbox(
+            "Secondary variable to display",
+            metric_options,
+            index=metric_options.index("Basal area"),
+            key="secondary_metric_select",
+        )
+    
+    st.divider()
+
+    # --- Helper to render a chart for a chosen metric ---
+
+    def render_metric_chart(selected_metric_label: str, title_suffix: str = ""):
+        """Render a line chart for a selected metric label."""
+        if selected_metric_label == "Stocking by species (TPA)":
+            available_tpa_cols = [c for c in tpa_group if c in plot_df.columns]
+            if not available_tpa_cols:
+                st.warning("TPA metrics are not available in the current model outputs.")
+                return
+
+            tpa_long = plot_df[["Year"] + available_tpa_cols].melt(
+                "Year", var_name="Metric", value_name="Value"
+            )
+            tpa_chart = (
+                alt.Chart(tpa_long)
+                .mark_line(point=True)
+                .encode(
+                    x=alt.X("Year:O", title="Year", axis=alt.Axis(labelAngle=30)),
+                    y=alt.Y("Value:Q", title="Trees per acre"),
+                    color=alt.Color("Metric:N", title="Metric"),
+                    tooltip=["Year", "Metric", "Value"],
+                )
+                .properties(
+                    title=f"Stocking by species (trees per acre){title_suffix}",
+                    height=350,
+                )
+            )
+            st.altair_chart(tpa_chart, use_container_width=True)
+
+        else:
+            var_name = single_metric_vars[selected_metric_label]
+            if var_name not in plot_df.columns:
+                st.warning(f"Metric '{selected_metric_label}' is not available in the current model outputs.")
+                return
+
+            df_metric = plot_df[["Year", var_name]]
+
+            # Use the friendly label as y-axis title
+            metric_chart = (
+                alt.Chart(df_metric)
+                .mark_line(point=True)
+                .encode(
+                    x=alt.X("Year:O", title="Year", axis=alt.Axis(labelAngle=30)),
+                    y=alt.Y(f"{var_name}:Q", title=selected_metric_label),
+                    tooltip=["Year", var_name],
+                )
+                .properties(
+                    title=f"{selected_metric_label}{title_suffix}",
+                    height=350,
+                )
+            )
+            st.altair_chart(metric_chart, use_container_width=True)
+
+    # --- Render the two charts ---
+    render_metric_chart(primary_metric_label, title_suffix="")
+    st.divider()
+    render_metric_chart(secondary_metric_label, title_suffix="")
+    st.divider()
+
+    # Success messages based on ABLD_C (still tied to carbon)
+    if "ABLD_C" in plot_df.columns:
+        try:
+            year_2064_val = plot_df.loc[plot_df['Year'] == 2064, 'ABLD_C'].iloc[-1]
+            st.success(f"Final Carbon Output (year 2064): {year_2064_val:.2f}")
+        except IndexError:
+            pass  # year 2064 not present
+
+        st.success(
+            f"Final Carbon Output (year {int(plot_df['Year'].max())}): "
+            f"{plot_df['ABLD_C'].iloc[-1]:.2f}"
+        )
+    else:
+        st.info("ABLD_C is not available in the current model outputs.")
 
 # ---------- Carbon Units ----------
 def carbon_units():
@@ -537,7 +796,7 @@ def carbon_units():
     
     for protocol in protocols:
         df_base = df.copy()
-        df_base['Onsite Total CO2'] = df_base['C_Score'] * 3.667
+        df_base['Onsite Total CO2'] = df_base['ABLD_C'] * 3.667
 
         # ----------------------------------
         # Protocol-specific calculations
