@@ -1,6 +1,6 @@
 import streamlit as st
-
-from utils.functions.helper import _species_keys
+from pathlib import Path
+import json
 
 def _planting_keys():
     """
@@ -105,3 +105,21 @@ def _restore_backup(keys, backup_name: str = "_planting_backup"):
     for k in keys:
         if k not in st.session_state and k in backup:
             st.session_state[k] = backup[k]
+
+def _species_keys(preset: dict):
+    """
+    Accessor for species keys loaded from conf/base/FVSVariant_presets.json.
+    """
+    # any key that starts with tpa_ is treated as a species slider
+    return [k for k in preset.keys() if k.startswith("tpa_")]
+
+def _label_for(key: str) -> str:
+    """
+    Accessor for species labels loaded from conf/base/species_labels.json.
+    """
+    LABELS_PATH = Path("conf/base/species_labels.json")
+
+    with LABELS_PATH.open("r") as f:
+        SPECIES_LABELS = json.load(f)
+
+    return SPECIES_LABELS.get(key, key.replace("tpa_", "TPA_").upper())

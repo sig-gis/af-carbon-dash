@@ -154,7 +154,7 @@ if st.session_state.active_tab == "Site Selection Map":
 
     with st.expander(label="Upload GeoJSON/Shapefile", expanded=False):
         uploaded_files = st.file_uploader(
-            "Upload GeoJSON or all shapefile components seperatly (.shp, .shx, .dbf, .prj, .cpg) or zipped (.zip)",
+            "Upload GeoJSON (.geojson) or all shapefile components seperatly (.shp, .shx, .dbf, .prj) or zipped (.zip)",
             accept_multiple_files=True,
             type=["geojson", "shp", "shx", "dbf", "prj", "cpg", "zip"],
             width = 600

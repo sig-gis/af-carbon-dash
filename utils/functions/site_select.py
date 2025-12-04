@@ -6,6 +6,7 @@ import os
 import tempfile
 import numpy as np
 from pathlib import Path
+import io
 from shapely.geometry import shape, box
 
 @st.fragment
@@ -50,20 +51,23 @@ def load_geojson_fragment(simplified_geojson_path, shapefile_path, tolerance_deg
 @st.cache_data
 def load_geojson_or_shapefile(uploaded_files, tolerance_deg=0.001,
                               skip_keys={"Shape_Area", "Shape_Leng"}, max_tooltip_fields=3):
-    """Load either a GeoJSON or Shapefile, supporting both uploaded filess and file paths."""
-    
+    """Load either a GeoJSON, shapefile, or zipped folder containing either file type.
+       Automatically checks CRS and reprojects to EPSG:4326 if needed.
+    """
+
     # Normalize input: if single file, wrap in list
     if isinstance(uploaded_files, (str, bytes)):
         uploaded_files = [uploaded_files]
-    
-    # Try to detect a GeoJSON file (either uploaded file or path)
+
+    # Try to detect a GeoJSON file
     geojson_file = next(
-        (f for f in uploaded_files 
-         if (hasattr(f, "name") and f.name.lower().endswith(".geojson")) 
+        (f for f in uploaded_files
+         if (hasattr(f, "name") and f.name.lower().endswith(".geojson"))
          or (isinstance(f, str) and f.lower().endswith(".geojson"))),
         None
     )
-    
+
+    #  GEOJSON
     if geojson_file:
         if isinstance(geojson_file, str):
             with open(geojson_file, "r", encoding="utf-8") as f:
@@ -71,8 +75,28 @@ def load_geojson_or_shapefile(uploaded_files, tolerance_deg=0.001,
         else:
             geojson_str = geojson_file.getvalue().decode("utf-8")
 
+        gdf = gpd.read_file(io.StringIO(geojson_str))
+
+        # CRS handling
+        if gdf.crs is None:
+            st.warning("GeoJSON has no CRS defined. Assuming EPSG:4326.")
+            gdf = gdf.set_crs("EPSG:4326")
+
+        else:
+            if gdf.crs.to_string() == "EPSG:4326":
+                st.success("GeoJSON CRS is already EPSG:4326.")
+            else:
+                st.info(f"Reprojecting GeoJSON from {gdf.crs} to EPSG:4326...")
+                gdf = gdf.to_crs("EPSG:4326")
+                st.success("GeoJSON successfully reprojected to EPSG:4326.")
+
+        gdf["geometry"] = gdf.geometry.simplify(tolerance_deg, preserve_topology=True)
+        geojson_str = gdf.to_json(na="drop")
+
+        st.success("GeoJSON file loaded successfully!")
+
+    # SHAPEFILE
     else:
-        # Handle shapefiles (uploaded file or file paths)
         with tempfile.TemporaryDirectory() as tmpdir:
             for f in uploaded_files:
                 if isinstance(f, str):
@@ -82,8 +106,7 @@ def load_geojson_or_shapefile(uploaded_files, tolerance_deg=0.001,
                 else:
                     with open(os.path.join(tmpdir, f.name), "wb") as out:
                         out.write(f.getbuffer())
-            
-            # Find shapefile inside tempdir
+
             shp_files = [os.path.join(tmpdir, f) for f in os.listdir(tmpdir) if f.lower().endswith(".shp")]
             if not shp_files:
                 st.error("No .shp file found among uploaded files.")
@@ -91,11 +114,29 @@ def load_geojson_or_shapefile(uploaded_files, tolerance_deg=0.001,
 
             shp_path = shp_files[0]
             gdf = gpd.read_file(shp_path)
+
+            # CRS handling
+            if gdf.crs is None:
+                st.warning("Shapefile has no CRS defined. Assuming EPSG:4326.")
+                gdf = gdf.set_crs("EPSG:4326")
+
+            else:
+                if gdf.crs.to_string() == "EPSG:4326":
+                    st.success("Shapefile CRS is already EPSG:4326.")
+                else:
+                    st.info(f"Reprojecting shapefile from {gdf.crs} to EPSG:4326...")
+                    gdf = gdf.to_crs("EPSG:4326")
+                    st.success("Shapefile successfully reprojected to EPSG:4326.")
+
             gdf["geometry"] = gdf.geometry.simplify(tolerance_deg, preserve_topology=True)
 
+            # Keep selected fields
             keep = [c for c in ["FVSVariant", "FVSVarName", "FVSLocName"] if c in gdf.columns]
             gdf = gdf[keep + ["geometry"]] if keep else gdf[["geometry"]]
+
             geojson_str = gdf.to_json(na="drop")
+
+            st.success("Shapefile loaded successfully!")
 
     # Extract tooltip fields
     try:

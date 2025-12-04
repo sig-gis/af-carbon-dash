@@ -7,8 +7,8 @@ from pathlib import Path
 from scipy.interpolate import make_interp_spline  
 import altair as alt  
 
-from utils.functions.helper import  H, _species_keys, _label_for
-from utils.functions.statefulness import  _carbon_units_keys, _init_planting_state, _init_carbon_units_state, _backup_keys, _restore_backup
+from utils.functions.helper import  H
+from utils.functions.statefulness import  _carbon_units_keys, _init_planting_state, _init_carbon_units_state, _backup_keys, _restore_backup, _species_keys, _label_for
 
 @st.cache_data
 def load_variant_presets(path: str = "conf/base/FVSVariant_presets.json"):
