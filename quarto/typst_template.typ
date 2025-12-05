@@ -472,7 +472,7 @@ supplement: "Figure",
 position: bottom, 
 [
   #align(center)[
-  #text(weight: "bold", size: 11pt, fill: brand-color.primary)[Figure 4. Figure caption.]
+  #text(weight: "bold", size: 11pt, fill: brand-color.primary)[Figure 4.  Annual Carbon Units for the full project area by selected protocols.]
 ]
 ]), 
 kind: "quarto-float-fig", 
@@ -578,7 +578,7 @@ supplement: "Figure",
 position: bottom, 
 [
   #align(center)[
-  #text(weight: "bold", size: 11pt, fill: brand-color.primary)[Figure 6. Figure 6. Annual net revenue trends by protocol for the selected planting scenario across the duration of the project]
+  #text(weight: "bold", size: 11pt, fill: brand-color.primary)[Figure 6. Annual net revenue trends by protocol for the selected planting scenario across the duration of the project]
 ]
 ]), 
 kind: "quarto-float-fig", 
