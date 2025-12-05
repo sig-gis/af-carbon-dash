@@ -1,0 +1,12 @@
+[
+    {
+        "label": "1. Site Selection",
+        "tab": "Site Selection Map",
+        "caption": "Select the FVS Variant Location geometry which contains your project location."
+    },
+    {
+        "label": "2. Planting Design",
+        "tab": "Planting Design",
+        "caption": "Estimate certified carbon units under different protocols.\n\n*1. Planting Parameters*: Design your reforestation plan and estimate FVS results in real time.\n*2. Carbon Estimates*: Estimate carbon units (CUs)(tons CO₂e/acre) under different protocols.\n*3. Credits*: Customize financial factors to estimate net project revenue."
+    }
+]
