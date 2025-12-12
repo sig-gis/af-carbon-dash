@@ -6,9 +6,16 @@ import numpy_financial as npf
 from pathlib import Path           
 from scipy.interpolate import make_interp_spline  
 import altair as alt  
+import requests
+import os
+from urllib.parse import urlparse
 
 from utils.functions.helper import  H
 from utils.functions.statefulness import  _carbon_units_keys, _init_planting_state, _init_carbon_units_state, _backup_keys, _restore_backup, _species_keys, _label_for
+
+from utils.config import get_api_base_url
+
+API_BASE_URL = get_api_base_url()
 
 @st.cache_data
 def load_variant_presets(path: str = "conf/base/FVSVariant_presets.json"):
@@ -77,6 +84,12 @@ def planting_sliders():
     # Backup latest values so they're available if user navigates away and back
     _backup_keys(["survival", "si", "net_acres", *species_keys])
 
+@st.cache_data(ttl=300)
+def fetch_carbon_coefficients():
+    resp = requests.get(f"{API_BASE_URL}/carbon/coefficients", timeout=5)
+    resp.raise_for_status()
+    return resp.json()
+
 def carbon_chart():
     """
     Compute cumulative and annual carbon scores using regression coefficients and
@@ -96,8 +109,10 @@ def carbon_chart():
     si = st.session_state["si"]
 
     # Load coefficients
-    with open("conf/base/carbon_model_coefficients.json", "r") as file:
-        coefficients = json.load(file)
+    # with open("conf/base/carbon_model_coefficients.json", "r") as file:
+    #     coefficients = json.load(file)
+
+    coefficients = fetch_carbon_coefficients()
 
     years, c_scores, ann_c_scores = [], [], []
     for year in coefficients.keys():
@@ -262,13 +277,19 @@ def carbon_units():
 
     st.altair_chart(CU_chart, use_container_width=True)
 
-@st.cache_data
+# @st.cache_data
+# def _load_proforma_defaults() -> dict:
+#     """
+#     Load the default proforma economic and financial parameters from conf/base/proforma_presets.json.
+#     """
+#     with open("conf/base/proforma_presets.json") as f:
+#         return json.load(f)
+
+@st.cache_data(ttl=300)
 def _load_proforma_defaults() -> dict:
-    """
-    Load the default proforma economic and financial parameters from conf/base/proforma_presets.json.
-    """
-    with open("conf/base/proforma_presets.json") as f:
-        return json.load(f)
+    resp = requests.get(f"{API_BASE_URL}/proforma/presets", timeout=5)
+    resp.raise_for_status()
+    return resp.json()
 
 def _seed_defaults(prefix: str = "credits_"):
     """
