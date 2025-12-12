@@ -169,7 +169,10 @@ SPECIES_LABELS = {
     "tpa_wh": "western hemlock",
     "tpa_ss": "Sitka spruce",
     "tpa_pp": "ponderosa pine",
-    "tpa_wl": "western larch"
+    "tpa_wl": "western larch",
+    "tpa_wp": "southwestern white pine",
+    "tpa_pm": "pinyon Pine",
+    "tpa_ju": "Utah juniper"
 }
 
 @st.cache_data
@@ -681,8 +684,9 @@ def carbon_chart():
     }
 
     # TPA group for combined chart
-    tpa_group = ["DF_TPA", "WH_TPA", "RC_TPA", "SS_TPA"]
-    metric_options = list(single_metric_vars.keys()) + ["Stocking by species (TPA)"]
+    # tpa_group = ["DF_TPA", "WH_TPA", "RC_TPA", "SS_TPA"]
+    # metric_options = list(single_metric_vars.keys()) + ["Stocking by species (TPA)"]
+    metric_options = list(single_metric_vars.keys())
 
     # --- Two selectors: primary & secondary ---
 
@@ -710,54 +714,54 @@ def carbon_chart():
 
     def render_metric_chart(selected_metric_label: str, title_suffix: str = ""):
         """Render a line chart for a selected metric label."""
-        if selected_metric_label == "Stocking by species (TPA)":
-            available_tpa_cols = [c for c in tpa_group if c in plot_df.columns]
-            if not available_tpa_cols:
-                st.warning("TPA metrics are not available in the current model outputs.")
-                return
+        # if selected_metric_label == "Stocking by species (TPA)":
+        #     available_tpa_cols = [c for c in tpa_group if c in plot_df.columns]
+        #     if not available_tpa_cols:
+        #         st.warning("TPA metrics are not available in the current model outputs.")
+        #         return
 
-            tpa_long = plot_df[["Year"] + available_tpa_cols].melt(
-                "Year", var_name="Metric", value_name="Value"
+        #     tpa_long = plot_df[["Year"] + available_tpa_cols].melt(
+        #         "Year", var_name="Metric", value_name="Value"
+        #     )
+        #     tpa_chart = (
+        #         alt.Chart(tpa_long)
+        #         .mark_line(point=True)
+        #         .encode(
+        #             x=alt.X("Year:O", title="Year", axis=alt.Axis(labelAngle=30)),
+        #             y=alt.Y("Value:Q", title="Trees per acre"),
+        #             color=alt.Color("Metric:N", title="Metric"),
+        #             tooltip=["Year", "Metric", "Value"],
+        #         )
+        #         .properties(
+        #             title=f"Stocking by species (trees per acre){title_suffix}",
+        #             height=350,
+        #         )
+        #     )
+        #     st.altair_chart(tpa_chart, use_container_width=True)
+
+        # else:
+        var_name = single_metric_vars[selected_metric_label]
+        if var_name not in plot_df.columns:
+            st.warning(f"Metric '{selected_metric_label}' is not available in the current model outputs.")
+            return
+
+        df_metric = plot_df[["Year", var_name]]
+
+        # Use the friendly label as y-axis title
+        metric_chart = (
+            alt.Chart(df_metric)
+            .mark_line(point=True)
+            .encode(
+                x=alt.X("Year:O", title="Year", axis=alt.Axis(labelAngle=30)),
+                y=alt.Y(f"{var_name}:Q", title=selected_metric_label),
+                tooltip=["Year", var_name],
             )
-            tpa_chart = (
-                alt.Chart(tpa_long)
-                .mark_line(point=True)
-                .encode(
-                    x=alt.X("Year:O", title="Year", axis=alt.Axis(labelAngle=30)),
-                    y=alt.Y("Value:Q", title="Trees per acre"),
-                    color=alt.Color("Metric:N", title="Metric"),
-                    tooltip=["Year", "Metric", "Value"],
-                )
-                .properties(
-                    title=f"Stocking by species (trees per acre){title_suffix}",
-                    height=350,
-                )
+            .properties(
+                title=f"{selected_metric_label}{title_suffix}",
+                height=350,
             )
-            st.altair_chart(tpa_chart, use_container_width=True)
-
-        else:
-            var_name = single_metric_vars[selected_metric_label]
-            if var_name not in plot_df.columns:
-                st.warning(f"Metric '{selected_metric_label}' is not available in the current model outputs.")
-                return
-
-            df_metric = plot_df[["Year", var_name]]
-
-            # Use the friendly label as y-axis title
-            metric_chart = (
-                alt.Chart(df_metric)
-                .mark_line(point=True)
-                .encode(
-                    x=alt.X("Year:O", title="Year", axis=alt.Axis(labelAngle=30)),
-                    y=alt.Y(f"{var_name}:Q", title=selected_metric_label),
-                    tooltip=["Year", var_name],
-                )
-                .properties(
-                    title=f"{selected_metric_label}{title_suffix}",
-                    height=350,
-                )
-            )
-            st.altair_chart(metric_chart, use_container_width=True)
+        )
+        st.altair_chart(metric_chart, use_container_width=True)
 
     # --- Render the two charts ---
     render_metric_chart(primary_metric_label, title_suffix="")

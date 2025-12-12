@@ -5,6 +5,7 @@
         "tpa_pp": 55,
         "tpa_df": 15,
         "tpa_wl": 20,
+        "tpa_pm": 20,
         "_tpa_cap": 435
     },
     "PN": {
@@ -14,6 +15,15 @@
         "tpa_wh": 15,
         "tpa_rc": 20,
         "tpa_ss": 20,
+        "_tpa_cap": 435
+    },
+    "CR": {
+        "survival": 70,
+        "si": 125,
+        "tpa_pp": 60,
+        "tpa_df": 15,
+        "tpa_wp": 20,
+        "tpa_pm": 20,
         "_tpa_cap": 435
     }
 }
