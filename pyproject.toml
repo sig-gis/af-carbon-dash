@@ -26,4 +26,5 @@ dependencies = [
     "shapely>=2.1.1",
     "streamlit>=1.48.1",
     "streamlit-folium>=0.25.1",
+    "uvicorn>=0.38.0",
 ]
