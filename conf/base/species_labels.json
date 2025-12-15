@@ -4,5 +4,8 @@
   "tpa_wh": "western hemlock",
   "tpa_ss": "Sitka spruce",
   "tpa_pp": "ponderosa pine",
-  "tpa_wl": "western larch"
+  "tpa_wl": "western larch",
+  "tpa_wp": "southwestern white pine",
+  "tpa_pm": "pinyon Pine",
+  "tpa_ju": "Utah juniper"
 }

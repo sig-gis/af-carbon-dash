@@ -14,6 +14,7 @@ from utils.functions.helper import  H
 from utils.functions.statefulness import  _carbon_units_keys, _init_planting_state, _init_carbon_units_state, _backup_keys, _restore_backup, _species_keys, _label_for
 from utils.functions.models import build_input_vector, pick_fvs_models, load_fvs_models, predict_metrics
 from utils.config import get_api_base_url
+from utils.functions.mlflow_models import load_fvs_model_from_registry, run_fvs_prediction
 
 API_BASE_URL = get_api_base_url()
 
@@ -109,26 +110,46 @@ def carbon_chart():
 
     total_tpa = sum(int(st.session_state.get(k, 0)) for k in species_keys)
     
-    # load fvs models
-    models_path = pick_fvs_models(
-        base='data/',
-        variant=st.session_state.get("selected_variant", "PN"),
-        loccode=st.session_state.get("FVSLocCode"),
-    )
-    models = load_fvs_models(models_path)
+    # # load fvs models
+    # models_path = pick_fvs_models(
+    #     base='data/',
+    #     variant=st.session_state.get("selected_variant", "PN"),
+    #     loccode=st.session_state.get("FVSLocCode"),
+    # )
+    # models = load_fvs_models(models_path)
 
-    # create model input vector from user inputs
-    X = build_input_vector(
+    # # create model input vector from user inputs
+    # X = build_input_vector(
+    #     survival=st.session_state["survival"],
+    #     total_tpa=total_tpa,
+    #     sp1=st.session_state[species_keys[0]],  # indexing this way works because spp order is preserved from JSON w/ tuple
+    #     sp2=st.session_state[species_keys[1]],  # see _species_keys function
+    #     sp3=st.session_state[species_keys[2]],
+    #     sp4=st.session_state[species_keys[3]],
+    #     si=st.session_state["si"],
+    # )
+
+    # st.session_state.carbon_df = predict_metrics(models, X)
+
+    @st.cache_resource  # <- for heavy, non-serializable objects
+    def get_fvs_model(variant: str, loccode: str, stage: str = "Production"):
+        # Only called once per (variant, loccode, stage) per process
+        return load_fvs_model_from_registry(variant, loccode, stage)
+
+    # inside the page:
+    m = get_fvs_model(variant=st.session_state.get("selected_variant", "PN"), 
+                      loccode=st.session_state.get("FVSLocCode"))
+
+    st.session_state.carbon_df = run_fvs_prediction(
+        m,
         survival=st.session_state["survival"],
         total_tpa=total_tpa,
-        sp1=st.session_state[species_keys[0]],  # indexing this way works because spp order is preserved from JSON w/ tuple
-        sp2=st.session_state[species_keys[1]],  # see _species_keys function
+        sp1=st.session_state[species_keys[0]],
+        sp2=st.session_state[species_keys[1]],
         sp3=st.session_state[species_keys[2]],
         sp4=st.session_state[species_keys[3]],
         si=st.session_state["si"],
     )
-
-    st.session_state.carbon_df = predict_metrics(models, X)
 
     toggle_oc = st.toggle('Show Project Acreage', True, 'toggle_oc', H("toggle.inputs.acres"))
 
