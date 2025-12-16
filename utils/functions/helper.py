@@ -1,5 +1,6 @@
 import streamlit as st
 import json
+import numpy as np
 
 @st.cache_data
 def load_help(path: str = "conf/base/help_text.json"):

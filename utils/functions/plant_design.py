@@ -12,19 +12,11 @@ from urllib.parse import urlparse
 
 from utils.functions.helper import  H
 from utils.functions.statefulness import  _carbon_units_keys, _init_planting_state, _init_carbon_units_state, _backup_keys, _restore_backup, _species_keys, _label_for
+from utils.config import get_api_base_url, normalize_params
 
-from utils.config import get_api_base_url
+from model_service.main import load_variant_presets, _load_proforma_defaults
 
 API_BASE_URL = get_api_base_url()
-
-@st.cache_data
-def load_variant_presets(path: str = "conf/base/FVSVariant_presets.json"):
-    """
-    Load FVS variant preset values from a JSON file and return them as a
-    dictionary. Cached by Streamlit to avoid repeated disk access.
-    """
-    with open(path, "r") as f:
-        return json.load(f)
 
 def _credits_keys(prefix: str = "credits_") -> list[str]:
     """
@@ -33,6 +25,15 @@ def _credits_keys(prefix: str = "credits_") -> list[str]:
     """
     defaults = _load_proforma_defaults()
     return [prefix + k for k in defaults.keys()]
+
+def _seed_defaults(prefix: str = "credits_"):
+    """
+    Seed Streamlit session state with default financial and credit parameters
+    based on proforma defaults. Only sets missing keys.
+    """
+    defaults = _load_proforma_defaults()
+    for k, v in defaults.items():
+        st.session_state.setdefault(prefix + k, v)
 
 def planting_sliders():
     """
@@ -84,53 +85,27 @@ def planting_sliders():
     # Backup latest values so they're available if user navigates away and back
     _backup_keys(["survival", "si", "net_acres", *species_keys])
 
-@st.cache_data(ttl=300)
-def fetch_carbon_coefficients():
-    resp = requests.get(f"{API_BASE_URL}/carbon/coefficients", timeout=5)
-    resp.raise_for_status()
-    return resp.json()
-
 def carbon_chart():
-    """
-    Compute cumulative and annual carbon scores using regression coefficients and
-    current planting inputs. Build a DataFrame and render an Altair time-series
-    carbon chart. Store intermediate data in session state.
-    """
-    # Ensure the sliders have been set
     if not all(k in st.session_state for k in ["tpa_df", "tpa_rc", "tpa_wh", "survival", "si", "net_acres"]):
         st.info("Adjust Planting Design sliders to see the carbon output.")
         return
 
-    tpa_df = st.session_state["tpa_df"]
-    tpa_rc = st.session_state["tpa_rc"]
-    tpa_wh = st.session_state["tpa_wh"]
-    tpa_total = tpa_df + tpa_rc + tpa_wh
-    survival = st.session_state["survival"]
-    si = st.session_state["si"]
-
-    # Load coefficients
-    # with open("conf/base/carbon_model_coefficients.json", "r") as file:
-    #     coefficients = json.load(file)
-
-    coefficients = fetch_carbon_coefficients()
-
-    years, c_scores, ann_c_scores = [], [], []
-    for year in coefficients.keys():
-        c_score = (coefficients[year]['TPA_DF'] * tpa_df 
-                   + coefficients[year]['TPA_RC'] * tpa_rc 
-                   + coefficients[year]['TPA_WH'] * tpa_wh
-                   + coefficients[year]['TPA_total'] * tpa_total
-                   + coefficients[year]['Survival'] * survival
-                   + coefficients[year]['SI'] * si
-                   + coefficients[year]['Intercept'])
-        ann_c_score = c_score - c_scores[-1] if c_scores else c_score
-        c_scores.append(c_score)
-        ann_c_scores.append(ann_c_score)
-        years.append(int(year))
+    payload = {
+        "tpa_df": st.session_state["tpa_df"],
+        "tpa_rc": st.session_state["tpa_rc"],
+        "tpa_wh": st.session_state["tpa_wh"],
+        "survival": st.session_state["survival"],
+        "si": st.session_state["si"],
+    }
     
-    year_0 = pd.DataFrame({"Year": [2024], "C_Score": [0], "Annual_C_Score": [0]})
-    df = pd.DataFrame({"Year": years, "C_Score": c_scores, "Annual_C_Score": ann_c_scores})
-    df = pd.concat([year_0, df])
+    resp = requests.post(
+        f"{API_BASE_URL}/carbon/calculate",
+        json=payload,
+        timeout=10,
+    )
+    resp.raise_for_status()
+
+    df = pd.DataFrame(resp.json()["carbon_df"])
     st.session_state.carbon_df = df
 
     toggle_oc = st.toggle('Show Project Acreage', True, 'toggle_oc', H("toggle.inputs.acres"))
@@ -159,146 +134,63 @@ def carbon_chart():
     st.success(f"Final Carbon Output (year {max(plot_df['Year'])}): {plot_df['C_Score'].iloc[-1]:.2f}")
 
 def carbon_units():
-    """
-    Convert annual carbon scores into carbon units (CUs) for each selected
-    protocol. Apply buffers, rules, and interpolation. Store results in session
-    state and render the CU chart.
-    """
-    if "carbon_df" not in st.session_state:
-            st.error("No carbon data found. Adjust sliders first.")
+        if "carbon_df" not in st.session_state:
+            st.error("No carbon data found.")
             st.stop()
 
-    df = st.session_state.carbon_df.copy()
+        protocols = st.session_state.get(
+            "carbon_units_inputs", {}
+        ).get("protocols", [])
 
-    inputs = st.session_state.get("carbon_units_inputs", {"protocols": ["ACR/CAR/VERRA"]})
-    protocols = inputs["protocols"]
+        if not protocols:
+            st.info("Select at least one protocol.")
+            return
 
-    all_protocol_dfs = []
-    
-    for protocol in protocols:
-        df_base = df.copy()
-        df_base['Onsite Total CO2'] = df_base['C_Score'] * 3.667
+        payload = {
+            "carbon_rows": st.session_state.carbon_df[
+                ["Year", "C_Score"]
+            ].to_dict(orient="records"),
+            "protocols": protocols,
+        }
 
-        if protocol == "ACR/CAR/VERRA": 
-            BUF = 0.20
-            coeff = 1.0
-            apply_buf = True
-        elif protocol == "GS": #no buffer value
-            coeff = 1.0
-            apply_buf = False
-        elif protocol == "ISO":
-            BUF = 0.25 #dummy value
-            coeff = 1.0
-            apply_buf = True
-        else:
-            BUF = 0.20
-            coeff = 1.0
-            apply_buf = True
+        json.dumps(payload) 
 
-        df_base['Onsite Total CO2'] = df_base['Onsite Total CO2'] * coeff
-
-        # Interpolation
-        df_poly = df_base[['Year', 'Onsite Total CO2']].sort_values('Year')
-        X = df_poly['Year'].values
-        y = df_poly['Onsite Total CO2'].values
-        spline = make_interp_spline(X, y, k=3)
-
-        years_interp = np.arange(df_poly['Year'].min(), df_poly['Year'].max() + 1)
-        y_interp = spline(years_interp)
-
-        df_interp = pd.DataFrame({
-            'Year': years_interp,
-            'Onsite Total CO2_interp': y_interp,
-            'ModelType': 'Project',
-            'Protocol': protocol
-        })
-
-        baseline_df = pd.DataFrame({
-            'Year': years_interp,
-            'Onsite Total CO2_interp': 0,
-            'ModelType': 'Baseline',
-            'Protocol': protocol
-        })
-
-        baseline_df['delta_C_baseline'] = baseline_df['Onsite Total CO2_interp'].diff()
-        df_interp['delta_C_project'] = df_interp['Onsite Total CO2_interp'].diff()
-
-        merged_df = pd.merge(
-            baseline_df[['Year', 'delta_C_baseline']],
-            df_interp[['Year', 'delta_C_project']],
-            on='Year'
+        resp = requests.post(
+            f"{API_BASE_URL}/carbon/units",
+            json=payload,
+            timeout=10,
         )
+        resp.raise_for_status()
 
-        # Compute CU only if buffer applies
-        if apply_buf:
-            merged_df['C_total'] = merged_df['delta_C_project'] - merged_df['delta_C_baseline']
-            merged_df['BUF'] = merged_df['C_total'] * BUF
-            merged_df['CU'] = merged_df['C_total'] - merged_df['BUF']
-        else:
-            merged_df['C_total'] = merged_df['delta_C_project'] - merged_df['delta_C_baseline']
-            merged_df['BUF'] = 0.0
-            merged_df['CU'] = merged_df['C_total']
+        final_df = pd.DataFrame(resp.json()["rows"])
 
-        merged_df['Protocol'] = protocol
-
-        for col in ['delta_C_project', 'delta_C_baseline', 'C_total', 'BUF', 'CU']:
-            merged_df[col] = merged_df[col].round(2)
-
-        # Append each protocol's results to the list
-        all_protocol_dfs.append(merged_df)
-
-    # Combine results
-    if all_protocol_dfs:
-        final_df = pd.concat(all_protocol_dfs)
+        if final_df.empty:
+            st.error("No protocols selected or no data available to plot.")
+            return
+        
         st.session_state.merged_df = final_df
-    else:
-        st.error("No protocols selected or no data available to plot.")
-        return
 
-    toggle_ce = st.toggle('Show Project Acreage', True, 'toggle_ce', H("toggle.inputs.acres"))
+        toggle_ce = st.toggle('Show Project Acreage', True, 'toggle_ce', H("toggle.inputs.acres"))
 
-    # Adjust chart values based on toggle
-    plot_df = final_df.copy()
-    if toggle_ce:
-        plot_df['CU'] = plot_df['CU'] * st.session_state["net_acres"]
+        # Adjust chart values based on toggle
+        plot_df = final_df.copy()
+        if toggle_ce:
+            plot_df['CU'] = plot_df['CU'] * st.session_state["net_acres"]
 
-    chart_title = "(tons/project)" if toggle_ce else "(tons/acre)"
+        chart_title = "(tons/project)" if toggle_ce else "(tons/acre)"
 
-    CU_chart = alt.Chart(plot_df).mark_line(point=True).encode(
-        x=alt.X('Year:O', title='Year', axis=alt.Axis(labelAngle=30)),
-        y=alt.Y('CU:Q', title='CUs ' + chart_title),
-        color='Protocol:N',
-        tooltip=['Year', 'CU', 'Protocol']
-    ).properties(
-        title='Annual CU Estimates ' + chart_title,
-        width=600,
-        height=400
-    ).configure_axis(grid=True, gridOpacity=0.3)
+        CU_chart = alt.Chart(plot_df).mark_line(point=True).encode(
+            x=alt.X('Year:O', title='Year', axis=alt.Axis(labelAngle=30)),
+            y=alt.Y('CU:Q', title='CUs ' + chart_title),
+            color='Protocol:N',
+            tooltip=['Year', 'CU', 'Protocol']
+        ).properties(
+            title='Annual CU Estimates ' + chart_title,
+            width=600,
+            height=400
+        ).configure_axis(grid=True, gridOpacity=0.3)
 
-    st.altair_chart(CU_chart, use_container_width=True)
-
-# @st.cache_data
-# def _load_proforma_defaults() -> dict:
-#     """
-#     Load the default proforma economic and financial parameters from conf/base/proforma_presets.json.
-#     """
-#     with open("conf/base/proforma_presets.json") as f:
-#         return json.load(f)
-
-@st.cache_data(ttl=300)
-def _load_proforma_defaults() -> dict:
-    resp = requests.get(f"{API_BASE_URL}/proforma/presets", timeout=5)
-    resp.raise_for_status()
-    return resp.json()
-
-def _seed_defaults(prefix: str = "credits_"):
-    """
-    Seed Streamlit session state with default financial and credit parameters
-    based on proforma defaults. Only sets missing keys.
-    """
-    defaults = _load_proforma_defaults()
-    for k, v in defaults.items():
-        st.session_state.setdefault(prefix + k, v)
+        st.altair_chart(CU_chart, use_container_width=True)
 
 def credits_inputs(prefix: str = "credits_") -> dict:
     """
@@ -353,56 +245,6 @@ def credits_inputs(prefix: str = "credits_") -> dict:
         "years_advance": years_advance,
     }
 
-def _compute_proforma(df_ert_ac: pd.DataFrame, p: dict) -> pd.DataFrame:
-    """
-    df_ert_ac: DataFrame with ['Year','CU','Protocol'] where CU is per-acre
-    p: params dict from credits_inputs()
-    returns full proforma DataFrame with costs, revenue, net revenue for each protocol
-    """
-    results = []
-    for protocol, subdf in df_ert_ac.groupby("Protocol"):
-        df = subdf[['Year', 'CU']].copy()
-        df = df.rename(columns={'CU': 'CU_ac'})
-        df['Project_acres'] = p['net_acres']
-        df['CU'] = df['CU_ac'] * p['net_acres']
-
-        # credit volume: sell every 5th year including start year
-        df['CUs_Sold'] = 0.0
-        for i, row in df.iterrows():
-            if row['Year'] == p['year_start'] or ((row['Year'] - p['year_start']) % 5 == 0 and row['Year'] > p['year_start']):
-                df.loc[i, 'CUs_Sold'] = df.loc[max(0, i-4):i, 'CU'].sum()
-
-        # revenue
-        df['CU_Credit_Price'] = p['price_per_ert_initial'] * ((1 + p['credit_price_increase']) ** (df['Year'] - p['year_start']))
-        df['Total_Revenue'] = df['CUs_Sold'] * df['CU_Credit_Price']
-
-        # costs
-        df['Validation_and_Verification'] = 0
-        df.loc[df['Year'] == p['year_start'], 'Validation_and_Verification'] = p['validation_cost']
-        df.loc[(df['Year'] > p['year_start']) & ((df['Year'] - p['year_start']) % 5 == 0), 'Validation_and_Verification'] = p['verification_cost']
-
-        df['Survey_Cost'] = 0
-        df.loc[(df['Year'] - p['year_start']) % 5 == 4, 'Survey_Cost'] = p['num_plots'] * p['cost_per_cfi_plot'] * (1 + p['anticipated_inflation'])
-
-        df['Registry_Fees'] = p['registry_fees']
-        df['Issuance_Fees'] = df['CUs_Sold'] * p['issuance_fee_per_ert']
-        df['Planting_Cost'] = p['planting_cost']
-        df['Seedling_Cost'] = p['seedling_cost']
-
-        df['Total_Costs'] = (
-            df['Validation_and_Verification'] +
-            df['Survey_Cost'] +
-            df['Registry_Fees'] +
-            df['Issuance_Fees'] +
-            df['Planting_Cost'] +
-            df['Seedling_Cost']
-        )
-        df['Net_Revenue'] = df['Total_Revenue'] - df['Total_Costs']
-        df['Protocol'] = protocol
-        results.append(df)
-
-    return pd.concat(results, ignore_index=True)
-
 def credits_results(params: dict, prefix: str = "credits_") -> dict:
     """
     Execute the proforma model, summarize financial outputs, render revenue
@@ -414,9 +256,24 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
 
     # Extract merged CU data per protocol
     df_ert_ac = st.session_state.merged_df[['Year', 'CU', 'Protocol']].copy()
+    df_ert_ac = df_ert_ac.replace([np.inf, -np.inf], np.nan)
+    df_ert_ac = df_ert_ac.dropna(subset=['CU'])
 
-    # Compute full proforma table per protocol
-    df_pf = _compute_proforma(df_ert_ac, params)
+    payload = {
+        "df_ert_ac": df_ert_ac.to_dict(orient="records"),
+        "params": normalize_params(params),
+    }
+
+    json.dumps(payload)
+    resp = requests.post(
+        f"{API_BASE_URL}/proforma/compute",
+        json=payload,
+        timeout=10,
+    )
+
+    resp.raise_for_status()
+
+    df_pf = pd.DataFrame(resp.json()["proforma_rows"])
 
     # Drop rows with NaN Net_Revenue to avoid chart issues
     df_pf = df_pf.dropna(subset=['Net_Revenue'])
@@ -425,21 +282,7 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
     year_start = params['year_start']
     year_stop = int(df_pf['Year'].max())
 
-    summaries = []
-    for protocol, subdf in df_pf.groupby("Protocol"):
-        total_net = subdf['Net_Revenue'].sum()
-        npv_yr20 = float(npf.npv(
-            params['anticipated_inflation'] + params['discount_rate'],
-            subdf[subdf['Year'] <= (year_start + 20)]['Net_Revenue']
-        ))
-        npv_per_acre = npv_yr20 / params['net_acres']
-        summaries.append({
-            "Protocol": protocol,
-            "total_net": total_net,
-            "npv_yr20": npv_yr20,
-            "npv_per_acre": npv_per_acre
-        })
-    summaries_df = pd.DataFrame(summaries)
+    summaries_df = pd.DataFrame(resp.json()["summaries"])
 
     # Filter chart to every 5 years (optional)
     include_years = np.arange(year_start, year_stop + 5, 5)

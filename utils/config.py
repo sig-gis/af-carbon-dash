@@ -1,5 +1,5 @@
 import os
-import streamlit as st
+import numpy as np
 from urllib.parse import urlparse
 
 def get_api_base_url() -> str:
@@ -9,7 +9,6 @@ def get_api_base_url() -> str:
     # Priority: env var → Streamlit secrets → local default
     api_url = (
         os.getenv("CARBON_API_BASE_URL")
-        or st.secrets.get("CARBON_API_BASE_URL", None)
     )
 
     # If nothing set, assume local FastAPI for dev
@@ -27,3 +26,23 @@ def get_api_base_url() -> str:
             )
 
     return api_url
+
+def normalize_params(params: dict) -> dict:
+    """
+    Convert params dict into JSON-safe Python primitives.
+    - Converts numpy scalars → Python floats
+    - Replaces NaN / inf → None
+    """
+    clean = {}
+
+    for k, v in params.items():
+        if isinstance(v, (int, float, np.generic)):
+            v = float(v)
+            if not np.isfinite(v):
+                clean[k] = None
+            else:
+                clean[k] = v
+        else:
+            clean[k] = v
+
+    return clean
