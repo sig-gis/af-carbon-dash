@@ -342,9 +342,8 @@
 #heading(level: 1, outlined: false)[Resilient Reforestation Plan]
 <gresham>
 ]
-#place(top + right, dx: 0.8in, dy: 0.2in)[
-#box(image("report_files/figure-typst/cell-6-output-1.svg", width: 1.25in))
-
+#place(top + right, dx: 0.8in, dy: 0.4in)[
+#box(image("data/fig/AFlogo3.png", width: 1.5in))
 ]
 ]
 
@@ -389,13 +388,13 @@ supplement: "Figure",
 #v(0.5cm)  // vertical gap
 
 #align(left)[
-  #text(weight: "bold", size: 11pt)[This report was generated directly from the #link("https://nwgiebink-af-carbon-dash.share.connect.posit.cloud/")[Reforestation Financial & Carbon Dashboard]. The dashboard allows users to choose species, planting densities, site conditions, regional variants, and carbon protocols; these selections feed directly into the modeling that underlies this document.]
+  #text(weight: "bold", size: 11pt)[This report was generated directly from the #link("https://nwgiebink-af-carbon-dash.share.connect.posit.cloud/")[Reforestation Financial & Carbon Dashboard]. The dashboard allows users to adjust planting parameters (species mix, site index, and survival), select one or more carbon accounting protocols, and adjust financial options. Forest stand metrics, such as cumulative onsite carbon, are calculated in real-time based on user inputs and are used to estimate carbon credits and associated project financials.]
 ]
 
 #v(0.25cm)  // vertical gap
 
 #align(left)[
-  #text(weight: "bold", size: 11pt)[The report uses the Forest Vegetation Simulator (FVS) - a widely applied, publicly available forest growth and yield model used across the United States. Each FVS variant represents a specific geographic region and contains its own calibrated parameters, species list, growth equations, and ecological assumptions. Selecting a variant ensures that tree growth, mortality, and carbon accumulation are modeled in a way that reflects the environmental conditions of the project location.]
+  #text(weight: "bold", size: 11pt)[The report uses predictions from machine learning models trained to approximate outputs from the Forest Vegetation Simulator (FVS) - a widely applied, publicly available forest growth and yield model used across the United States. Each FVS variant represents a specific geographic region and contains its own calibrated parameters, species list, growth equations, and ecological assumptions; our machine learning models are trained to capture variant-level differences represented by FVS. Selecting a variant ensures that tree growth, mortality, and carbon accumulation are modeled in a way that reflects the environmental conditions of the project location.]
 ]
 
 #v(0.25cm)  // vertical gap
@@ -418,18 +417,18 @@ supplement: "Figure",
 #v(0.25cm)  // vertical gap
 
 #align(left)[
-  #text(weight: "bold", size: 11pt)[The carbon projections presented here are generated using the FVS growth model for the selected species, planting density, and site conditions. FVS simulates tree- and stand-level carbon accumulation over time, including live biomass, mortality, and structural changes in the forest. The dashboard combines these raw five-year outputs and interpolates them to produce annual estimates of on-site carbon storage. This approach preserves the long-term growth trends modeled by FVS while providing more continuous year-by-year results.]
+  #text(weight: "bold", size: 11pt)[The carbon projections presented here are generated using the ML-approximated FVS growth model for the selected species mix and site conditions. FVS simulates tree- and stand-level carbon accumulation over time, including live biomass, mortality, and structural changes in the forest. The dashboard combines these raw five-year outputs and interpolates them to produce annual estimates of on-site carbon storage. This approach preserves the long-term growth trends modeled by FVS while providing more continuous year-by-year results.]
 ]
 
 #v(0.15cm)  // vertical gap
 
 #figure([
-#box(image("report_files/figure-typst/cell-11-output-1.svg", width: 70%))
+#box(image("report_files/figure-typst/cell-11-output-1.svg", width: 65%))
 ], caption: figure.caption(
 position: bottom, 
 [
   #align(center)[
-  #text(weight: "bold", size: 11pt, fill: brand-color.primary)[Figure 2. Annual cummulative onsite Carbon per acre (tons CO₂ per acre).]
+  #text(weight: "bold", size: 11pt, fill: brand-color.primary)[Figure 2. Annual cumulative onsite Carbon per acre (tons CO₂ per acre).]
 ]
 ]), 
 kind: "quarto-float-fig", 
@@ -445,12 +444,12 @@ supplement: "Figure",
 #v(0.05cm)  // vertical gap
 
 #figure([
-#box(image("report_files/figure-typst/cell-12-output-1.svg", width: 70%))
+#box(image("report_files/figure-typst/cell-12-output-1.svg", width: 65%))
 ], caption: figure.caption(
 position: bottom, 
 [
   #align(center)[
-  #text(weight: "bold", size: 11pt, fill: brand-color.primary)[Figure 3. Annual cummulative onsite Carbon for the full project area (tons CO₂).]
+  #text(weight: "bold", size: 11pt, fill: brand-color.primary)[Figure 3. Annual cumulative onsite Carbon for the full project area (tons CO₂).]
 ]
 ]), 
 kind: "quarto-float-fig", 
@@ -482,7 +481,7 @@ supplement: "Figure",
 #v(0.35cm)  // vertical gap
 
 #align(left)[
-  #text(weight: "bold", size: 11pt)[The dashboard standardizes biological modeling by using FVS for all protocols (see FAQs), and then applies protocol-specific rules to calculate eligible credits. This ensures that differences shown in the graphs reflect accounting rules, not differences in forest growth modeling.]
+  #text(weight: "bold", size: 11pt)[The dashboard standardizes biological modeling by using ML-approximated FVS for all protocols (see FAQs), and then applies protocol-specific rules to calculate eligible credits. This ensures that differences shown in the graphs reflect accounting rules, not differences in forest growth modeling.]
 ]
 
 #pagebreak()
@@ -540,7 +539,7 @@ The following cost categories are included in the projection:
   and issuance process.
 - Initial planting costs and seedling costs, applied at the start of the project.
 - Anticipated inflation, applied to verification-related and registry-related expenses.
-- Discount rate, which is used in calculation of the 20-year net present-value.
+- Discount rate, which is used in calculation of the 20-year net present value.
 
 Net revenue represents the difference between Total Revenue and Total Costs.
 
@@ -598,7 +597,7 @@ supplement: "Figure",
   #text(weight: "bold", size: 11pt, fill: brand-color.primary)[What does "Cumulative Onsite Carbon" mean?]
 ]
 
-Cumulative Onsite Carbon is the net amount of carbon stored within project area over time, adding up all eligible carbon.  
+Cumulative Onsite Carbon is the net amount of carbon stored within a project area over time, adding up all eligible carbon.  
 It reflects everything that happens within each acre in the selected variant.
 ]
 #v(0.5cm)  // vertical gap
@@ -617,7 +616,7 @@ The baseline scenario in the current version of the dashboard assumes bare groun
   #text(weight: "bold", size: 11pt, fill: brand-color.primary)[What Forest Vegetation Simulator (FVS) modeling approach is applied?]
 ]
 
-The current version of the dashboard applies a let-grow simulation for the duration of the project, with a growth/reporting interval of 5 years.
+The current version of the dashboard approximates a let-grow simulation for the duration of the project, with a growth/reporting interval of 5 years.
 ]
 #v(0.5cm)  // vertical gap
 
@@ -665,7 +664,7 @@ Below are the protocols currently supported in the dashboard and the modeled ass
   #text(weight: "bold", size: 11pt, fill: brand-color.primary)[How are FVS simulations approximated for real-time analysis in the dashboard?]
 ]
 
-Coming soon.
+We run a sample of single-stand FVS simulations representing the project lifetime over a range of possible combinations of planting parameters, repeated over each supported FVS Variant with variant-appropriate species. Using this representative sample of FVS simulations as a training set, we train Polynomial Regression models to predict FVS outputs for each timestep across the project lifetime. Each time the user tweaks planting parameters, the models make real-time predictions of FVS outputs, without the latency of running an FVS simulation.
 ]
 #v(0.5cm)  // vertical gap
 
