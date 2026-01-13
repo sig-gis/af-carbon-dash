@@ -39,4 +39,4 @@ ENV PATH="/app/.venv/bin:$PATH"
 EXPOSE 8000
 
 # Command to run the application
-CMD ["uvicorn", "model_service.main:app", "--host 0.0.0.0", "--port 8000"]
+CMD ["uvicorn", "model_service.main:app", "--host", "0.0.0.0", "--port", "8000"]
