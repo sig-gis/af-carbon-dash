@@ -2,6 +2,8 @@ import streamlit as st
 from pathlib import Path
 import json
 
+from model_service.main import load_species_labels
+
 def _planting_keys():
     """
     Return list of planting session state keys.
@@ -117,9 +119,6 @@ def _label_for(key: str) -> str:
     """
     Accessor for species labels loaded from conf/base/species_labels.json.
     """
-    LABELS_PATH = Path("conf/base/species_labels.json")
-
-    with LABELS_PATH.open("r") as f:
-        SPECIES_LABELS = json.load(f)
+    SPECIES_LABELS = load_species_labels()
 
     return SPECIES_LABELS.get(key, key.replace("tpa_", "TPA_").upper())

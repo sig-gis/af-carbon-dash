@@ -1,0 +1,17 @@
+{
+    "ACR/CAR/VERRA": {
+        "BUF": 0.20,
+        "coeff": 1.0,
+        "apply_buf": true
+    },
+    "GS": {
+        "BUF": 0.0,
+        "coeff": 1.0,
+        "apply_buf": false
+    },
+    "ISO": {
+        "BUF": 0.25,
+        "coeff": 1.0,
+        "apply_buf": true
+    }
+}
