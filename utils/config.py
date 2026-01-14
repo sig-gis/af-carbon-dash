@@ -13,7 +13,7 @@ def get_api_base_url() -> str:
 
     # If nothing set, assume local FastAPI for dev
     if not api_url:
-        api_url = "http://127.0.0.1:8000"
+        api_url = "https://model-service-api-test-526758851260.us-west1.run.app"
 
     env = os.getenv("ENV", "local")
 

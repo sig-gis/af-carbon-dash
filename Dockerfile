@@ -20,10 +20,12 @@ ENV UV_TOOL_BIN_DIR=/usr/local/bin
 COPY ./pyproject.toml ./uv.lock ./.python-version /app/
 
 # Install the project's dependencies using the lockfile and settings
-RUN --mount=type=cache,target=/root/.cache/uv \
-    --mount=type=bind,source=uv.lock,target=uv.lock \
-    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --locked --no-install-project
+# RUN --mount=type=cache,target=/root/.cache/uv \
+#     --mount=type=bind,source=uv.lock,target=uv.lock \
+#     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+#     uv sync --locked --no-install-project
+
+RUN uv sync --locked --no-install-project
 
 # Then, add the rest of the project source code and install it
 # Installing separately from its dependencies allows optimal layer caching
@@ -32,14 +34,16 @@ COPY model_service/ ./model_service/
 COPY conf/ ./conf/
 COPY utils/ ./utils/
 
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked
+# RUN --mount=type=cache,target=/root/.cache/uv \
+#     uv sync --locked
+
+RUN uv sync --locked
 
 # Place executables in the environment at the front of the path
 ENV PATH="/app/.venv/bin:$PATH"
 
 # Expose the port the app runs on
-EXPOSE 8000
+EXPOSE 8080
 
 # Command to run the application
-CMD ["uvicorn", "model_service.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "model_service.main:app", "--host", "0.0.0.0", "--port", "8080"]
