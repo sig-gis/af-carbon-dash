@@ -83,7 +83,7 @@ def run_proforma(req: ProformaRequest):
 
 @app.post("/carbon/calculate", response_model=CarbonResponse)
 def calculate_carbon(inputs: CarbonInputs):
-    coefficients = fetch_carbon_coefficients()
+    coefficients = get_carbon_coefficients()
 
     results = compute_carbon_scores(
         coefficients=coefficients,
