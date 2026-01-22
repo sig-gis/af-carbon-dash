@@ -27,3 +27,5 @@ reports/*
 # quarto/data
 quarto/data/*
 !quarto/data/.gitkeep
+
+.streamlit/*
