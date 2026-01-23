@@ -1,22 +1,25 @@
-import streamlit as st           
-import json                       
-import pandas as pd               
-import numpy as np                 
-import numpy_financial as npf     
-from pathlib import Path           
-from scipy.interpolate import make_interp_spline  
-import altair as alt  
+import streamlit as st
+import json
+import pandas as pd
+import numpy as np
+import numpy_financial as npf
+from pathlib import Path
+from scipy.interpolate import make_interp_spline
+import altair as alt
 import requests
 import os
 from urllib.parse import urlparse
+import io
 
 from utils.functions.helper import  H
 from utils.functions.statefulness import  _carbon_units_keys, _init_planting_state, _init_carbon_units_state, _backup_keys, _restore_backup, _species_keys, _label_for
 from utils.config import get_api_base_url, normalize_params
+from utils.quarto_config import get_api_quarto_url
 
 from model_service.main import load_variant_presets, _load_proforma_defaults
 
 API_BASE_URL = get_api_base_url()
+QUARTO_API_BASE_URL = get_api_quarto_url()
 
 def _credits_keys(prefix: str = "credits_") -> list[str]:
     """
@@ -339,6 +342,108 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
         help=H("credits.download_button")
     )
 
+def generate_report():
+    """
+    Collect project data and request PDF report from the Quarto API.
+    """
+    if "merged_df" not in st.session_state:
+        st.error("Complete the financial analysis first.")
+        return
+
+    # Collect data for the report
+    # Planting design - using static values for now (can be made dynamic later)
+    planting_design = [
+        {"column1": "Reforestation Strategy", "column2": "Mixed Species Planting"},
+        {"column1": "Survival Rate", "column2": f"{st.session_state.get('survival', 70)}%"},
+        {"column1": "Site Index", "column2": str(st.session_state.get('si', 120))},
+        {"column1": "Net Acres", "column2": str(st.session_state.get('net_acres', 10000))},
+    ]
+
+    # Species mix
+    species_mix = []
+    species_labels = {
+        "tpa_df": "Douglas-fir",
+        "tpa_rc": "red cedar",
+        "tpa_wh": "western hemlock",
+        "tpa_ss": "Sitka spruce",
+        "tpa_pp": "ponderosa pine",
+        "tpa_wl": "western larch"
+    }
+    for key, label in species_labels.items():
+        value = st.session_state.get(key, 0)
+        if value > 0:
+            species_mix.append({"column1": label, "column2": str(value)})
+
+    # Financial options 1
+    financial_options1 = [
+        {"column1": "# Plots", "column2": str(st.session_state.get('credits_num_plots', 1))},
+        {"column1": "Cost/CFI Plot, $", "column2": str(st.session_state.get('credits_cost_per_cfi_plot', 1))},
+        {"column1": "Initial Price/CU, $", "column2": str(st.session_state.get('credits_price_per_ert_initial', 1.0))},
+        {"column1": "Credit Price Increase, %", "column2": str(st.session_state.get('credits_credit_price_increase', 0.0))},
+    ]
+
+    # Financial options 2
+    financial_options2 = [
+        {"column1": "Registry Fees, $", "column2": str(st.session_state.get('credits_registry_fees', 1))},
+        {"column1": "Validation Cost, $", "column2": str(st.session_state.get('credits_validation_cost', 1))},
+        {"column1": "Verification Cost, $", "column2": str(st.session_state.get('credits_verification_cost', 1))},
+        {"column1": "Issuance Fee per CU, $", "column2": str(st.session_state.get('credits_issuance_fee_per_ert', 0.0))},
+        {"column1": "Anticipated Inflation, %", "column2": str(st.session_state.get('credits_anticipated_inflation', 0.0))},
+        {"column1": "Discount Rate, %", "column2": str(st.session_state.get('credits_discount_rate', 0.0))},
+        {"column1": "Initial Planting Cost, $", "column2": str(st.session_state.get('credits_planting_cost', 0))},
+        {"column1": "Initial Seedling Cost, $", "column2": str(st.session_state.get('credits_seedling_cost', 0))},
+    ]
+
+    # Carbon data from merged_df - map to expected column names
+    carbon_df = st.session_state.merged_df[['Year', 'CU', 'Protocol']].copy()
+    carbon_df = carbon_df.rename(columns={'CU': 'CUs'})
+
+    # Add placeholder columns that the notebook expects (no calculations)
+    carbon_df['Annual CO2 per acre'] = 0  # Placeholder
+    carbon_df['Annual CO2'] = 0  # Placeholder
+    carbon_df['NetRevenue'] = 0  # Placeholder
+    carbon_df['TotalRevenue'] = 0  # Placeholder
+    carbon_df['TotalCosts'] = 0  # Placeholder
+
+    carbon_data = carbon_df.to_dict(orient="records")
+
+    # Get selected variant
+    selected_variant = st.session_state.get("selected_variant", "PN")
+
+    payload = {
+        "data": {
+            "planting_design": planting_design,
+            "species_mix": species_mix,
+            "financial_options1": financial_options1,
+            "financial_options2": financial_options2,
+            "carbon": carbon_data,
+            "selected_variant": selected_variant,
+        }
+    }
+
+    try:
+        with st.spinner("Generating report..."):
+            resp = requests.post(
+                f"{QUARTO_API_BASE_URL}/reports/generate",
+                json=payload,
+                timeout=60,  # Longer timeout for report generation
+            )
+            resp.raise_for_status()
+
+            # Create download button for the PDF
+            pdf_data = resp.content
+            st.download_button(
+                label="📄 Download Project Report (PDF)",
+                data=pdf_data,
+                file_name="project_report.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+            )
+            st.success("Report generated successfully!")
+
+    except requests.RequestException as e:
+        st.error(f"Failed to generate report: {str(e)}")
+
 @st.fragment
 def run_chart():
     """
@@ -389,4 +494,10 @@ def run_chart():
         with col5:
             proforma_params = credits_inputs(prefix="credits_")
         with col6:
-            credits_results(proforma_params) 
+            credits_results(proforma_params)
+
+    # Report Generation
+    with st.expander(label="Generate Report", expanded=False):
+        st.markdown("Generate a comprehensive PDF report of your project analysis.")
+        if st.button("📄 Generate Project Report", use_container_width=True, type="primary"):
+            generate_report()

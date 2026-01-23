@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.10"
 resolution-markers = [
     "python_full_version >= '3.13'",
@@ -27,7 +27,10 @@ dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.3.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "numpy-financial" },
+    { name = "pandas" },
+    { name = "pillow" },
     { name = "pyyaml" },
+    { name = "quarto" },
     { name = "requests" },
     { name = "scikit-learn" },
     { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -54,7 +57,10 @@ requires-dist = [
     { name = "matplotlib", specifier = ">=3.10.5" },
     { name = "numpy", specifier = ">=2.2.6" },
     { name = "numpy-financial", specifier = ">=1.0.0" },
+    { name = "pandas", specifier = ">=2.3.1" },
+    { name = "pillow", specifier = ">=11.3.0" },
     { name = "pyyaml", specifier = ">=6.0.2" },
+    { name = "quarto", specifier = ">=0.1.0" },
     { name = "requests", specifier = ">=2.32.4" },
     { name = "scikit-learn", specifier = ">=1.7.2" },
     { name = "scipy", specifier = ">=1.15.3" },
@@ -648,6 +654,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/cd/21/ade3ff6745a82ea8ad88552b4139d27941549e4f19125879f848ac8f3c3d/fastapi-0.124.4.tar.gz", hash = "sha256:0e9422e8d6b797515f33f500309f6e1c98ee4e85563ba0f2debb282df6343763", size = 378460, upload-time = "2025-12-12T15:00:43.891Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/3e/57/aa70121b5008f44031be645a61a7c4abc24e0e888ad3fc8fda916f4d188e/fastapi-0.124.4-py3-none-any.whl", hash = "sha256:6d1e703698443ccb89e50abe4893f3c84d9d6689c0cf1ca4fad6d3c15cf69f15", size = 113281, upload-time = "2025-12-12T15:00:42.44Z" },
+]
+
+[[package]]
+name = "fastjsonschema"
+version = "2.21.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/20/b5/23b216d9d985a956623b6bd12d4086b60f0059b27799f23016af04a74ea1/fastjsonschema-2.21.2.tar.gz", hash = "sha256:b1eb43748041c880796cd077f1a07c3d94e93ae84bba5ed36800a33554ae05de", size = 374130, upload-time = "2025-08-14T18:49:36.666Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cb/a8/20d0723294217e47de6d9e2e40fd4a9d2f7c4b6ef974babd482a59743694/fastjsonschema-2.21.2-py3-none-any.whl", hash = "sha256:1c797122d0a86c5cace2e54bf4e819c36223b552017172f32c5c024a6b77e463", size = 24024, upload-time = "2025-08-14T18:49:34.776Z" },
 ]
 
 [[package]]
@@ -1562,6 +1577,36 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/88/2b/d1206ec57d44efd07a08c75ecbeeef05e6b0457dc6777b6bd2d1e79713cd/narwhals-2.1.1.tar.gz", hash = "sha256:308ec9d0e40616b66b61cd76ede4083a4232ae04942a3acef7e514d49641cb77", size = 529925, upload-time = "2025-08-12T13:06:31.306Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/5b/9d/4e9b4b3de8e5b809a41eaa22e1516ea65636ca78eb342607434155ffe0ed/narwhals-2.1.1-py3-none-any.whl", hash = "sha256:dee7d7582d456ef325cb831a65b80783041ef841bbf183180ec445d132a154c6", size = 389471, upload-time = "2025-08-12T13:06:29.671Z" },
+]
+
+[[package]]
+name = "nbclient"
+version = "0.10.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "jupyter-client" },
+    { name = "jupyter-core" },
+    { name = "nbformat" },
+    { name = "traitlets" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/56/91/1c1d5a4b9a9ebba2b4e32b8c852c2975c872aec1fe42ab5e516b2cecd193/nbclient-0.10.4.tar.gz", hash = "sha256:1e54091b16e6da39e297b0ece3e10f6f29f4ac4e8ee515d29f8a7099bd6553c9", size = 62554, upload-time = "2025-12-23T07:45:46.369Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/83/a0/5b0c2f11142ed1dddec842457d3f65eaf71a0080894eb6f018755b319c3a/nbclient-0.10.4-py3-none-any.whl", hash = "sha256:9162df5a7373d70d606527300a95a975a47c137776cd942e52d9c7e29ff83440", size = 25465, upload-time = "2025-12-23T07:45:44.51Z" },
+]
+
+[[package]]
+name = "nbformat"
+version = "5.10.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "fastjsonschema" },
+    { name = "jsonschema" },
+    { name = "jupyter-core" },
+    { name = "traitlets" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/6d/fd/91545e604bc3dad7dca9ed03284086039b294c6b3d75c0d2fa45f9e9caf3/nbformat-5.10.4.tar.gz", hash = "sha256:322168b14f937a5d11362988ecac2a4952d3d8e3a2cbeb2319584631226d5b3a", size = 142749, upload-time = "2024-04-04T11:20:37.371Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a9/82/0340caa499416c78e5d8f5f05947ae4bc3cba53c9f038ab6e9ed964e22f1/nbformat-5.10.4-py3-none-any.whl", hash = "sha256:3b48d6c8fbca4b299bf3982ea7db1af21580e4fec269ad087b9e81588891200b", size = 78454, upload-time = "2024-04-04T11:20:34.895Z" },
 ]
 
 [[package]]
@@ -2626,6 +2671,22 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/30/f1/fd96138a0f152786a2ba517e9c6a8b1b3516719e412a90bb5d8eea6b660c/pyzmq-27.0.1-pp311-pypy311_pp73-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:b978c0678cffbe8860ec9edc91200e895c29ae1ac8a7085f947f8e8864c489fb", size = 567403, upload-time = "2025-08-03T05:05:17.326Z" },
     { url = "https://files.pythonhosted.org/packages/16/57/34e53ef2b55b1428dac5aabe3a974a16c8bda3bf20549ba500e3ff6cb426/pyzmq-27.0.1-pp311-pypy311_pp73-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:7ebccf0d760bc92a4a7c751aeb2fef6626144aace76ee8f5a63abeb100cae87f", size = 747032, upload-time = "2025-08-03T05:05:19.074Z" },
     { url = "https://files.pythonhosted.org/packages/81/b7/769598c5ae336fdb657946950465569cf18803140fe89ce466d7f0a57c11/pyzmq-27.0.1-pp311-pypy311_pp73-win_amd64.whl", hash = "sha256:77fed80e30fa65708546c4119840a46691290efc231f6bfb2ac2a39b52e15811", size = 544566, upload-time = "2025-08-03T05:05:20.798Z" },
+]
+
+[[package]]
+name = "quarto"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "ipykernel" },
+    { name = "jupyter-core" },
+    { name = "nbclient" },
+    { name = "nbformat" },
+    { name = "pyyaml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/82/a4/33dc28f6fcd5ff80ee80b2afddea9bc46a42f5e2bbc000eeb1b5f6194918/quarto-0.1.0.tar.gz", hash = "sha256:d9a4978110204f5b9d3af39faa9e195083efcbac8f6a23789e29cb27c72ded15", size = 2920, upload-time = "2021-02-03T21:53:12.381Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7d/14/8af79508df038ab05953ecf862420c7f4cc131b1682f0c80cb4f78c58593/quarto-0.1.0-py3-none-any.whl", hash = "sha256:8138fc9d1bee6269a5436837baedc699a262be1478f96444d6f99029f1a114f0", size = 10319, upload-time = "2021-02-03T21:53:10.812Z" },
 ]
 
 [[package]]

@@ -22,3 +22,6 @@ tmp/*
 
 # _archive
 pages/_archive/*
+
+quarto/data/*
+quarto/reports/*
