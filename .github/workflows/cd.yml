@@ -1,0 +1,69 @@
+name: Deploy to Cloud Run
+
+on:
+  # A PR merge to main/dev results in a push event on that branch,
+  # so push triggers cover both direct pushes and merged PRs.
+  push:
+    branches:
+      - main
+      - dev
+
+permissions:
+  contents: read
+  id-token: write # Required for Workload Identity Federation
+
+jobs:
+  deploy:
+    name: Build and Deploy API
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Determine Environment
+        id: determine_env
+        run: |
+          BRANCH_NAME="${{ github.ref_name }}"
+          if [[ "$BRANCH_NAME" == "main" ]]; then
+            echo "service_suffix=-prod" >> "$GITHUB_OUTPUT"
+          else
+            echo "service_suffix=-dev" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set environment variables
+        run: |
+          echo "GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}" >> $GITHUB_ENV
+          echo "SERVICE_NAME=model-service-api${{ steps.determine_env.outputs.service_suffix }}" >> $GITHUB_ENV
+          echo "IMAGE_URI=gcr.io/${{ secrets.GCP_PROJECT_ID }}/model-service-api${{ steps.determine_env.outputs.service_suffix }}:${{ github.sha }}" >> $GITHUB_ENV
+
+      - name: Authenticate to Google Cloud (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: 'Debug: Print authenticated user and project'
+        run: |
+          gcloud auth list
+          gcloud config list project
+
+      - name: Build and Push Docker image (Cloud Build)
+        run: |
+          gcloud builds submit \
+            --project="${{ env.GCP_PROJECT_ID }}" \
+            --tag "${{ env.IMAGE_URI }}"
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy "${{ env.SERVICE_NAME }}" \
+            --image "${{ env.IMAGE_URI }}" \
+            --platform managed \
+            --region us-west1 \
+            --allow-unauthenticated \
+            --service-account="${{ secrets.GCP_SERVICE_ACCOUNT }}" \
+            --set-env-vars "GCP_PROJECT=${{ env.GCP_PROJECT_ID }}"
