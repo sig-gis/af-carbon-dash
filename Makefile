@@ -12,7 +12,14 @@ FINAL_GEOJSON = data/FVSVariantMap20210525/FVS_Variants_and_Locations_4326_simpl
 SUPPORTED_VARIANT_LOCS = conf/base/supported_variant_locations.yml
 
 # Read variant codes (one per line; ignore blanks/#; strip CR)
-KEEP_VARIANTS := $(shell sed -e 's/#.*//' -e '/^[[:space:]]*$$/d' -e 's/\r//' $(SUPPORTED_VARIANT_LOCS) 2>/dev/null | xargs)
+# KEEP_VARIANTS := $(shell sed -e 's/#.*//' -e '/^[[:space:]]*$$/d' -e 's/\r//' "$(SUPPORTED_VARIANT_LOCS)" 2>/dev/null | xargs)
+
+define KEEP_VARIANTS_CMD
+sed -e 's/#.*//' -e '/^[[:space:]]*$$/d' -e 's/\r//' "$(SUPPORTED_VARIANT_LOCS)" 2>/dev/null | xargs
+endef
+
+KEEP_VARIANTS := $(shell $(KEEP_VARIANTS_CMD))
+
 ifneq ($(strip $(KEEP_VARIANTS)),)
   KEEP_ARGS = --keep-variants $(KEEP_VARIANTS)
 endif
