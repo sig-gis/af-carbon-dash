@@ -149,19 +149,36 @@ def generate_report(req: ReportRequest = None):
 
     try:
         if req:
-            temp_dir = Path(tempfile.mkdtemp())
-            temp_data_dir = temp_dir / "data"
-            temp_data_dir.mkdir()
+            # pd.DataFrame(req.data.planting_design).to_csv(DATA_DIR / "planting_design.csv", index=False, header=None)
+            # pd.DataFrame(req.data.species_mix).to_csv(DATA_DIR / "species_mix.csv", index=False, header=None)
+            # pd.DataFrame(req.data.financial_options1).to_csv(DATA_DIR / "financial_options1.csv", index=False, header=None)
+            # pd.DataFrame(req.data.financial_options2).to_csv(DATA_DIR / "financial_options2.csv", index=False, header=None)
+            # pd.DataFrame(req.data.carbon).to_csv(DATA_DIR / "carbon.csv", index=False)
+            # pd.DataFrame([{"variant": req.data.selected_variant}]).to_csv(DATA_DIR / "variant.csv", index=False)
 
-            pd.DataFrame(req.data.planting_design).to_csv(temp_data_dir / "planting_design.csv", index=False, header=None)
-            pd.DataFrame(req.data.species_mix).to_csv(temp_data_dir / "species_mix.csv", index=False, header=None)
-            pd.DataFrame(req.data.financial_options1).to_csv(temp_data_dir / "financial_options1.csv", index=False, header=None)
-            pd.DataFrame(req.data.financial_options2).to_csv(temp_data_dir / "financial_options2.csv", index=False, header=None)
-            pd.DataFrame(req.data.carbon).to_csv(temp_data_dir / "carbon.csv", index=False)
-            pd.DataFrame([{"variant": req.data.selected_variant}]).to_csv(temp_data_dir / "variant.csv", index=False)
+                df = pd.DataFrame(req.data.planting_design)
+                df.to_csv(DATA_DIR / "planting_design.csv", index=False, header=None)
+                del df
 
-            for file in temp_data_dir.glob("*.csv"):
-                shutil.copy(file, DATA_DIR / file.name)
+                df = pd.DataFrame(req.data.species_mix)
+                df.to_csv(DATA_DIR / "species_mix.csv", index=False, header=None)
+                del df
+
+                df = pd.DataFrame(req.data.financial_options1)
+                df.to_csv(DATA_DIR / "financial_options1.csv", index=False, header=None)
+                del df
+
+                df = pd.DataFrame(req.data.financial_options2)
+                df.to_csv(DATA_DIR / "financial_options2.csv", index=False, header=None)
+                del df
+
+                df = pd.DataFrame(req.data.carbon)
+                df.to_csv(DATA_DIR / "carbon.csv", index=False)
+                del df
+
+                df = pd.DataFrame([{"variant": req.data.selected_variant}])
+                df.to_csv(DATA_DIR / "variant.csv", index=False)
+                del df
 
         env = os.environ.copy()
         env["QUARTO_DATA_DIR"] = str(DATA_DIR)
@@ -172,7 +189,7 @@ def generate_report(req: ReportRequest = None):
                 "--to", "typst-pdf",
                 "--output-dir", str(REPORTS_DIR),
                 "--output", f"report_{timestamp}.pdf",
-                "--execute"
+                "--execute", "--no-cache"
             ],
             cwd=str(QUARTO_DIR),
             env=env,
