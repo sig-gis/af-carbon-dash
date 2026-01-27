@@ -21,8 +21,12 @@ app = FastAPI(title="Carbon Model Service")
 
 API_BASE_URL = get_api_base_url()
 
-BASE_PATH = Path("conf/base")
-QUARTO_DIR = Path("model_service/quarto")
+# BASE_PATH = Path("conf/base")
+# QUARTO_DIR = Path("model_service/quarto")
+
+APP_ROOT = Path(__file__).resolve().parent.parent
+BASE_PATH = APP_ROOT / "conf" / "base"
+QUARTO_DIR = APP_ROOT / "model_service" / "quarto"
 
 def load_json(filename: str):
     with open(BASE_PATH / filename, "r") as f:
@@ -130,68 +134,64 @@ def carbon_units_endpoint(req: CarbonUnitsRequest,
 #QUARTO REPORTING
 @app.post("/reports/generate")
 def generate_report(req: ReportRequest = None):
-    """
-    Generate a PDF report using Quarto.
-    If req is provided, generates temp CSVs from the data.
-    Otherwise, uses existing data in quarto/data/.
-    """
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
 
-    # Ensure reports folder exists
-    reports_dir = QUARTO_DIR / "reports"
-    reports_dir.mkdir(exist_ok=True)
+    TMP_DIR = Path("/tmp/quarto")
+    DATA_DIR = TMP_DIR / "data"
+    REPORTS_DIR = TMP_DIR / "reports"
 
-    output_file = reports_dir / f"report_{timestamp}.pdf"
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Change to quarto directory for execution
-    original_cwd = os.getcwd()
+    output_file = REPORTS_DIR / f"report_{timestamp}.pdf"
+
     temp_dir = None
 
     try:
-        os.chdir(QUARTO_DIR)
-
         if req:
-            # Create temp data directory
-            temp_dir = tempfile.mkdtemp()
-            temp_data_dir = Path(temp_dir) / "data"
+            temp_dir = Path(tempfile.mkdtemp())
+            temp_data_dir = temp_dir / "data"
             temp_data_dir.mkdir()
 
-            # Generate CSVs from request data
             pd.DataFrame(req.data.planting_design).to_csv(temp_data_dir / "planting_design.csv", index=False, header=None)
             pd.DataFrame(req.data.species_mix).to_csv(temp_data_dir / "species_mix.csv", index=False, header=None)
             pd.DataFrame(req.data.financial_options1).to_csv(temp_data_dir / "financial_options1.csv", index=False, header=None)
             pd.DataFrame(req.data.financial_options2).to_csv(temp_data_dir / "financial_options2.csv", index=False, header=None)
             pd.DataFrame(req.data.carbon).to_csv(temp_data_dir / "carbon.csv", index=False)
-            # Save variant
             pd.DataFrame([{"variant": req.data.selected_variant}]).to_csv(temp_data_dir / "variant.csv", index=False)
 
-            # Copy temp data to quarto data folder (or modify notebook to use temp dir)
-            # For simplicity, copy to data/
-            data_dir = Path("data")
-            data_dir.mkdir(exist_ok=True)
             for file in temp_data_dir.glob("*.csv"):
-                shutil.copy(file, data_dir / file.name)
+                shutil.copy(file, DATA_DIR / file.name)
 
-        # Run quarto render
-        result = subprocess.run([
-            "quarto", "render", "report.ipynb",
-            "--to", "typst-pdf",
-            "--output-dir", "reports",
-            "--output", f"report_{timestamp}.pdf",
-            "--execute"
-        ], capture_output=True, text=True)
+        env = os.environ.copy()
+        env["QUARTO_DATA_DIR"] = str(DATA_DIR)
+
+        result = subprocess.run(
+            [
+                "quarto", "render", str(QUARTO_DIR / "report.ipynb"),
+                "--to", "typst-pdf",
+                "--output-dir", str(REPORTS_DIR),
+                "--output", f"report_{timestamp}.pdf",
+                "--execute"
+            ],
+            cwd=str(QUARTO_DIR),
+            env=env,
+            capture_output=True,
+            text=True,
+        )
 
         if result.returncode != 0:
-            raise HTTPException(status_code=500, detail=f"Quarto render failed: {result.stderr}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Quarto failed:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+            )
 
-        # Return the PDF file
         return FileResponse(
             path=output_file,
-            media_type='application/pdf',
-            filename=f"report_{timestamp}.pdf"
+            media_type="application/pdf",
+            filename=output_file.name,
         )
 
     finally:
-        os.chdir(original_cwd)
-        if temp_dir and Path(temp_dir).exists():
+        if temp_dir and temp_dir.exists():
             shutil.rmtree(temp_dir)
