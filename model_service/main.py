@@ -1,13 +1,18 @@
-from fastapi import FastAPI
-from fastapi import Depends
+from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FileResponse
 from pathlib import Path
 import json
 import pandas as pd
 import requests
 import numpy as np
+import subprocess
+import datetime
+import os
+import tempfile
+import shutil
 
 from model_service.model import compute_proforma, compute_summaries, compute_carbon_scores, compute_carbon_units
-from model_service.schemas import ProformaRequest, ProformaResponse, CarbonInputs, CarbonResponse, CarbonUnitsRequest, CarbonUnitsResponse
+from model_service.schemas import ProformaRequest, ProformaResponse, CarbonInputs, CarbonResponse, CarbonUnitsRequest, CarbonUnitsResponse, ReportRequest
 
 from utils.config import get_api_base_url
 
@@ -16,6 +21,7 @@ app = FastAPI(title="Carbon Model Service")
 API_BASE_URL = get_api_base_url()
 
 BASE_PATH = Path("conf/base")
+QUARTO_DIR = Path("model_service/quarto")
 
 def load_json(filename: str):
     with open(BASE_PATH / filename, "r") as f:
@@ -119,3 +125,72 @@ def carbon_units_endpoint(req: CarbonUnitsRequest,
     return {
         "rows": df_units.to_dict(orient="records")
     }
+
+#QUARTO REPORTING
+@app.post("/reports/generate")
+def generate_report(req: ReportRequest = None):
+    """
+    Generate a PDF report using Quarto.
+    If req is provided, generates temp CSVs from the data.
+    Otherwise, uses existing data in quarto/data/.
+    """
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
+
+    # Ensure reports folder exists
+    reports_dir = QUARTO_DIR / "reports"
+    reports_dir.mkdir(exist_ok=True)
+
+    output_file = reports_dir / f"report_{timestamp}.pdf"
+
+    # Change to quarto directory for execution
+    original_cwd = os.getcwd()
+    temp_dir = None
+
+    try:
+        os.chdir(QUARTO_DIR)
+
+        if req:
+            # Create temp data directory
+            temp_dir = tempfile.mkdtemp()
+            temp_data_dir = Path(temp_dir) / "data"
+            temp_data_dir.mkdir()
+
+            # Generate CSVs from request data
+            pd.DataFrame(req.data.planting_design).to_csv(temp_data_dir / "planting_design.csv", index=False, header=None)
+            pd.DataFrame(req.data.species_mix).to_csv(temp_data_dir / "species_mix.csv", index=False, header=None)
+            pd.DataFrame(req.data.financial_options1).to_csv(temp_data_dir / "financial_options1.csv", index=False, header=None)
+            pd.DataFrame(req.data.financial_options2).to_csv(temp_data_dir / "financial_options2.csv", index=False, header=None)
+            pd.DataFrame(req.data.carbon).to_csv(temp_data_dir / "carbon.csv", index=False)
+            # Save variant
+            pd.DataFrame([{"variant": req.data.selected_variant}]).to_csv(temp_data_dir / "variant.csv", index=False)
+
+            # Copy temp data to quarto data folder (or modify notebook to use temp dir)
+            # For simplicity, copy to data/
+            data_dir = Path("data")
+            data_dir.mkdir(exist_ok=True)
+            for file in temp_data_dir.glob("*.csv"):
+                shutil.copy(file, data_dir / file.name)
+
+        # Run quarto render
+        result = subprocess.run([
+            "quarto", "render", "report.ipynb",
+            "--to", "typst-pdf",
+            "--output-dir", "reports",
+            "--output", f"report_{timestamp}.pdf",
+            "--execute"
+        ], capture_output=True, text=True)
+
+        if result.returncode != 0:
+            raise HTTPException(status_code=500, detail=f"Quarto render failed: {result.stderr}")
+
+        # Return the PDF file
+        return FileResponse(
+            path=output_file,
+            media_type='application/pdf',
+            filename=f"report_{timestamp}.pdf"
+        )
+
+    finally:
+        os.chdir(original_cwd)
+        if temp_dir and Path(temp_dir).exists():
+            shutil.rmtree(temp_dir)
