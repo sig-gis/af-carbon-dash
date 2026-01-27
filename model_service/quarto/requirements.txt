@@ -1,0 +1,10 @@
+PyYAML
+pandas
+matplotlib
+numpy
+numpy-financial
+requests
+Pillow
+dataframe-image
+tabulate
+seaborn

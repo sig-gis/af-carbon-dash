@@ -25,3 +25,10 @@ pages/_archive/*
 
 # streamlit secrets
 .streamlit/secrets.toml
+
+model_service/quarto/.quarto/*
+model_service/quarto/_archive/*
+model_service/quarto/data/*
+model_service/quarto/data/fig/*
+model_service/quarto/reports/*
+model_service/quarto/reports/report_files/*
