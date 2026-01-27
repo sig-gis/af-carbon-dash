@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
-from fastapi import Depends, FileResponse
+from fastapi import Depends
+from fastapi.responses import FileResponse
 from pathlib import Path
 import json
 import pandas as pd
