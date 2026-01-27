@@ -47,6 +47,7 @@ RUN uv sync --locked
 # Place executables in the environment at the front of the path
 ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONPATH=/app
+ENV QUARTO_PYTHON=/app/.venv/bin/python
 
 # Expose the port the app runs on
 EXPOSE 8080
