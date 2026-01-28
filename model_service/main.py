@@ -21,6 +21,18 @@ app = FastAPI(title="Carbon Model Service")
 
 API_BASE_URL = get_api_base_url()
 
+SUPPORTED_VARIANTS = {"EC", "PN"}
+
+
+def normalize_variant(value: str) -> str:
+    if value is None:
+        return ""
+    normalized = str(value).strip().upper()
+    for variant in SUPPORTED_VARIANTS:
+        if variant in normalized:
+            return variant
+    return normalized
+
 # BASE_PATH = Path("conf/base")
 # QUARTO_DIR = Path("model_service/quarto")
 
@@ -176,12 +188,23 @@ def generate_report(req: ReportRequest = None):
                 df.to_csv(DATA_DIR / "carbon.csv", index=False)
                 del df
 
-                df = pd.DataFrame([{"variant": req.data.selected_variant}])
+                selected_variant = normalize_variant(req.data.selected_variant)
+                if selected_variant not in SUPPORTED_VARIANTS:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            "Unsupported variant value. "
+                            f"Expected one of {sorted(SUPPORTED_VARIANTS)}, got: {selected_variant!r}"
+                        ),
+                    )
+
+                df = pd.DataFrame([{"variant": selected_variant}])
                 df.to_csv(DATA_DIR / "variant.csv", index=False)
                 del df
 
         env = os.environ.copy()
         env["QUARTO_DATA_DIR"] = str(DATA_DIR)
+        env["QUARTO_FIG_DIR"] = str(QUARTO_DIR / "data" / "fig")
 
         result = subprocess.run(
             [
