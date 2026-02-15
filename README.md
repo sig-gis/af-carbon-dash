@@ -1,4 +1,4 @@
-# 🚀 Getting Started
+# Getting Started
 
 ## 1. Clone the repo
 
@@ -55,7 +55,7 @@ make
 
 ## 4. Run the streamlit app
 
-### ✅ Option A (Recommended): Without Manual Activation
+### Option A (Recommended): Without Manual Activation
 
 This is the simplest method. It will:
 
@@ -73,4 +73,37 @@ If you’ve activated the environment manually (see 2b):
 
 ```
 streamlit run carbon_dash.py
+```
+
+---
+
+## 5. Run the FastAPI service locally (optional)
+
+If you want the dashboard to call a locally running API instead of Cloud Run, start the
+FastAPI service in a separate terminal:
+
+```
+uv run uvicorn model_service.main:app --reload --port 8001
+```
+
+This starts the API at `http://127.0.0.1:8001`, which the dashboard will use by default
+when no `CARBON_API_BASE_URL` is set.
+
+---
+
+## 6. Run the dashboard against a Cloud Run API
+
+To point the dashboard at a hosted API, set `CARBON_API_BASE_URL` before starting
+Streamlit.
+
+**Linux:**
+```
+export CARBON_API_BASE_URL="https://YOUR-CLOUD-RUN-URL"
+uv run streamlit run carbon_dash.py
+```
+
+**Windows PowerShell:**
+```
+$env:CARBON_API_BASE_URL = "https://YOUR-CLOUD-RUN-URL"
+uv run streamlit run carbon_dash.py
 ```

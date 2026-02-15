@@ -66,6 +66,7 @@ def planting_sliders():
     key="net_acres",
     help=H("number.inputs.acres")
     )
+    st.caption(f"{int(st.session_state.get('net_acres', 0)):,} acres")
     st.slider("Survival Percentage", 40, 90, key="survival", help=H("planting.slider_survival"))
     st.slider("Site Index", 96, 137, key="si", help=H("planting.slider_si"))
 
@@ -131,7 +132,7 @@ def carbon_chart():
     )
 
     st.altair_chart(line, use_container_width=True)
-    st.success(f"Final Carbon Output (year {max(plot_df['Year'])}): {plot_df['C_Score'].iloc[-1]:.2f}")
+    st.success(f"Final Carbon Output (year {max(plot_df['Year'])}): {plot_df['C_Score'].iloc[-1]:,.2f}")
 
 def carbon_units():
         if "carbon_df" not in st.session_state:
@@ -202,22 +203,34 @@ def credits_inputs(prefix: str = "credits_") -> dict:
     # seed defaults (setdefault) will not overwrite restored/user values
     _seed_defaults(prefix)
     
-    st.markdown("Financial Options", help=None)
+    st.markdown("Financial Options", help=H("credits.expander_subheader"))
     container = st.container(height=600)
     with container:
         # net_acres              = st.number_input("Net Acres:", min_value=1, step=100, key=prefix+"net_acres", help=H("credits.inputs.net_acres"))
         num_plots              = st.number_input("# Plots:", min_value=1, key=prefix+"num_plots", help=H("credits.inputs.num_plots"))
+        st.caption(f"{int(num_plots):,} plots")
         cost_per_cfi_plot      = st.number_input("Cost/CFI Plot, $:", min_value=1, key=prefix+"cost_per_cfi_plot", help=H("credits.inputs.cost_per_cfi_plot"))
+        st.caption(f"${float(cost_per_cfi_plot):,.1f}")
         price_per_ert_initial  = st.number_input("Initial Price/CU, $:", min_value=1.0, key=prefix+"price_per_ert_initial", help=H("credits.inputs.price_per_ert_initial"))
+        st.caption(f"${float(price_per_ert_initial):,.1f}/CU")
         credit_price_increase_perc = st.number_input("Credit Price Increase, %:", min_value=0.0, step=1.0, format="%.1f", key=prefix+"credit_price_increase", help=H("credits.inputs.credit_price_increase"))
+        st.caption(f"{float(credit_price_increase_perc):,.1f}%")
         registry_fees              = st.number_input("Registry Fees, $:", min_value=1, key=prefix+"registry_fees", help=H("credits.inputs.registry_fees"))
+        st.caption(f"${float(registry_fees):,.1f}")
         validation_cost            = st.number_input("Validation Cost, $:", min_value=1, key=prefix+"validation_cost", help=H("credits.inputs.validation_cost"))
+        st.caption(f"${float(validation_cost):,.1f}")
         verification_cost          = st.number_input("Verification Cost, $:", min_value=1, key=prefix+"verification_cost", help=H("credits.inputs.verification_cost"))
+        st.caption(f"${float(verification_cost):,.1f}")
         issuance_fee_per_ert       = st.number_input("Issuance Fee per CU, $:", min_value=0.0, step=0.01, format="%.2f", key=prefix+"issuance_fee_per_ert", help=H("credits.inputs.issuance_fee_per_ert"))
+        st.caption(f"${float(issuance_fee_per_ert):,.2f}/CU")
         anticipated_inflation_perc = st.number_input("Anticipated Inflation, %:", min_value=0.0, step=1.0, format="%.1f", key=prefix+"anticipated_inflation", help=H("credits.inputs.anticipated_inflation"))
+        st.caption(f"{float(anticipated_inflation_perc):,.1f}%")
         discount_rate_perc         = st.number_input("Discount Rate, %:", min_value=0.0, step=1.0, format="%.1f", key=prefix+"discount_rate", help=H("credits.inputs.discount_rate"))
+        st.caption(f"{float(discount_rate_perc):,.1f}%")
         planting_cost              = st.number_input("Initial Planting Cost, $:", min_value=0, key=prefix+"planting_cost", help=H("credits.inputs.planting_cost"))
+        st.caption(f"${float(planting_cost):,.1f}")
         seedling_cost              = st.number_input("Initial Seedling Cost, $:", min_value=0, key=prefix+"seedling_cost", help=H("credits.inputs.seedling_cost"))
+        st.caption(f"${float(seedling_cost):,.1f}")
 
     # backup inputs so the latest entries persist across navigation
     _backup_keys(_credits_keys(prefix), backup_name="_credits_backup")
@@ -278,6 +291,9 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
     # Drop rows with NaN Net_Revenue to avoid chart issues
     df_pf = df_pf.dropna(subset=['Net_Revenue'])
 
+    # Store proforma outputs for report generation
+    st.session_state["proforma_df"] = df_pf.copy()
+
     # Summary metrics per protocol
     year_start = params['year_start']
     year_stop = int(df_pf['Year'].max())
@@ -309,7 +325,7 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
             tooltip=['Year', 'Net_Revenue', 'Protocol']
         )
         .properties(
-            title= chart_title + f' Estimated Credits for {params["net_acres"]} Acre Project',
+            title= chart_title + f' Estimated Credits for {params["net_acres"]:,} acres project',
             width=600,
             height=400
         )
@@ -339,12 +355,30 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
         help=H("credits.download_button")
     )
 
+    st.markdown(
+        "Generate a comprehensive PDF report of your project analysis.",
+        help=H("reports.generate_report_description")
+    )
+    if st.button(
+        "Generate Project Report",
+        use_container_width=True,
+        type="primary",
+        help=H("reports.generate_report_button")
+    ):
+        generate_report()
+
 def generate_report():
     """
     Collect project data and request PDF report from the Quarto API.
     """
     if "merged_df" not in st.session_state:
         st.error("Complete the financial analysis first.")
+        return
+    if "carbon_df" not in st.session_state:
+        st.error("No carbon data found. Return to the Carbon Estimates section first.")
+        return
+    if "proforma_df" not in st.session_state:
+        st.error("No financial data found. Return to the Project Financials section first.")
         return
 
     # Collect data for the report
@@ -395,12 +429,27 @@ def generate_report():
     carbon_df = st.session_state.merged_df[['Year', 'CU', 'Protocol']].copy()
     carbon_df = carbon_df.rename(columns={'CU': 'CUs'})
 
-    # Add placeholder columns that the notebook expects (no calculations)
-    carbon_df['Annual CO2 per acre'] = 0  # Placeholder
-    carbon_df['Annual CO2'] = 0  # Placeholder
-    carbon_df['NetRevenue'] = 0  # Placeholder
-    carbon_df['TotalRevenue'] = 0  # Placeholder
-    carbon_df['TotalCosts'] = 0  # Placeholder
+    # Annual CO2 per acre derived from carbon scores (no protocol split)
+    carbon_scores = st.session_state.carbon_df[["Year", "Annual_C_Score"]].copy()
+    carbon_scores["Annual CO2 per acre"] = carbon_scores["Annual_C_Score"] * 3.667
+    carbon_scores["Annual CO2"] = carbon_scores["Annual CO2 per acre"] * st.session_state.get("net_acres", 0)
+    carbon_scores = carbon_scores[["Year", "Annual CO2 per acre", "Annual CO2"]]
+
+    # Financials per protocol/year from proforma outputs
+    proforma_df = st.session_state.proforma_df[["Year", "Protocol", "Total_Revenue", "Total_Costs", "Net_Revenue"]].copy()
+    proforma_df = proforma_df.rename(
+        columns={
+            "Total_Revenue": "TotalRevenue",
+            "Total_Costs": "TotalCosts",
+            "Net_Revenue": "NetRevenue",
+        }
+    )
+
+    carbon_df = carbon_df.merge(carbon_scores, on="Year", how="left")
+    carbon_df = carbon_df.merge(proforma_df, on=["Year", "Protocol"], how="left")
+    carbon_df[["Annual CO2 per acre", "Annual CO2", "NetRevenue", "TotalRevenue", "TotalCosts"]] = (
+        carbon_df[["Annual CO2 per acre", "Annual CO2", "NetRevenue", "TotalRevenue", "TotalCosts"]].fillna(0)
+    )
 
     carbon_data = carbon_df.to_dict(orient="records")
 
@@ -493,7 +542,4 @@ def run_chart():
         with col6:
             credits_results(proforma_params) 
 
-    with st.expander(label="Generate Report", expanded=False):
-        st.markdown("Generate a comprehensive PDF report of your project analysis.")
-        if st.button("Generate Project Report", use_container_width=True, type="primary"):
-            generate_report()
+    
