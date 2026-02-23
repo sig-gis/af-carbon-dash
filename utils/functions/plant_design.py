@@ -18,6 +18,53 @@ from model_service.main import load_variant_presets, _load_proforma_defaults
 
 API_BASE_URL = get_api_base_url()
 
+CHART_BASE_YEAR = 2024
+
+
+def _five_year_values(max_year: int, start_year: int = CHART_BASE_YEAR) -> list[int]:
+    """Return 5-year x-axis values from start_year through max_year (inclusive range)."""
+    if max_year < start_year:
+        return [start_year]
+    return list(range(start_year, int(max_year) + 1, 5))
+
+
+def _prepend_zero_year_row(
+    df: pd.DataFrame,
+    value_col: str,
+    year_col: str = "Year",
+    base_year: int = CHART_BASE_YEAR,
+) -> pd.DataFrame:
+    """Prepend a synthetic base-year row (value=0) for single-series charts."""
+    out = df.copy()
+    out = out[out[year_col] != base_year]
+    zero_row = {col: np.nan for col in out.columns}
+    zero_row[year_col] = base_year
+    zero_row[value_col] = 0.0
+    out = pd.concat([pd.DataFrame([zero_row]), out], ignore_index=True)
+    return out.sort_values(year_col).reset_index(drop=True)
+
+
+def _prepend_zero_year_rows_by_group(
+    df: pd.DataFrame,
+    group_col: str,
+    value_col: str,
+    year_col: str = "Year",
+    base_year: int = CHART_BASE_YEAR,
+) -> pd.DataFrame:
+    """Prepend a synthetic base-year row (value=0) for each group in multi-series charts."""
+    out = df.copy()
+    out = out[out[year_col] != base_year]
+    groups = out[group_col].dropna().unique().tolist()
+
+    if not groups:
+        return out
+
+    zero_rows = pd.DataFrame(
+        [{year_col: base_year, group_col: g, value_col: 0.0} for g in groups]
+    )
+    out = pd.concat([zero_rows, out], ignore_index=True)
+    return out.sort_values([group_col, year_col]).reset_index(drop=True)
+
 def _credits_keys(prefix: str = "credits_") -> list[str]:
     """
     Return all proforma input keys (prefixed) that should persist for the Credits section.
@@ -121,8 +168,17 @@ def carbon_chart():
 
     chart_title = "Onsite Carbon (tons/project)" if toggle_oc else "Onsite Carbon (tons/acre)"
 
+    plot_df = _prepend_zero_year_row(plot_df, value_col="C_Score", base_year=CHART_BASE_YEAR)
+    include_years = _five_year_values(plot_df["Year"].max(), start_year=CHART_BASE_YEAR)
+    plot_df = plot_df[plot_df["Year"].isin(include_years)]
+
     line = alt.Chart(plot_df).mark_line(point=True).encode(
-        x=alt.X('Year:O', title='Year', axis=alt.Axis(labelAngle=30)),
+        x=alt.X(
+            'Year:Q',
+            title='Year',
+            axis=alt.Axis(values=include_years, format='d', labelAngle=30),
+            scale=alt.Scale(domain=[CHART_BASE_YEAR, max(include_years)])
+        ),
         y=alt.Y('C_Score:Q', title=chart_title),
         tooltip=['Year', 'C_Score']
     ).properties(
@@ -180,8 +236,22 @@ def carbon_units():
 
         chart_title = "(tons/project)" if toggle_ce else "(tons/acre)"
 
+        plot_df = _prepend_zero_year_rows_by_group(
+            plot_df,
+            group_col='Protocol',
+            value_col='CU',
+            base_year=CHART_BASE_YEAR,
+        )
+        include_years = _five_year_values(plot_df['Year'].max(), start_year=CHART_BASE_YEAR)
+        plot_df = plot_df[plot_df['Year'].isin(include_years)]
+
         CU_chart = alt.Chart(plot_df).mark_line(point=True).encode(
-            x=alt.X('Year:O', title='Year', axis=alt.Axis(labelAngle=30)),
+            x=alt.X(
+                'Year:Q',
+                title='Year',
+                axis=alt.Axis(values=include_years, format='d', labelAngle=30),
+                scale=alt.Scale(domain=[CHART_BASE_YEAR, max(include_years)])
+            ),
             y=alt.Y('CU:Q', title='CUs ' + chart_title),
             color='Protocol:N',
             tooltip=['Year', 'CU', 'Protocol']
@@ -300,9 +370,15 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
 
     summaries_df = pd.DataFrame(resp.json()["summaries"])
 
-    # Filter chart to every 5 years (optional)
-    include_years = np.arange(year_start, year_stop + 5, 5)
-    df_chart = df_pf[df_pf['Year'].isin(include_years)]
+    # Chart alignment: start at 2024 (0), then show every 5 years
+    include_years = _five_year_values(year_stop, start_year=CHART_BASE_YEAR)
+    df_chart = _prepend_zero_year_rows_by_group(
+        df_pf,
+        group_col='Protocol',
+        value_col='Net_Revenue',
+        base_year=CHART_BASE_YEAR,
+    )
+    df_chart = df_chart[df_chart['Year'].isin(include_years)]
 
     plot_df = df_chart.copy()
 
@@ -319,7 +395,12 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
         alt.Chart(plot_df)
         .mark_line(point=True)
         .encode(
-            x=alt.X('Year:O', title='Year', axis=alt.Axis(labelAngle=30)), 
+            x=alt.X(
+                'Year:Q',
+                title='Year',
+                axis=alt.Axis(values=include_years, format='d', labelAngle=30),
+                scale=alt.Scale(domain=[CHART_BASE_YEAR, max(include_years)])
+            ),
             y=alt.Y('Net_Revenue:Q', title= chart_title + ' Net Revenue'),
             color=alt.Color('Protocol:N', title='Protocol'),
             tooltip=['Year', 'Net_Revenue', 'Protocol']

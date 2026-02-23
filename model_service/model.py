@@ -166,7 +166,7 @@ def compute_carbon_units(
         X = df_poly["Year"].values
         y = df_poly["Onsite_Total_CO2"].values
 
-        spline = make_interp_spline(X, y, k=3)
+        spline = make_interp_spline(X, y, k=1)
         years_interp = np.arange(X.min(), X.max() + 1)
         y_interp = spline(years_interp)
 
