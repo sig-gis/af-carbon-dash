@@ -342,10 +342,9 @@
 #heading(level: 1, outlined: false)[Resilient Reforestation Plan]
 <gresham>
 ]
-// Conditional logo - uncomment when AFlogo3.png is available
-// #place(top + right, dx: 0.8in, dy: 0.4in)[
-// #box(image("data/fig/AFlogo3.png", width: 1.5in))
-// ]
+ #place(top + right, dx: 0.8in, dy: 0.4in)[
+ #box(image("data/fig/AFlogo.png", width: 1.5in))
+ ]
 ]
 
 #include "report_files/figure-typst/variant-image.typ"
@@ -384,7 +383,7 @@
 #v(0.25cm)  // vertical gap
 
 #align(left)[
-  #text(weight: "bold", size: 11pt)[The report uses predictions from machine learning models trained to approximate outputs from the Forest Vegetation Simulator (FVS) - a widely applied, publicly available forest growth and yield model used across the United States. Each FVS variant represents a specific geographic region and contains its own calibrated parameters, species list, growth equations, and ecological assumptions; our machine learning models are trained to capture variant-level differences represented by FVS. Selecting a variant ensures that tree growth, mortality, and carbon accumulation are modeled in a way that reflects the environmental conditions of the project location.]
+  #text(weight: "bold", size: 11pt)[The report uses predictions from machine learning (ML) models trained to approximate outputs from the Forest Vegetation Simulator (FVS) - a widely applied, publicly available forest growth and yield model used across the United States. Each FVS variant represents a specific geographic region and contains its own calibrated parameters, species list, growth equations, and ecological assumptions; our ML models are trained to capture variant-level differences represented by FVS. Selecting a variant ensures that tree growth, mortality, and carbon accumulation are modeled in a way that reflects the environmental conditions of the project location.]
 ]
 
 #v(0.25cm)  // vertical gap
@@ -399,6 +398,14 @@
   #text(weight: "bold", size: 11pt)[The dashboard supports multiple carbon accounting protocols, but only the accounting protocols selected by the user in the dashboard are included in the carbon and financial projections below.]
 ]
 
+#v(0.25cm)  // vertical gap
+
+#align(left)[
+  #text(weight: "bold", size: 11pt)[The results presented in this report represent modeled estimates based on the selected inputs, assumptions, and accounting rules, rather than exact or observed values. Actual project outcomes may differ due to site-specific conditions, implementation details, and future management or environmental factors.]
+]
+
+
+
 #pagebreak()
 #v(top-margin)
 
@@ -407,7 +414,7 @@
 #v(0.25cm)  // vertical gap
 
 #align(left)[
-  #text(weight: "bold", size: 11pt)[The carbon projections presented here are generated using the ML-approximated FVS growth model for the selected species mix and site conditions. FVS simulates tree- and stand-level carbon accumulation over time, including live biomass, mortality, and structural changes in the forest. The dashboard combines these raw five-year outputs and interpolates them to produce annual estimates of on-site carbon storage. This approach preserves the long-term growth trends modeled by FVS while providing more continuous year-by-year results.]
+  #text(weight: "bold", size: 11pt)[The carbon projections presented here are generated using the ML-approximated FVS growth model (see FAQ on simulation approximation) for the selected species mix and site conditions. FVS simulates tree- and stand-level carbon accumulation over time, including live biomass, mortality, and structural changes in the forest. The dashboard combines these raw five-year outputs and interpolates them to produce annual estimates of on-site carbon storage. This approach preserves the long-term growth trends modeled by FVS while providing more continuous year-by-year results.]
 ]
 
 #v(0.15cm)  // vertical gap
@@ -481,6 +488,13 @@ supplement: "Figure",
 #v(0.5cm)  // vertical gap
 
 #align(left)[
+  #text(weight: "bold", size: 11pt)[Project cost projections are derived from the project design implied by the selected planting parameters, carbon accounting protocol(s), and verification requirements. Costs reflect the operational activities required to establish, monitor, verify, and register carbon credits under the selected protocol(s), including field sampling, third-party validation and verification, and registry participation. Where applicable, costs are applied at protocol-defined intervals and adjusted for inflation over time. This approach ensures that projected financial outcomes are consistent with compliance-driven project requirements rather than generalized or assumed cost structures.]
+]
+
+#v(0.25cm)  // vertical gap
+
+
+#align(left)[
   #text(weight: "bold", size: 11pt)[The financial projections integrate user-selected financial inputs with modeled carbon outputs to estimate annual and cumulative revenues and costs for the project.]
 ]
 
@@ -519,7 +533,10 @@ are summed across the project period to produce the total revenue values.
 
 #v(0.15cm)  // vertical gap
 
-The following cost categories are included in the projection:
+#pagebreak()
+#v(top-margin)
+
+Based on the selected project configuration and accounting requirements, the following cost categories are included in the financial projections:
 
 - CFI plot costs and number of plots, which determine sampling and field verification
   costs.
@@ -532,9 +549,6 @@ The following cost categories are included in the projection:
 - Discount rate, which is used in calculation of the 20-year net present value.
 
 Net revenue represents the difference between Total Revenue and Total Costs.
-
-#pagebreak()
-#v(top-margin)
 
 Table 1, Figure 5 and Figure 6 summarize the Net Revenue, including the Total Revenue and Total Costs across the project
 lifetime and compare financial performance across the selected protocols.
@@ -559,7 +573,8 @@ supplement: "Figure",
   #text(weight: "bold", size: 11pt)[The annual net revenue trend illustrates how project cashflow varies over time. Peaks typically correspond to verification or credit issuance years, as CUs are credited in discrete events rather than every year.]
 ]
 
-#v(0.15cm)  // vertical gap
+#pagebreak()
+#v(top-margin)
 
 #figure([
 #box(image("report_files/figure-typst/cell-21-output-1.svg", width: 60%))
@@ -654,7 +669,11 @@ Below are the protocols currently supported in the dashboard and the modeled ass
   #text(weight: "bold", size: 11pt, fill: brand-color.primary)[How are FVS simulations approximated for real-time analysis in the dashboard?]
 ]
 
-We run a sample of single-stand FVS simulations representing the project lifetime over a range of possible combinations of planting parameters, repeated over each supported FVS Variant with variant-appropriate species. Using this representative sample of FVS simulations as a training set, we train Polynomial Regression models to predict FVS outputs for each timestep across the project lifetime. Each time the user tweaks planting parameters, the models make real-time predictions of FVS outputs, without the latency of running an FVS simulation.
+A representative sample of single-stand Forest Vegetation Simulator (FVS) simulations is first generated across the project lifetime, spanning a range of plausible planting parameters and species combinations. These simulations are run for each supported FVS Variant using variant-appropriate species.
+The resulting FVS outputs are then used as a training dataset for machine learning models (in this case, polynomial regression models) that approximate FVS-predicted values at each timestep across the project lifetime. When users adjust planting parameters, these models generate real-time predictions of FVS outputs without the computational latency of running a full FVS simulation.
+This approach preserves the growth dynamics and carbon accumulation behavior modeled by FVS while enabling efficient, interactive scenario analysis.
+Machine learning is used strictly as a computational approximation of FVS outputs and does not introduce new growth assumptions or carbon accounting rules.
+
 ]
 #v(0.5cm)  // vertical gap
 
