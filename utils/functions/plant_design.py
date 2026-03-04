@@ -89,12 +89,16 @@ def planting_sliders():
     """
     presets = load_variant_presets()
     variant = st.session_state.get("selected_variant", "PN")
+    varloc_name = st.session_state.get("selected_varloc_name", "Olympic National Forest")
+    varloc_code = st.session_state.get("selected_varloc_code", "609")
 
     if variant not in presets:
         st.warning(f"Variant '{variant}' not found in presets. Falling back to 'PN'.")
     preset = presets.get(variant, presets.get("PN", {}))
 
     st.markdown(f"**FVS Variant:** {variant}", unsafe_allow_html=False, help=H("planting.variant_label"), width="stretch")
+    st.markdown(f"**FVS Location Name:** {varloc_name}", unsafe_allow_html=False, help=H("planting.variant_label"), width="stretch")
+    st.markdown(f"**FVS Location Code:** {varloc_code}", unsafe_allow_html=False, help=H("planting.variant_label"), width="stretch")
 
     species_keys = _species_keys(preset)
     
@@ -469,6 +473,8 @@ def generate_report():
     planting_design = [
         {"column1": "Reforestation Strategy", "column2": "Mixed Species Planting"},
         {"column1": "Variant", "column2": st.session_state.get("selected_variant", "PN")},
+        # {"column1": "Location Name", "column2": st.session_state.get("selected_varloc_name", "Olympic National Forest")},
+        # {"column1": "Location Code", "column2": st.session_state.get("selected_varloc_code", "609")},
         {"column1": "Location Name", "column2": "placeholder"},
         {"column1": "Location Code", "column2": "placeholder"},
         {"column1": "Area, acres", "column2": str(st.session_state.get('net_acres', 10000))},
@@ -543,6 +549,8 @@ def generate_report():
 
     # Get selected variant
     selected_variant = st.session_state.get("selected_variant", "PN")
+    selected_varloc_name = st.session_state.get("selected_varloc_name", "Olympic National Forest")
+    selected_varloc_code = st.session_state.get("selected_varloc_code", "609")
 
     payload = {
         "data": {

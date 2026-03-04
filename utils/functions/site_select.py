@@ -342,12 +342,12 @@ def display_selected_info():
 
         # st.subheader("Selected Feature Info", anchor=None, help=H("site.subheader_selected_feature_info"), divider=False, width="stretch")
         pretty_names = {
-            # "FVSLocCode": "FVS Location Code",
-            # "FVSLocName": "FVS Location Name",
             # "FVSVarName": "FVS Variant Name",
             "FVSVariant": "FVS Variant",
+            "FVSLocName": "FVS Location Name",
+            "FVSLocCode": "FVS Location Code",
         }
-        skip_keys = {"Shape_Area", "Shape_Leng", 'FVSVariantLoc', 'FVSLocCode', 'FVSLocName', 'FVSVarName'}
+        skip_keys = {"Shape_Area", "Shape_Leng", 'FVSVariantLoc', 'FVSVarName'}
 
         for key, value in props.items():
             if key not in skip_keys:
@@ -365,3 +365,5 @@ def submit_map(map_data):
         clicked = map_data["last_active_drawing"].get("properties", {})
         if clicked:
             st.session_state["selected_variant"] = clicked.get("FVSVariant", "PN")
+            st.session_state["selected_varloc_name"] = clicked.get("FVSLocName", "Olympic National Forest")
+            st.session_state["selected_varloc_code"] = clicked.get("FVSLocCode", "609")
