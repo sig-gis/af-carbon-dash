@@ -461,18 +461,25 @@ def generate_report():
     if "proforma_df" not in st.session_state:
         st.error("No financial data found. Return to the Project Financials section first.")
         return
-
+    
+    
+    
     # Collect data for the report
     # Planting design - using static values for now (can be made dynamic later)
     planting_design = [
         {"column1": "Reforestation Strategy", "column2": "Mixed Species Planting"},
-        {"column1": "Survival Rate", "column2": f"{st.session_state.get('survival', 70)}%"},
+        {"column1": "Variant", "column2": st.session_state.get("selected_variant", "PN")},
+        {"column1": "Location Name", "column2": "placeholder"},
+        {"column1": "Location Code", "column2": "placeholder"},
+        {"column1": "Area, acres", "column2": str(st.session_state.get('net_acres', 10000))},
+        {"column1": "Survival Rate, %", "column2": st.session_state.get('survival', 70)},
         {"column1": "Site Index", "column2": str(st.session_state.get('si', 120))},
-        {"column1": "Net Acres", "column2": str(st.session_state.get('net_acres', 10000))},
+        {"column1": "Included Protocols", "column2": ", ".join(st.session_state.get("carbon_units_inputs", {}).get("protocols", []))},
     ]
 
     # Species mix
     species_mix = []
+    species_mix.append({"column1": "Species", "column2": "TPA#footnote[Trees per Acre]"})
     species_labels = {
         "tpa_df": "Douglas-fir",
         "tpa_rc": "red cedar",
@@ -488,17 +495,17 @@ def generate_report():
 
     # Financial options 1
     financial_options1 = [
-        {"column1": "# Plots", "column2": str(st.session_state.get('credits_num_plots', 1))},
-        {"column1": "Cost/CFI Plot, $", "column2": str(st.session_state.get('credits_cost_per_cfi_plot', 1))},
-        {"column1": "Initial Price/CU, $", "column2": str(st.session_state.get('credits_price_per_ert_initial', 1.0))},
+        {"column1": "Number of Plots", "column2": str(st.session_state.get('credits_num_plots', 1))},
+        {"column1": "Cost per CFI Plot, $", "column2": str(st.session_state.get('credits_cost_per_cfi_plot', 1))},
+        {"column1": "Initial Price per CU, $", "column2": str(st.session_state.get('credits_price_per_ert_initial', 1.0))},
         {"column1": "Credit Price Increase, %", "column2": str(st.session_state.get('credits_credit_price_increase', 0.0))},
+        {"column1": "Validation Cost, $", "column2": str(st.session_state.get('credits_validation_cost', 1))},
+        {"column1": "Verification Cost, $", "column2": str(st.session_state.get('credits_verification_cost', 1))},        
     ]
 
     # Financial options 2
     financial_options2 = [
         {"column1": "Registry Fees, $", "column2": str(st.session_state.get('credits_registry_fees', 1))},
-        {"column1": "Validation Cost, $", "column2": str(st.session_state.get('credits_validation_cost', 1))},
-        {"column1": "Verification Cost, $", "column2": str(st.session_state.get('credits_verification_cost', 1))},
         {"column1": "Issuance Fee per CU, $", "column2": str(st.session_state.get('credits_issuance_fee_per_ert', 0.0))},
         {"column1": "Anticipated Inflation, %", "column2": str(st.session_state.get('credits_anticipated_inflation', 0.0))},
         {"column1": "Discount Rate, %", "column2": str(st.session_state.get('credits_discount_rate', 0.0))},
