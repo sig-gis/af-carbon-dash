@@ -473,10 +473,8 @@ def generate_report():
     planting_design = [
         {"column1": "Reforestation Strategy", "column2": "Mixed Species Planting"},
         {"column1": "Variant", "column2": st.session_state.get("selected_variant", "PN")},
-        # {"column1": "Location Name", "column2": st.session_state.get("selected_varloc_name", "Olympic National Forest")},
-        # {"column1": "Location Code", "column2": st.session_state.get("selected_varloc_code", "609")},
-        {"column1": "Location Name", "column2": "placeholder"},
-        {"column1": "Location Code", "column2": "placeholder"},
+        {"column1": "Location Name", "column2": st.session_state.get("selected_varloc_name", "Olympic National Forest")},
+        {"column1": "Location Code", "column2": st.session_state.get("selected_varloc_code", "609")},
         {"column1": "Area, acres", "column2": str(st.session_state.get('net_acres', 10000))},
         {"column1": "Survival Rate, %", "column2": st.session_state.get('survival', 70)},
         {"column1": "Site Index", "column2": str(st.session_state.get('si', 120))},

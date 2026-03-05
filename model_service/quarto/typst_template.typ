@@ -333,17 +333,23 @@
   doc,
 )
 
+#set page(
+  header: context if counter(page).get().first() > 1 []
+)
+
+
+
 #set figure(numbering: none)
 #show figure.caption: set align(left)
 #block(fill: brand-color.primary, width: 100%, height: 1.5in, outset: (x: 1.25in))[
 #show heading.where(level: 1): set text(fill: white, size: 36pt)
-#place(bottom + left, dy:-0.25in)[
+#place(bottom + left, dy:-0.35in)[
 
-#heading(level: 1, outlined: false)[Resilient Reforestation Plan]
+#heading(level: 1, outlined: false)[Carbon Addendum]
 <gresham>
 ]
  #place(top + right, dx: 0.8in, dy: 0.4in)[
- #box(image("data/fig/AFlogo.png", width: 1.5in))
+ #box(image("data/fig/AFlogo.png", width: 2.1in))
  ]
 ]
 
@@ -354,7 +360,7 @@
 
 #grid(
   columns: 2,
-  column-gutter: 2.5cm,
+  column-gutter: 2cm,
   [
     #include "report_files/figure-typst/strategy-summary.typ"
   ],
@@ -364,13 +370,15 @@
 )
 
 #pagebreak()
-#v(top-margin)
+#set page(
+  margin: (top: 1.25in, bottom: 1.25in),
+  header: context if counter(page).get().first() > 1 []
+)
 
 #show outline.entry: set block(spacing: 2em)
 #outline()
 
 #pagebreak()
-#v(top-margin)
 
 #heading(level: 1)[Introduction]
 
@@ -407,7 +415,6 @@
 
 
 #pagebreak()
-#v(top-margin)
 
 #heading(level: 1)[Carbon Projections]
 
@@ -453,8 +460,6 @@ kind: "quarto-float-fig",
 supplement: "Figure", 
 )
 
-#pagebreak()
-#v(top-margin)
 
 #align(left)[
   #text(weight: "bold", size: 11pt)[Different carbon protocols apply unique sets of rules related to risk buffers, leakage deductions, and measurement requirements. Because the same biological growth can be credited differently depending on these rules, different protocols may yield different carbon units (CUs) over time, even for the same underlying forest scenario.]
@@ -482,7 +487,6 @@ supplement: "Figure",
 ]
 
 #pagebreak()
-#v(top-margin)
 
 #heading(level: 1)[Financial Projections]
 #v(0.5cm)  // vertical gap
@@ -533,8 +537,6 @@ are summed across the project period to produce the total revenue values.
 
 #v(0.15cm)  // vertical gap
 
-#pagebreak()
-#v(top-margin)
 
 Based on the selected project configuration and accounting requirements, the following cost categories are included in the financial projections:
 
@@ -573,8 +575,6 @@ supplement: "Figure",
   #text(weight: "bold", size: 11pt)[The annual net revenue trend illustrates how project cashflow varies over time. Peaks typically correspond to verification or credit issuance years, as CUs are credited in discrete events rather than every year.]
 ]
 
-#pagebreak()
-#v(top-margin)
 
 #figure([
 #box(image("report_files/figure-typst/cell-21-output-1.svg", width: 60%))
@@ -590,7 +590,7 @@ supplement: "Figure",
 )
 
 #pagebreak()
-#v(top-margin)
+
 
 #heading(level: 1)[Frequently Asked Questions]
 
@@ -661,8 +661,6 @@ Below are the protocols currently supported in the dashboard and the modeled ass
 
 ]
 
-#pagebreak()
-#v(top-margin)
 
 #block[
 #align(left)[
