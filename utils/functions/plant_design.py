@@ -97,8 +97,8 @@ def planting_sliders():
     preset = presets.get(variant, presets.get("PN", {}))
 
     st.markdown(f"**FVS Variant:** {variant}", unsafe_allow_html=False, help=H("planting.variant_label"), width="stretch")
-    st.markdown(f"**FVS Location Name:** {varloc_name}", unsafe_allow_html=False, help=H("planting.variant_label"), width="stretch")
-    st.markdown(f"**FVS Location Code:** {varloc_code}", unsafe_allow_html=False, help=H("planting.variant_label"), width="stretch")
+    st.markdown(f"**FVS Location Name:** {varloc_name}", unsafe_allow_html=False, help=H("planting.varloc_label"), width="stretch")
+    st.markdown(f"**FVS Location Code:** {varloc_code}", unsafe_allow_html=False, help=H("planting.varcode_label"), width="stretch")
 
     species_keys = _species_keys(preset)
     

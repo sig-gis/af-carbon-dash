@@ -328,7 +328,10 @@ def show_clicked_variant(map_data):
                 st.session_state["clicked_feature"] = feat
                 st.session_state["clicked_props"] = props
                 st.session_state["selected_variant"] = props.get("FVSVariant", "PN")
-                st.session_state["FVSLocCode"] = _loccode_str(props.get("FVSLocCode"))
+                st.session_state["selected_varloc_name"] = props.get("FVSLocName", "Olympic National Forest")
+                st.session_state["selected_varloc_code"] = _loccode_str(props.get("FVSLocCode")) or "609"
+                # Backward-compatibility key used in older paths.
+                st.session_state["FVSLocCode"] = st.session_state["selected_varloc_code"]
                 st.rerun()
 
 @st.fragment
@@ -366,4 +369,4 @@ def submit_map(map_data):
         if clicked:
             st.session_state["selected_variant"] = clicked.get("FVSVariant", "PN")
             st.session_state["selected_varloc_name"] = clicked.get("FVSLocName", "Olympic National Forest")
-            st.session_state["selected_varloc_code"] = clicked.get("FVSLocCode", "609")
+            st.session_state["selected_varloc_code"] = _loccode_str(clicked.get("FVSLocCode")) or "609"

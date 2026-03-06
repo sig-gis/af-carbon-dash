@@ -29,6 +29,16 @@
       "component": "Bold line showing the current FVS Variant above the planting sliders",
       "help": "Selected FVS Variant"
     },
+    "planting.varloc_label": {
+      "streamlit_function": "markdown",
+      "component": "Bold line showing the current FVS Variant Location above the planting sliders",
+      "help": "Selected FVS Variant Location"
+    },
+    "planting.varcode_label": {
+      "streamlit_function": "markdown",
+      "component": "Bold line showing the current FVS Variant Location Code above the planting sliders",
+      "help": "Selected FVS Variant Location Code"
+    },
     "planting.slider_survival": {
       "streamlit_function": "slider",
       "component": "Survival Percentage slider",
