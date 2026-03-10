@@ -539,8 +539,8 @@ def generate_report():
 
     carbon_df = carbon_df.merge(carbon_scores, on="Year", how="left")
     carbon_df = carbon_df.merge(proforma_df, on=["Year", "Protocol"], how="left")
-    carbon_df[["Annual CO2 per acre", "Annual CO2", "NetRevenue", "TotalRevenue", "TotalCosts"]] = (
-        carbon_df[["Annual CO2 per acre", "Annual CO2", "NetRevenue", "TotalRevenue", "TotalCosts"]].fillna(0)
+    carbon_df[["Annual CO2 per acre", "Annual CO2", "NetRevenue", "TotalCosts", "TotalRevenue"]] = (
+        carbon_df[["Annual CO2 per acre", "Annual CO2", "NetRevenue", "TotalCosts", "TotalRevenue"]].fillna(0)
     )
 
     carbon_data = carbon_df.to_dict(orient="records")
