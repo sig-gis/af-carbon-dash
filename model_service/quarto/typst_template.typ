@@ -427,7 +427,7 @@
 #v(0.15cm)  // vertical gap
 
 #figure([
-#box(image("report_files/figure-typst/cell-11-output-1.svg", width: 65%))
+#box(image("report_files/figure-typst/cell-12-output-1.svg", width: 65%))
 ], caption: figure.caption(
 position: bottom, 
 [
@@ -448,7 +448,7 @@ supplement: "Figure",
 #v(0.05cm)  // vertical gap
 
 #figure([
-#box(image("report_files/figure-typst/cell-12-output-1.svg", width: 65%))
+#box(image("report_files/figure-typst/cell-13-output-1.svg", width: 65%))
 ], caption: figure.caption(
 position: bottom, 
 [
@@ -468,7 +468,7 @@ supplement: "Figure",
 #v(0.25cm)  // vertical gap
 
 #figure([
-#box(image("report_files/figure-typst/cell-13-output-1.svg", width: 70%))
+#box(image("report_files/figure-typst/cell-14-output-1.svg", width: 70%))
 ], caption: figure.caption(
 position: bottom, 
 [
@@ -556,7 +556,7 @@ Table 1, Figure 5 and Figure 6 summarize the Net Revenue, including the Total Re
 lifetime and compare financial performance across the selected protocols.
 
 #figure([
-#box(image("report_files/figure-typst/cell-20-output-1.svg", width: 60%))
+#box(image("report_files/figure-typst/cell-21-output-1.svg", width: 60%))
 ], caption: figure.caption(
 position: bottom, 
 [
@@ -577,7 +577,7 @@ supplement: "Figure",
 
 
 #figure([
-#box(image("report_files/figure-typst/cell-21-output-1.svg", width: 60%))
+#box(image("report_files/figure-typst/cell-22-output-1.svg", width: 60%))
 ], caption: figure.caption(
 position: bottom, 
 [

@@ -566,7 +566,7 @@ def generate_report():
             resp = requests.post(
                 f"{API_BASE_URL}/reports/generate",
                 json=payload,
-                timeout=60,  # Longer timeout for report generation
+                timeout=300,  # Longer timeout for report generation
             )
             resp.raise_for_status()
 
