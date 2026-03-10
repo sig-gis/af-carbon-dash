@@ -16,7 +16,7 @@ import re
 import datetime
 
 # timestamp string
-timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
+timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M")
 
 # the dataset
 df = pd.read_csv("data/credits_proforma.csv")
