@@ -154,6 +154,16 @@ def generate_report(req: ReportRequest = None):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
+    # Ensure static lookup table required by report.ipynb is present in QUARTO_DATA_DIR
+    lookup_src = QUARTO_DIR / "data" / "var_sp_ref.csv"
+    lookup_dst = DATA_DIR / "var_sp_ref.csv"
+    if not lookup_src.exists():
+        raise HTTPException(
+            status_code=500,
+            detail=f"Required lookup file not found: {lookup_src}",
+        )
+    lookup_dst.write_bytes(lookup_src.read_bytes())
+
     output_file = REPORTS_DIR / f"report_{timestamp}.pdf"
 
     env = os.environ.copy()
