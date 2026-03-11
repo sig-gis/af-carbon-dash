@@ -37,7 +37,7 @@ The same project scenario can yield different credit numbers across protocols be
 
 | Protocol | Risk/Buffer | Leakage | Uncertainty | Measurement |
 |---|---:|---:|---:|---:|
-| [Verra (VCS)](https://verra.org/methodologies/vm0047-afforestation-reforestation-and-revegetation-v1-0/) | 20% | 0% | 0% | Jenkins(https://academic.oup.com/forestscience/article-abstract/49/1/12/4617214) |
+| [Verra (VCS)](https://verra.org/methodologies/vm0047-afforestation-reforestation-and-revegetation-v1-0/) | 20% | 0% | 0% | [Jenkins](https://academic.oup.com/forestscience/article-abstract/49/1/12/4617214) |
 | [ACR](https://acrcarbon.org/methodology/afforestation-and-reforestation-of-degraded-lands/) | 20% | 0% | 0% | Jenkins |
 | [CAR](https://www.climateactionreserve.org/wp-content/uploads/2023/07/Final_Forest_Protocol_V5.1_7.14.2023.pdf) | 20% | 0% | 0% | Jenkins |
 | [Isometric](https://registry.isometric.com/protocol/reforestation/1.0#data-sharing) | 25% | 0% | 0% | Jenkins |
@@ -51,9 +51,9 @@ The same project scenario can yield different credit numbers across protocols be
     {
         "q": "How are FVS simulations approximated for real-time analysis in the dashboard?",
         "a": "A representative sample of single-stand FVS simulations is first generated across the project lifetime, spanning a range of plausible planting parameters and species combinations. These simulations are run for each supported FVS Variant using variant-appropriate species."
-        "The resulting FVS outputs are then used as a training dataset for machine learning models (in this case, polynomial regression models) that approximate FVS-predicted values at each timestep across the project lifetime. When users adjust planting parameters, these models generate real-time predictions of FVS outputs without the computational latency of running a full FVS simulation."
-        "This approach preserves the growth dynamics and carbon accumulation behavior modeled by FVS while enabling efficient, interactive scenario analysis."
-        "Machine learning is used strictly as a computational approximation of FVS outputs and does not introduce new growth assumptions or carbon accounting rules."
+        " The resulting FVS outputs are then used as a training dataset for machine learning models (in this case, polynomial regression models) that approximate FVS-predicted values at each timestep across the project lifetime. When users adjust planting parameters, these models generate real-time predictions of FVS outputs without the computational latency of running a full FVS simulation."
+        " This approach preserves the growth dynamics and carbon accumulation behavior modeled by FVS while enabling efficient, interactive scenario analysis."
+        " Machine learning is used strictly as a computational approximation of FVS outputs and does not introduce new growth assumptions or carbon accounting rules."
     },
     {
         "q": "Is it possible to model an unrealistic scenario?",
