@@ -450,21 +450,35 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
         type="primary",
         help=H("reports.generate_report_button")
     ):
-        generate_report()
+        pdf_data = generate_report()
+        if pdf_data:
+            st.session_state["report_pdf_data"] = pdf_data
+            st.success("Report generated successfully!")
+
+    if "report_pdf_data" in st.session_state:
+        st.download_button(
+            label="Download Project Report (PDF)",
+            data=st.session_state["report_pdf_data"],
+            file_name="project_report.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+            key="download_project_report_pdf",
+        )
 
 def generate_report():
     """
     Collect project data and request PDF report from the Quarto API.
+    Returns PDF bytes on success, else None.
     """
     if "merged_df" not in st.session_state:
         st.error("Complete the financial analysis first.")
-        return
+        return None
     if "carbon_df" not in st.session_state:
         st.error("No carbon data found. Return to the Carbon Estimates section first.")
-        return
+        return None
     if "proforma_df" not in st.session_state:
         st.error("No financial data found. Return to the Project Financials section first.")
-        return
+        return None
     
     
     
@@ -569,20 +583,11 @@ def generate_report():
                 timeout=300,  # Longer timeout for report generation
             )
             resp.raise_for_status()
-
-            # Create download button for the PDF
-            pdf_data = resp.content
-            st.download_button(
-                label="Download Project Report (PDF)",
-                data=pdf_data,
-                file_name="project_report.pdf",
-                mime="application/pdf",
-                use_container_width=True,
-            )
-            st.success("Report generated successfully!")
+            return resp.content
 
     except requests.RequestException as e:
         st.error(f"Failed to generate report: {str(e)}")
+        return None
 
 @st.fragment
 def run_chart():
