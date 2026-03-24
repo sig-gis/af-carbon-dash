@@ -12,7 +12,14 @@ import zipfile
 from geopy.geocoders import Nominatim
 
 from utils.functions.helper import  H
-from utils.functions.site_select import load_geojson_fragment, load_geojson_or_shapefile, build_map, show_clicked_variant, display_selected_info
+from utils.functions.site_select import (
+    load_geojson_fragment,
+    load_geojson_or_shapefile,
+    build_map,
+    show_clicked_variant,
+    display_selected_info,
+    find_variant_for_point,
+)
 from utils.functions.plant_design import run_chart
 
 # Page Configuration
@@ -147,6 +154,28 @@ if st.session_state.active_tab == "Site Selection Map":
                 # Track last added
                 st.session_state["last_added_type"] = "point"
                 st.session_state["last_point"] = new_pt
+
+                # Auto-select FVS variant for geocoded address point
+                base_geojson_str, _ = load_geojson_fragment(simplified_geojson, local_shapefile)
+                matched_feature, matched_props = find_variant_for_point(
+                    base_geojson_str,
+                    location.longitude,
+                    location.latitude,
+                )
+
+                if matched_props:
+                    st.session_state["clicked_feature"] = matched_feature
+                    st.session_state["clicked_props"] = matched_props
+                    st.session_state["selected_variant"] = matched_props.get("FVSVariant", "PN")
+                    st.session_state["selected_varloc_name"] = matched_props.get("FVSLocName", "Olympic National Forest")
+                    try:
+                        st.session_state["selected_varloc_code"] = f"{int(matched_props.get('FVSLocCode')):03d}"
+                    except Exception:
+                        st.session_state["selected_varloc_code"] = "609"
+                    st.session_state["FVSLocCode"] = st.session_state["selected_varloc_code"]
+                    st.success("Address located and FVS variant auto-selected.")
+                else:
+                    st.warning("Address located, but no supported FVS variant polygon matched this point.")
             else:
                 st.error("Address not found.")
         else:

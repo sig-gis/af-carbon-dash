@@ -7,7 +7,7 @@ import tempfile
 import numpy as np
 from pathlib import Path
 import io
-from shapely.geometry import shape, box
+from shapely.geometry import shape, box, Point
 
 @st.fragment
 def load_geojson_fragment(simplified_geojson_path, shapefile_path, tolerance_deg=0.001, skip_keys={"Shape_Area", "Shape_Leng"}, max_tooltip_fields=4):
@@ -315,6 +315,33 @@ def _loccode_str(v):
         return f"{int(v):03d}"
     except Exception:
         return None
+
+
+@st.cache_data
+def find_variant_for_point(geojson_str, lon, lat):
+    """
+    Return the first FVS feature/properties containing the provided lon/lat.
+    Uses boundary-inclusive logic (contains OR touches).
+    """
+    if not geojson_str:
+        return None, None
+
+    try:
+        geojson = json.loads(geojson_str) if isinstance(geojson_str, str) else geojson_str
+        point = Point(float(lon), float(lat))
+
+        for feat in geojson.get("features", []):
+            geom = feat.get("geometry")
+            if not geom:
+                continue
+
+            polygon = shape(geom)
+            if polygon.contains(point) or polygon.touches(point):
+                return feat, feat.get("properties", {})
+    except Exception:
+        return None, None
+
+    return None, None
 
 @st.fragment
 def show_clicked_variant(map_data):
