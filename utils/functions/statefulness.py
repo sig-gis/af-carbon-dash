@@ -46,7 +46,7 @@ def _init_carbon_units_state():
     Does not overwrite existing user selections.
     """
     # default protocols
-    default_protocols = ["ACR/CAR/VERRA"]
+    default_protocols = ["ACR"]
 
     # initialize the mapping dict
     if "carbon_units_inputs" not in st.session_state:

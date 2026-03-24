@@ -20,6 +20,12 @@ API_BASE_URL = get_api_base_url()
 
 CHART_BASE_YEAR = 2024
 
+PROTOCOL_STYLE_DOMAIN = ["ACR", "CAR", "Verra", "GS", "ISO"]
+PROTOCOL_POINT_SHAPES = ["circle", "square", "triangle-up", "diamond", "cross"]
+# ACR, GS, ISO => solid; CAR/Verra => dashed (different patterns)
+# ACR, CAR, Verra => dashed (all distinct); GS, ISO => solid
+PROTOCOL_LINE_DASHES = [[18, 6, 2, 6], [14, 10], [2, 6, 10, 6], [1, 0], [1, 0]]
+
 
 def _five_year_values(max_year: int, start_year: int = CHART_BASE_YEAR) -> list[int]:
     """Return 5-year x-axis values from start_year through max_year (inclusive range)."""
@@ -249,7 +255,7 @@ def carbon_units():
         include_years = _five_year_values(plot_df['Year'].max(), start_year=CHART_BASE_YEAR)
         plot_df = plot_df[plot_df['Year'].isin(include_years)]
 
-        CU_chart = alt.Chart(plot_df).mark_line(point=True).encode(
+        base = alt.Chart(plot_df).encode(
             x=alt.X(
                 'Year:Q',
                 title='Year',
@@ -257,9 +263,27 @@ def carbon_units():
                 scale=alt.Scale(domain=[CHART_BASE_YEAR, max(include_years)])
             ),
             y=alt.Y('CU:Q', title='CUs ' + chart_title),
-            color='Protocol:N',
+            color=alt.Color('Protocol:N', title='Protocol'),
             tooltip=['Year', 'CU', 'Protocol']
-        ).properties(
+        )
+
+        lines = base.mark_line().encode(
+            strokeDash=alt.StrokeDash(
+                'Protocol:N',
+                scale=alt.Scale(domain=PROTOCOL_STYLE_DOMAIN, range=PROTOCOL_LINE_DASHES),
+                legend=None,
+            )
+        )
+
+        points = base.mark_point(size=90, filled=True).encode(
+            shape=alt.Shape(
+                'Protocol:N',
+                scale=alt.Scale(domain=PROTOCOL_STYLE_DOMAIN, range=PROTOCOL_POINT_SHAPES),
+                legend=None,
+            )
+        )
+
+        CU_chart = (lines + points).properties(
             title='Annual CU Estimates ' + chart_title,
             width=600,
             height=400
@@ -395,20 +419,36 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
 
     chart_title = "Total" if toggle_nr else "Per Acre"
 
-    chart = (
-        alt.Chart(plot_df)
-        .mark_line(point=True)
-        .encode(
-            x=alt.X(
-                'Year:Q',
-                title='Year',
-                axis=alt.Axis(values=include_years, format='d', labelAngle=30),
-                scale=alt.Scale(domain=[CHART_BASE_YEAR, max(include_years)])
-            ),
-            y=alt.Y('Net_Revenue:Q', title= chart_title + ' Net Revenue'),
-            color=alt.Color('Protocol:N', title='Protocol'),
-            tooltip=['Year', 'Net_Revenue', 'Protocol']
+    base = alt.Chart(plot_df).encode(
+        x=alt.X(
+            'Year:Q',
+            title='Year',
+            axis=alt.Axis(values=include_years, format='d', labelAngle=30),
+            scale=alt.Scale(domain=[CHART_BASE_YEAR, max(include_years)])
+        ),
+        y=alt.Y('Net_Revenue:Q', title= chart_title + ' Net Revenue'),
+        color=alt.Color('Protocol:N', title='Protocol'),
+        tooltip=['Year', 'Net_Revenue', 'Protocol']
+    )
+
+    lines = base.mark_line().encode(
+        strokeDash=alt.StrokeDash(
+            'Protocol:N',
+            scale=alt.Scale(domain=PROTOCOL_STYLE_DOMAIN, range=PROTOCOL_LINE_DASHES),
+            legend=None,
         )
+    )
+
+    points = base.mark_point(size=90, filled=True).encode(
+        shape=alt.Shape(
+            'Protocol:N',
+            scale=alt.Scale(domain=PROTOCOL_STYLE_DOMAIN, range=PROTOCOL_POINT_SHAPES),
+            legend=None,
+        )
+    )
+
+    chart = (
+        (lines + points)
         .properties(
             title= chart_title + f' Estimated Credits for {params["net_acres"]:,} acres project',
             width=600,
@@ -618,7 +658,9 @@ def run_chart():
             # render widget using key only to enable restoring backups
             protocols = st.multiselect(
                 "Select Protocol(s)",
-                options=["ACR/CAR/VERRA", 
+                options=["ACR",
+                         "CAR",
+                         "Verra",
                          "GS",  
                          "ISO"],
                 key="carbon_units_protocols",
