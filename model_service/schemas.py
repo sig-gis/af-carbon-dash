@@ -16,19 +16,16 @@ class ProformaResponse(BaseModel):
     summaries: list[ProformaSummary]
 
 class CarbonInputs(BaseModel):
-    tpa_df: float
-    tpa_rc: float
-    tpa_wh: float
+    variant: str
+    loccode: str
     survival: float
     si: float
-
-class CarbonYearResult(BaseModel):
-    Year: int
-    C_Score: float
-    Annual_C_Score: float
+    species_tpa: List[float]  # positional: [SP1_TPA, SP2_TPA, ...] in variant species order
+    pct_level: str = "PCT0"  # PCT0 (none), PCT1 (light), PCT2 (moderate)
 
 class CarbonResponse(BaseModel):
-    carbon_df: List[CarbonYearResult]
+    carbon_df: List[Dict[str, Any]]  # wide-format rows: Year, ABLD_C, BA, QMD, ...
+    model_source: str  # "fvs" or "coefficients"
 
 class ProtocolRule(BaseModel):
     BUF: float
@@ -39,7 +36,7 @@ class ProtocolRule(BaseModel):
 ProtocolRules = Dict[str, ProtocolRule]
 
 class CarbonUnitsRequest(BaseModel):
-    carbon_rows: List[Dict]  # Year, C_Score
+    carbon_rows: List[Dict]  # Year, ABLD_C
     protocols: List[str]
     protocol_rules: ProtocolRules | None = None
 

@@ -16,6 +16,9 @@ conf/local/*
 data/*
 !data/.gitkeep
 !data/FVSVariant_presets.json
+!data/models/
+data/models/*
+!data/models/.gitkeep
 
 #temp files
 tmp/*

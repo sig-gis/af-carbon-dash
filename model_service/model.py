@@ -1,8 +1,125 @@
+import json
+import logging
+from functools import lru_cache
+from pathlib import Path
+
+import joblib
 import pandas as pd
-import numpy as np    
+import numpy as np
 import numpy_financial as npf
 from typing import List, Dict
 from scipy.interpolate import make_interp_spline
+from sklearn.preprocessing import PolynomialFeatures
+
+logger = logging.getLogger(__name__)
+
+APP_ROOT = Path(__file__).resolve().parent.parent
+BASE_PATH = APP_ROOT / "conf" / "base"
+
+FVS_MODEL_CACHE_SIZE = 16
+
+
+def _load_registry() -> list[dict]:
+    with open(BASE_PATH / "model_registry.json", "r") as f:
+        return json.load(f).get("models", [])
+
+
+@lru_cache(maxsize=FVS_MODEL_CACHE_SIZE)
+def get_fvs_models(variant: str, loccode: str, pct_level: str = "PCT0") -> dict | None:
+    """
+    Load and cache an FVS model collection via joblib.
+    LRU cache keeps the most recent models in memory and evicts the oldest
+    when the cache is full, preventing unbounded memory growth.
+
+    Models are sklearn Pipeline objects keyed by (year, variable).
+    """
+    registry = _load_registry()
+    entry = next(
+        (m for m in registry
+         if m["variant"] == variant
+         and m["loccode"] == loccode
+         and m.get("pct_level", "PCT0") == pct_level),
+        None,
+    )
+    if entry is None:
+        logger.warning(
+            "No model registry entry for variant=%s loccode=%s pct=%s",
+            variant, loccode, pct_level,
+        )
+        return None
+
+    model_path = APP_ROOT / entry["path"]
+    if not model_path.exists():
+        logger.warning("Model file not found: %s", model_path)
+        return None
+
+    models = joblib.load(model_path)
+
+    logger.info("Loaded FVS models from %s (%d entries)", model_path, len(models))
+    return models
+
+
+def predict_fvs_metrics(
+    models: dict,
+    survival: float,
+    si: float,
+    species_tpa: list[float],
+) -> pd.DataFrame:
+    """
+    Run prediction across all (year, variable) model entries.
+
+    Parameters
+    ----------
+    models : dict keyed by (year, variable) -> sklearn Ridge Pipeline
+    survival : survival percentage
+    si : site index
+    species_tpa : list of species TPA values in preset order (up to 4)
+
+    Returns
+    -------
+    Wide-format DataFrame: Year, ABLD_C, BA, QMD, SDI, TCuFt, MCuFt, ...
+    """
+    total_tpa = sum(species_tpa)
+    # Pad to exactly 4 species slots (SP1–SP4) as the pipelines expect
+    padded = (list(species_tpa) + [0, 0, 0, 0])[:4]
+
+    X_raw = np.array(
+        [[float(survival), float(total_tpa), *[float(s) for s in padded], float(si)]],
+        dtype=float,
+    )
+
+    # Detect model type: v3 (plain LinearRegression, expects 119 poly features)
+    # vs v4 (Pipeline with built-in transform, expects 7 raw features)
+    sample_model = next(iter(models.values()))
+    needs_poly = getattr(sample_model, "n_features_in_", 7) > len(X_raw[0])
+
+    if needs_poly:
+        poly = PolynomialFeatures(degree=3, include_bias=False)
+        X = poly.fit_transform(X_raw)
+    else:
+        # v4 pipelines expect named DataFrame
+        X = pd.DataFrame([{
+            "Survival": float(survival),
+            "total_TPA": float(total_tpa),
+            "SP1_TPA": float(padded[0]),
+            "SP2_TPA": float(padded[1]),
+            "SP3_TPA": float(padded[2]),
+            "SP4_TPA": float(padded[3]),
+            "SI": float(si),
+        }])
+
+    rows = []
+    for (year, var), model in models.items():
+        y_pred = max(model.predict(X)[0], 0)  # clamp negatives to 0 per Dave
+        rows.append({"Year": int(year), "Variable": var, "Value": y_pred})
+
+    if not rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows)
+    wide = df.pivot(index="Year", columns="Variable", values="Value").reset_index()
+    wide = wide.sort_values("Year").reset_index(drop=True)
+    return wide
 
 def compute_proforma(df_ert_ac: pd.DataFrame, p: dict) -> pd.DataFrame:
     results = []
@@ -103,9 +220,7 @@ def compute_summaries(
 
 def compute_carbon_scores(
     coefficients: Dict,
-    tpa_df: float,
-    tpa_rc: float,
-    tpa_wh: float,
+    species_tpa: list[float],
     survival: float,
     si: float,
 ):
@@ -113,17 +228,25 @@ def compute_carbon_scores(
     c_scores = []
     ann_c_scores = []
 
-    tpa_total = tpa_df + tpa_rc + tpa_wh
+    tpa_total = sum(species_tpa)
+
+    # Extract species-specific coefficient keys (anything starting with TPA_ except TPA_total)
+    sample_year = next(iter(sorted(coefficients.keys(), key=int)))
+    sp_coeff_keys = [k for k in coefficients[sample_year] if k.startswith("TPA_") and k != "TPA_total"]
 
     for year in sorted(coefficients.keys(), key=int):
+        c = coefficients[year]
+        # Sum species contributions positionally
+        sp_score = sum(
+            c.get(sp_coeff_keys[i], 0) * species_tpa[i]
+            for i in range(min(len(sp_coeff_keys), len(species_tpa)))
+        )
         c_score = (
-            coefficients[year]["TPA_DF"] * tpa_df
-            + coefficients[year]["TPA_RC"] * tpa_rc
-            + coefficients[year]["TPA_WH"] * tpa_wh
-            + coefficients[year]["TPA_total"] * tpa_total
-            + coefficients[year]["Survival"] * survival
-            + coefficients[year]["SI"] * si
-            + coefficients[year]["Intercept"]
+            sp_score
+            + c["TPA_total"] * tpa_total
+            + c["Survival"] * survival
+            + c["SI"] * si
+            + c["Intercept"]
         )
 
         ann = c_score - c_scores[-1] if c_scores else c_score
@@ -135,8 +258,8 @@ def compute_carbon_scores(
     return [
         {
             "Year": y,
-            "C_Score": round(c, 4),
-            "Annual_C_Score": round(a, 4),
+            "ABLD_C": round(c, 4),
+            "Annual_ABLD_C": round(a, 4),
         }
         for y, c, a in zip(years, c_scores, ann_c_scores)
     ]
@@ -147,7 +270,7 @@ def compute_carbon_units(
     protocol_rules: dict | None = None,
 ) -> pd.DataFrame:
     """
-    df_carbon: DataFrame with ['Year', 'C_Score']
+    df_carbon: DataFrame with ['Year', 'ABLD_C']
     returns: DataFrame with ['Year', 'CU', 'Protocol']
     """
 
@@ -159,7 +282,7 @@ def compute_carbon_units(
 
 
         df_base = df_carbon.copy()
-        df_base["Onsite_Total_CO2"] = df_base["C_Score"] * 3.667 * rules["coeff"]
+        df_base["Onsite_Total_CO2"] = df_base["ABLD_C"] * 3.667 * rules["coeff"]
 
         # Interpolation
         df_poly = df_base[["Year", "Onsite_Total_CO2"]].sort_values("Year")

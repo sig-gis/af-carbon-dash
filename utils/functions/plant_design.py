@@ -11,10 +11,39 @@ import os
 from urllib.parse import urlparse
 
 from utils.functions.helper import  H
-from utils.functions.statefulness import  _carbon_units_keys, _init_planting_state, _init_carbon_units_state, _backup_keys, _restore_backup, _species_keys, _label_for
+from utils.functions.statefulness import  _carbon_units_keys, _init_planting_state, _init_carbon_units_state, _backup_keys, _restore_backup, _species_keys, _species_label
 from utils.config import get_api_base_url, normalize_params
 
-from model_service.main import load_variant_presets, _load_proforma_defaults
+from model_service.main import load_variant_presets, load_variant_species, _load_proforma_defaults
+
+
+def _resolve_sub_variants(map_variant: str, loccode: str) -> list[str]:
+    """
+    Given a variant code from the map (e.g. 'CR') and a loccode, return the
+    sub-variants that have models available for that loccode in the registry.
+    Falls back to species config prefix matching if no registry entries found.
+    """
+    from model_service.main import load_json
+    registry = load_json("model_registry.json").get("models", [])
+    vs = load_variant_species()
+
+    # Find all sub-variant keys that could match this map variant
+    candidate_keys = []
+    if map_variant in vs and isinstance(vs[map_variant], list):
+        candidate_keys = [map_variant]
+    else:
+        candidate_keys = sorted(k for k, v in vs.items() if isinstance(v, list) and k.startswith(map_variant + "_"))
+
+    if not candidate_keys:
+        candidate_keys = [map_variant]
+
+    # Filter to sub-variants that have models for this loccode
+    available = [
+        k for k in candidate_keys
+        if any(m["variant"] == k and m["loccode"] == loccode for m in registry)
+    ]
+
+    return available if available else candidate_keys
 
 API_BASE_URL = get_api_base_url()
 
@@ -88,68 +117,97 @@ def planting_sliders():
     all planting parameters in session state. 
     """
     presets = load_variant_presets()
-    variant = st.session_state.get("selected_variant", "PN")
+    map_variant = st.session_state.get("selected_variant", "PN")
     varloc_name = st.session_state.get("selected_varloc_name", "Olympic National Forest")
     varloc_code = st.session_state.get("selected_varloc_code", "609")
+
+    # Resolve sub-variants based on what models exist for this loccode
+    sub_variants = _resolve_sub_variants(map_variant, varloc_code)
+    if len(sub_variants) > 1:
+        variant = st.selectbox(
+            "Sub-variant",
+            options=sub_variants,
+            index=0,
+            key="selected_sub_variant",
+        )
+    else:
+        variant = sub_variants[0]
+    st.session_state["active_variant"] = variant
 
     if variant not in presets:
         st.warning(f"Variant '{variant}' not found in presets. Falling back to 'PN'.")
     preset = presets.get(variant, presets.get("PN", {}))
 
-    st.markdown(f"**FVS Variant:** {variant}", unsafe_allow_html=False, help=H("planting.variant_label"), width="stretch")
+    st.markdown(f"**FVS Variant:** {map_variant}", unsafe_allow_html=False, help=H("planting.variant_label"), width="stretch")
     st.markdown(f"**FVS Location Name:** {varloc_name}", unsafe_allow_html=False, help=H("planting.varloc_label"), width="stretch")
     st.markdown(f"**FVS Location Code:** {varloc_code}", unsafe_allow_html=False, help=H("planting.varcode_label"), width="stretch")
 
-    species_keys = _species_keys(preset)
-    
-    # restore any missing keys from previous interaction with page (in case widgets were unmounted on the other page)
-    _restore_backup(["survival", "si", "net_acres", *species_keys])
+    sp_keys = _species_keys(variant)
+
+    # restore any missing keys from previous interaction with page
+    _restore_backup(["survival", "si", "net_acres", *sp_keys])
 
     # Initialize presets ONLY if the variant truly changed
-    _init_planting_state(variant, preset) 
+    _init_planting_state(variant, preset)
 
-    # Render widgets (key only; no value) so existing state is used
-    # net_acres input in planting params for organization (top of page), but not in FVSVariant_presets.json
     st.number_input(
-    "Net Acres:",
-    min_value=1,
-    step=100,
-    key="net_acres",
-    help=H("number.inputs.acres")
+        "Net Acres:",
+        min_value=1,
+        step=100,
+        key="net_acres",
+        help=H("number.inputs.acres")
     )
     st.caption(f"{int(st.session_state.get('net_acres', 0)):,} acres")
     st.slider("Survival Percentage", 40, 90, key="survival", help=H("planting.slider_survival"))
     st.slider("Site Index", 96, 137, key="si", help=H("planting.slider_si"))
 
-    st.markdown("🌲 Species Mix (TPA)", unsafe_allow_html=False, help=H("planting.species_mix_header"), width="stretch")
+    st.markdown("Species Mix (TPA)", unsafe_allow_html=False, help=H("planting.species_mix_header"), width="stretch")
     tpa_cap = preset.get("_tpa_cap", 435)
-    for spk in species_keys:
-        st.slider(_label_for(spk), 0, tpa_cap, key=spk)
+    for i, spk in enumerate(sp_keys):
+        st.slider(_species_label(variant, i), 0, tpa_cap, key=spk)
 
-    # Summary 
-    total_tpa = sum(int(st.session_state.get(k, 0)) for k in species_keys)
+    # Summary
+    total_tpa = sum(int(st.session_state.get(k, 0)) for k in sp_keys)
     st.markdown(f"**Total TPA:** {total_tpa}", unsafe_allow_html=False, help=H("planting.total_tpa_label"), width="stretch")
     if total_tpa > tpa_cap:
         st.warning(f"Total initial TPA exceeds {tpa_cap} and may present an unrealistic scenario. Consider adjusting sliders.")
 
-    st.session_state["species_mix"] = {k: int(st.session_state.get(k, 0)) for k in species_keys}
+    # Store as positional list for the API
+    st.session_state["species_tpa"] = [int(st.session_state.get(k, 0)) for k in sp_keys]
 
     # Backup latest values so they're available if user navigates away and back
-    _backup_keys(["survival", "si", "net_acres", *species_keys])
+    _backup_keys(["survival", "si", "net_acres", *sp_keys])
 
 def carbon_chart():
-    if not all(k in st.session_state for k in ["tpa_df", "tpa_rc", "tpa_wh", "survival", "si", "net_acres"]):
+    if not all(k in st.session_state for k in ["survival", "si", "net_acres", "species_tpa"]):
         st.info("Adjust Planting Design sliders to see the carbon output.")
         return
 
+    species_tpa = st.session_state["species_tpa"]
+    if not species_tpa or all(v == 0 for v in species_tpa):
+        st.info("Set at least one species TPA value.")
+        return
+
+    variant = st.session_state.get("active_variant", st.session_state.get("selected_variant", "PN"))
+    loccode = st.session_state.get("selected_varloc_code", "609")
+
+    pct_level = st.selectbox(
+        "Pre-commercial Thin (PCT)",
+        options=["PCT0", "PCT1", "PCT2"],
+        format_func=lambda x: {"PCT0": "None", "PCT1": "Light", "PCT2": "Moderate"}[x],
+        key="pct_level",
+        help=H("planting.pct_level"),
+    )
+
     payload = {
-        "tpa_df": st.session_state["tpa_df"],
-        "tpa_rc": st.session_state["tpa_rc"],
-        "tpa_wh": st.session_state["tpa_wh"],
+        "variant": variant,
+        "loccode": loccode,
         "survival": st.session_state["survival"],
         "si": st.session_state["si"],
+        "species_tpa": [float(v) for v in species_tpa],
+        "pct_level": pct_level,
     }
-    
+
     resp = requests.post(
         f"{API_BASE_URL}/carbon/calculate",
         json=payload,
@@ -157,42 +215,100 @@ def carbon_chart():
     )
     resp.raise_for_status()
 
-    df = pd.DataFrame(resp.json()["carbon_df"])
+    result = resp.json()
+    df = pd.DataFrame(result["carbon_df"])
     st.session_state.carbon_df = df
+    model_source = result.get("model_source", "coefficients")
+
+    # Metric definitions: label, column, unit (per-acre), unit (project), scales_with_acres
+    METRIC_DEFS = {
+        "ABLD_C":  {"label": "Aboveground live biomass carbon", "unit": "tons",       "unit_project": "tons",     "scales": True},
+        "BA":      {"label": "Basal area",                      "unit": "sq ft/acre", "unit_project": "sq ft",    "scales": True},
+        "QMD":     {"label": "Quadratic mean diameter",         "unit": "inches",     "unit_project": "inches",   "scales": False},
+        "SDI":     {"label": "Stand density index",             "unit": "index",      "unit_project": "index",    "scales": False},
+        "TCuFt":   {"label": "Total cubic volume",             "unit": "cu ft/acre", "unit_project": "cu ft",    "scales": True},
+        "MCuFt":   {"label": "Merchantable cubic volume",      "unit": "cu ft/acre", "unit_project": "cu ft",    "scales": True},
+        "Tpa":     {"label": "Trees per acre",                  "unit": "trees/acre", "unit_project": "trees",    "scales": True},
+    }
+
+    available = {col: METRIC_DEFS[col] for col in METRIC_DEFS if col in df.columns}
 
     toggle_oc = st.toggle('Show Project Acreage', True, 'toggle_oc', H("toggle.inputs.acres"))
+    net_acres = st.session_state["net_acres"]
 
-    chart_title = "Onsite Carbon (tons/project)" if toggle_oc else "Onsite Carbon (tons/acre)"
-
-     # Determine chart data
     plot_df = df.copy()
     if toggle_oc:
-        plot_df["C_Score"] = plot_df["C_Score"] * st.session_state["net_acres"]
-        plot_df["Annual_C_Score"] = plot_df["Annual_C_Score"] * st.session_state["net_acres"]
+        for col, meta in available.items():
+            if meta["scales"]:
+                plot_df[col] = plot_df[col] * net_acres
 
-    chart_title = "Onsite Carbon (tons/project)" if toggle_oc else "Onsite Carbon (tons/acre)"
+    if len(available) > 1:
+        # FVS model: dual metric selectors
+        metric_labels = {m["label"]: col for col, m in available.items()}
+        metric_options = list(metric_labels.keys())
+        col_select_1, col_select_2 = st.columns(2)
+        with col_select_1:
+            primary_label = st.selectbox(
+                "Primary variable",
+                metric_options,
+                index=0,
+                key="primary_metric_select",
+            )
+        with col_select_2:
+            secondary_default = min(1, len(metric_options) - 1)
+            secondary_label = st.selectbox(
+                "Secondary variable",
+                metric_options,
+                index=secondary_default,
+                key="secondary_metric_select",
+            )
+        st.divider()
 
-    plot_df = _prepend_zero_year_row(plot_df, value_col="C_Score", base_year=CHART_BASE_YEAR)
-    include_years = _five_year_values(plot_df["Year"].max(), start_year=CHART_BASE_YEAR)
-    plot_df = plot_df[plot_df["Year"].isin(include_years)]
+        def _render_metric(label: str):
+            col = metric_labels[label]
+            meta = available[col]
+            unit = meta["unit_project"] if (toggle_oc and meta["scales"]) else meta["unit"]
+            df_m = _prepend_zero_year_row(plot_df[["Year", col]].copy(), value_col=col, base_year=CHART_BASE_YEAR)
+            inc = _five_year_values(df_m["Year"].max(), start_year=CHART_BASE_YEAR)
+            df_m = df_m[df_m["Year"].isin(inc)]
+            chart = (
+                alt.Chart(df_m).mark_line(point=True).encode(
+                    x=alt.X("Year:Q", title="Year", axis=alt.Axis(values=inc, format="d", labelAngle=30),
+                            scale=alt.Scale(domain=[CHART_BASE_YEAR, max(inc)])),
+                    y=alt.Y(f"{col}:Q", title=f"{label} ({unit})"),
+                    tooltip=["Year", col],
+                ).properties(title=label, height=350)
+            )
+            st.altair_chart(chart, use_container_width=True)
+            # QMD disclaimer per Dave: 2029 values are unreliable
+            if col == "QMD":
+                st.caption("Note: QMD predictions at year 2029 are unreliable and should be interpreted with caution.")
 
-    line = alt.Chart(plot_df).mark_line(point=True).encode(
-        x=alt.X(
-            'Year:Q',
-            title='Year',
-            axis=alt.Axis(values=include_years, format='d', labelAngle=30),
-            scale=alt.Scale(domain=[CHART_BASE_YEAR, max(include_years)])
-        ),
-        y=alt.Y('C_Score:Q', title=chart_title),
-        tooltip=['Year', 'C_Score']
-    ).properties(
-        title="Cumulative " + chart_title,
-        width=600,
-        height=400
-    )
+        _render_metric(primary_label)
+        st.divider()
+        _render_metric(secondary_label)
+    else:
+        # Coefficient fallback: single ABLD_C chart
+        chart_title = "Onsite Carbon (tons/project)" if toggle_oc else "Onsite Carbon (tons/acre)"
+        plot_df = _prepend_zero_year_row(plot_df, value_col="ABLD_C", base_year=CHART_BASE_YEAR)
+        include_years = _five_year_values(plot_df["Year"].max(), start_year=CHART_BASE_YEAR)
+        plot_df = plot_df[plot_df["Year"].isin(include_years)]
 
-    st.altair_chart(line, use_container_width=True)
-    st.success(f"Final Carbon Output (year {max(plot_df['Year'])}): {plot_df['C_Score'].iloc[-1]:,.2f}")
+        line = alt.Chart(plot_df).mark_line(point=True).encode(
+            x=alt.X('Year:Q', title='Year',
+                     axis=alt.Axis(values=include_years, format='d', labelAngle=30),
+                     scale=alt.Scale(domain=[CHART_BASE_YEAR, max(include_years)])),
+            y=alt.Y('ABLD_C:Q', title=chart_title),
+            tooltip=['Year', 'ABLD_C']
+        ).properties(title="Cumulative " + chart_title, width=600, height=400)
+        st.altair_chart(line, use_container_width=True)
+
+    # Summary output
+    if "ABLD_C" in plot_df.columns:
+        st.success(f"Final Carbon Output (year {int(plot_df['Year'].max())}): {plot_df['ABLD_C'].iloc[-1]:,.2f}")
+
+    if model_source == "coefficients":
+        st.caption("Using coefficient-based estimates. Add FVS model files for richer predictions.")
 
 def carbon_units():
         if "carbon_df" not in st.session_state:
@@ -209,7 +325,7 @@ def carbon_units():
 
         payload = {
             "carbon_rows": st.session_state.carbon_df[
-                ["Year", "C_Score"]
+                ["Year", "ABLD_C"]
             ].to_dict(orient="records"),
             "protocols": protocols,
         }
@@ -481,20 +597,15 @@ def generate_report():
         {"column1": "Included Protocols", "column2": ", ".join(st.session_state.get("carbon_units_inputs", {}).get("protocols", []))},
     ]
 
-    # Species mix
+    # Species mix — built dynamically from variant species config
     species_mix = []
     species_mix.append({"column1": "Species", "column2": "TPA#footnote[Trees per Acre]"})
-    species_labels = {
-        "tpa_df": "Douglas-fir",
-        "tpa_rc": "red cedar",
-        "tpa_wh": "western hemlock",
-        "tpa_ss": "Sitka spruce",
-        "tpa_pp": "ponderosa pine",
-        "tpa_wl": "western larch"
-    }
-    for key, label in species_labels.items():
+    selected_variant = st.session_state.get("selected_variant", "PN")
+    sp_keys = _species_keys(selected_variant)
+    for i, key in enumerate(sp_keys):
         value = st.session_state.get(key, 0)
         if value > 0:
+            label = _species_label(selected_variant, i)
             species_mix.append({"column1": label, "column2": str(value)})
 
     # Financial options 1
@@ -522,8 +633,8 @@ def generate_report():
     carbon_df = carbon_df.rename(columns={'CU': 'CUs'})
 
     # Annual CO2 per acre derived from carbon scores (no protocol split)
-    carbon_scores = st.session_state.carbon_df[["Year", "Annual_C_Score"]].copy()
-    carbon_scores["Annual CO2 per acre"] = carbon_scores["Annual_C_Score"] * 3.667
+    carbon_scores = st.session_state.carbon_df[["Year", "Annual_ABLD_C"]].copy()
+    carbon_scores["Annual CO2 per acre"] = carbon_scores["Annual_ABLD_C"] * 3.667
     carbon_scores["Annual CO2"] = carbon_scores["Annual CO2 per acre"] * st.session_state.get("net_acres", 0)
     carbon_scores = carbon_scores[["Year", "Annual CO2 per acre", "Annual CO2"]]
 

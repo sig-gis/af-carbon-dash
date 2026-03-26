@@ -11,7 +11,7 @@ import datetime
 import os
 import tempfile
 
-from model_service.model import compute_proforma, compute_summaries, compute_carbon_scores, compute_carbon_units
+from model_service.model import compute_proforma, compute_summaries, compute_carbon_scores, compute_carbon_units, get_fvs_models, predict_fvs_metrics
 from model_service.schemas import ProformaRequest, ProformaResponse, CarbonInputs, CarbonResponse, CarbonUnitsRequest, CarbonUnitsResponse, ReportRequest
 
 from utils.config import get_api_base_url
@@ -20,7 +20,7 @@ app = FastAPI(title="Carbon Model Service")
 
 API_BASE_URL = get_api_base_url()
 
-SUPPORTED_VARIANTS = {"EC", "PN"}
+SUPPORTED_VARIANTS = {"CR", "CR_1", "CR_2", "EC", "EM", "PN", "WS", "WS_1"}
 
 
 def normalize_variant(value: str) -> str:
@@ -68,6 +68,11 @@ def load_protocol_rules() -> dict:
     resp.raise_for_status()
     return resp.json()
 
+def load_variant_species() -> dict:
+    resp = requests.get(f"{API_BASE_URL}/variant/species", timeout=5)
+    resp.raise_for_status()
+    return resp.json()
+
 @app.get("/carbon/coefficients")
 def get_carbon_coefficients():
     return load_json("carbon_model_coefficients.json")
@@ -88,6 +93,10 @@ def get_species_labels():
 def get_protocol_rules():
     return load_json("protocol_rules.json")
 
+@app.get("/variant/species")
+def get_variant_species():
+    return load_json("variant_species.json")
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -105,25 +114,46 @@ def run_proforma(req: ProformaRequest):
 
 @app.post("/carbon/calculate", response_model=CarbonResponse)
 def calculate_carbon(inputs: CarbonInputs):
-    coefficients = get_carbon_coefficients()
+    species_tpa = inputs.species_tpa  # already a positional list [SP1, SP2, ...]
 
+    # Try FVS models first (LRU cached, joblib/sklearn Pipeline)
+    models = get_fvs_models(inputs.variant, inputs.loccode, inputs.pct_level)
+
+    if models is not None:
+        wide = predict_fvs_metrics(models, inputs.survival, inputs.si, species_tpa)
+        if not wide.empty:
+            if "ABLD_C" in wide.columns:
+                wide["Annual_ABLD_C"] = wide["ABLD_C"].diff().fillna(wide["ABLD_C"].iloc[0])
+
+            # Prepend base year row
+            zero_row = {col: 0.0 for col in wide.columns}
+            zero_row["Year"] = 2024
+            wide = pd.concat([pd.DataFrame([zero_row]), wide], ignore_index=True)
+            wide = wide.sort_values("Year").reset_index(drop=True)
+
+            return {
+                "carbon_df": wide.to_dict(orient="records"),
+                "model_source": "fvs",
+            }
+
+    # Fallback: coefficient-based prediction
+    coefficients = get_carbon_coefficients()
     results = compute_carbon_scores(
         coefficients=coefficients,
-        tpa_df=inputs.tpa_df,
-        tpa_rc=inputs.tpa_rc,
-        tpa_wh=inputs.tpa_wh,
+        species_tpa=species_tpa,
         survival=inputs.survival,
         si=inputs.si,
     )
-
-    # Add Year 0
     results.insert(0, {
         "Year": 2024,
-        "C_Score": 0.0,
-        "Annual_C_Score": 0.0
+        "ABLD_C": 0.0,
+        "Annual_ABLD_C": 0.0,
     })
 
-    return {"carbon_df": results}
+    return {
+        "carbon_df": results,
+        "model_source": "coefficients",
+    }
 
 @app.post("/carbon/units", response_model=CarbonUnitsResponse)
 def carbon_units_endpoint(req: CarbonUnitsRequest,
