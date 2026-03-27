@@ -191,22 +191,33 @@ def build_map(geojson_str, points=None, upload=None, center=(37.8, -96.9), zoom=
         last_center = (last_point.y, last_point.x)
         last_zoom = 12
 
-    # Fallbacks
+    # Fallbacks: fit map to bounding box of all features
+    fit_bounds = None
     if last_center is None:
         if geojson_str:
             try:
                 gjson = json.loads(geojson_str)
-                feat0 = gjson["features"][0]["geometry"]["coordinates"]
-                if isinstance(feat0[0], list):
-                    last_center = (feat0[0][0][1], feat0[0][0][0])
+                all_bounds = []
+                for feat in gjson["features"]:
+                    geom = shape(feat["geometry"])
+                    all_bounds.append(geom.bounds)  # (minx, miny, maxx, maxy)
+                if all_bounds:
+                    minx = min(b[0] for b in all_bounds)
+                    miny = min(b[1] for b in all_bounds)
+                    maxx = max(b[2] for b in all_bounds)
+                    maxy = max(b[3] for b in all_bounds)
+                    last_center = ((miny + maxy) / 2, (minx + maxx) / 2)
+                    fit_bounds = [[miny, minx], [maxy, maxx]]
                 else:
-                    last_center = (feat0[1], feat0[0])
+                    last_center = (37.8, -96.9)
             except Exception:
                 last_center = (37.8, -96.9)
         else:
             last_center = (37.8, -96.9)
 
     m = folium.Map(location=last_center, zoom_start=last_zoom, tiles="CartoDB positron")
+    if fit_bounds:
+        m.fit_bounds(fit_bounds)
 
     filtered_geojson = geojson_str
 
@@ -327,11 +338,18 @@ def show_clicked_variant(map_data):
             if st.session_state.get("clicked_feature") != feat:
                 st.session_state["clicked_feature"] = feat
                 st.session_state["clicked_props"] = props
-                st.session_state["selected_variant"] = props.get("FVSVariant", "PN")
+                map_variant = props.get("FVSVariant", "PN")
+                loccode = _loccode_str(props.get("FVSLocCode")) or "609"
+                st.session_state["selected_variant"] = map_variant
                 st.session_state["selected_varloc_name"] = props.get("FVSLocName", "Olympic National Forest")
-                st.session_state["selected_varloc_code"] = _loccode_str(props.get("FVSLocCode")) or "609"
-                # Backward-compatibility key used in older paths.
-                st.session_state["FVSLocCode"] = st.session_state["selected_varloc_code"]
+                st.session_state["selected_varloc_code"] = loccode
+                st.session_state["FVSLocCode"] = loccode
+
+                # Resolve sub-variant at selection time
+                from utils.functions.plant_design import _resolve_sub_variants
+                sub_variants = _resolve_sub_variants(map_variant, loccode)
+                st.session_state["active_variant"] = sub_variants[0] if sub_variants else map_variant
+
                 st.rerun()
 
 @st.fragment
@@ -345,7 +363,6 @@ def display_selected_info():
 
         # st.subheader("Selected Feature Info", anchor=None, help=H("site.subheader_selected_feature_info"), divider=False, width="stretch")
         pretty_names = {
-            # "FVSVarName": "FVS Variant Name",
             "FVSVariant": "FVS Variant",
             "FVSLocName": "FVS Location Name",
             "FVSLocCode": "FVS Location Code",
@@ -355,7 +372,15 @@ def display_selected_info():
         for key, value in props.items():
             if key not in skip_keys:
                 display_key = pretty_names.get(key, key)
-                st.success(f"Successfully selected **{display_key}:** {value}")
+                display_value = value
+                # Show resolved sub-variant when available
+                if key == "FVSVariant":
+                    active = st.session_state.get("active_variant")
+                    if active and active != value:
+                        display_value = f"{active} (from {value})"
+                    elif active:
+                        display_value = active
+                st.success(f"Successfully selected **{display_key}:** {display_value}")
                 # st.success(f"Please continue to Planting Design, or select a different variant.")
 
 @st.fragment

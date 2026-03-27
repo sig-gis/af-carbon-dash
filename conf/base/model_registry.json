@@ -1,0 +1,256 @@
+{
+    "models": [
+        {
+            "variant": "CR_1",
+            "loccode": "211",
+            "pct_level": "PCT0",
+            "version": "4",
+            "path": "data/models/CR_1_v4_PCT0_Jenkins_211_ridge_models.pkl"
+        },
+        {
+            "variant": "CR_1",
+            "loccode": "308",
+            "pct_level": "PCT0",
+            "version": "4",
+            "path": "data/models/CR_1_v4_PCT0_Jenkins_308_ridge_models.pkl"
+        },
+        {
+            "variant": "CR_1",
+            "loccode": "310",
+            "pct_level": "PCT0",
+            "version": "4",
+            "path": "data/models/CR_1_v4_PCT0_Jenkins_310_ridge_models.pkl"
+        },
+        {
+            "variant": "CR_1",
+            "loccode": "211",
+            "pct_level": "PCT1",
+            "version": "4",
+            "path": "data/models/CR_1_v4_PCT1_Jenkins_211_ridge_models.pkl"
+        },
+        {
+            "variant": "CR_1",
+            "loccode": "308",
+            "pct_level": "PCT1",
+            "version": "4",
+            "path": "data/models/CR_1_v4_PCT1_Jenkins_308_ridge_models.pkl"
+        },
+        {
+            "variant": "CR_1",
+            "loccode": "310",
+            "pct_level": "PCT1",
+            "version": "4",
+            "path": "data/models/CR_1_v4_PCT1_Jenkins_310_ridge_models.pkl"
+        },
+        {
+            "variant": "CR_1",
+            "loccode": "211",
+            "pct_level": "PCT2",
+            "version": "4",
+            "path": "data/models/CR_1_v4_PCT2_Jenkins_211_ridge_models.pkl"
+        },
+        {
+            "variant": "CR_1",
+            "loccode": "308",
+            "pct_level": "PCT2",
+            "version": "4",
+            "path": "data/models/CR_1_v4_PCT2_Jenkins_308_ridge_models.pkl"
+        },
+        {
+            "variant": "CR_1",
+            "loccode": "310",
+            "pct_level": "PCT2",
+            "version": "4",
+            "path": "data/models/CR_1_v4_PCT2_Jenkins_310_ridge_models.pkl"
+        },
+        {
+            "variant": "EM",
+            "loccode": "102",
+            "pct_level": "PCT0",
+            "version": "4",
+            "path": "data/models/EM_v4_PCT0_Jenkins_102_ridge_models.pkl"
+        },
+        {
+            "variant": "EM",
+            "loccode": "108",
+            "pct_level": "PCT0",
+            "version": "4",
+            "path": "data/models/EM_v4_PCT0_Jenkins_108_ridge_models.pkl"
+        },
+        {
+            "variant": "EM",
+            "loccode": "109",
+            "pct_level": "PCT0",
+            "version": "4",
+            "path": "data/models/EM_v4_PCT0_Jenkins_109_ridge_models.pkl"
+        },
+        {
+            "variant": "EM",
+            "loccode": "102",
+            "pct_level": "PCT1",
+            "version": "4",
+            "path": "data/models/EM_v4_PCT1_Jenkins_102_ridge_models.pkl"
+        },
+        {
+            "variant": "EM",
+            "loccode": "108",
+            "pct_level": "PCT1",
+            "version": "4",
+            "path": "data/models/EM_v4_PCT1_Jenkins_108_ridge_models.pkl"
+        },
+        {
+            "variant": "EM",
+            "loccode": "109",
+            "pct_level": "PCT1",
+            "version": "4",
+            "path": "data/models/EM_v4_PCT1_Jenkins_109_ridge_models.pkl"
+        },
+        {
+            "variant": "EM",
+            "loccode": "102",
+            "pct_level": "PCT2",
+            "version": "4",
+            "path": "data/models/EM_v4_PCT2_Jenkins_102_ridge_models.pkl"
+        },
+        {
+            "variant": "EM",
+            "loccode": "108",
+            "pct_level": "PCT2",
+            "version": "4",
+            "path": "data/models/EM_v4_PCT2_Jenkins_108_ridge_models.pkl"
+        },
+        {
+            "variant": "EM",
+            "loccode": "109",
+            "pct_level": "PCT2",
+            "version": "4",
+            "path": "data/models/EM_v4_PCT2_Jenkins_109_ridge_models.pkl"
+        },
+        {
+            "variant": "PN",
+            "loccode": "603",
+            "pct_level": "PCT0",
+            "version": "4",
+            "path": "data/models/PN_v4_PCT0_Jenkins_603_ridge_models.pkl"
+        },
+        {
+            "variant": "PN",
+            "loccode": "606",
+            "pct_level": "PCT0",
+            "version": "4",
+            "path": "data/models/PN_v4_PCT0_Jenkins_606_ridge_models.pkl"
+        },
+        {
+            "variant": "PN",
+            "loccode": "609",
+            "pct_level": "PCT0",
+            "version": "4",
+            "path": "data/models/PN_v4_PCT0_Jenkins_609_ridge_models.pkl"
+        },
+        {
+            "variant": "PN",
+            "loccode": "603",
+            "pct_level": "PCT1",
+            "version": "4",
+            "path": "data/models/PN_v4_PCT1_Jenkins_603_ridge_models.pkl"
+        },
+        {
+            "variant": "PN",
+            "loccode": "606",
+            "pct_level": "PCT1",
+            "version": "4",
+            "path": "data/models/PN_v4_PCT1_Jenkins_606_ridge_models.pkl"
+        },
+        {
+            "variant": "PN",
+            "loccode": "609",
+            "pct_level": "PCT1",
+            "version": "4",
+            "path": "data/models/PN_v4_PCT1_Jenkins_609_ridge_models.pkl"
+        },
+        {
+            "variant": "PN",
+            "loccode": "603",
+            "pct_level": "PCT2",
+            "version": "4",
+            "path": "data/models/PN_v4_PCT2_Jenkins_603_ridge_models.pkl"
+        },
+        {
+            "variant": "PN",
+            "loccode": "606",
+            "pct_level": "PCT2",
+            "version": "4",
+            "path": "data/models/PN_v4_PCT2_Jenkins_606_ridge_models.pkl"
+        },
+        {
+            "variant": "PN",
+            "loccode": "609",
+            "pct_level": "PCT2",
+            "version": "4",
+            "path": "data/models/PN_v4_PCT2_Jenkins_609_ridge_models.pkl"
+        },
+        {
+            "variant": "WS_1",
+            "loccode": "501",
+            "pct_level": "PCT0",
+            "version": "4",
+            "path": "data/models/WS_1_v4_PCT0_Jenkins_501_ridge_models.pkl"
+        },
+        {
+            "variant": "WS_1",
+            "loccode": "502",
+            "pct_level": "PCT0",
+            "version": "4",
+            "path": "data/models/WS_1_v4_PCT0_Jenkins_502_ridge_models.pkl"
+        },
+        {
+            "variant": "WS_1",
+            "loccode": "503",
+            "pct_level": "PCT0",
+            "version": "4",
+            "path": "data/models/WS_1_v4_PCT0_Jenkins_503_ridge_models.pkl"
+        },
+        {
+            "variant": "WS_1",
+            "loccode": "501",
+            "pct_level": "PCT1",
+            "version": "4",
+            "path": "data/models/WS_1_v4_PCT1_Jenkins_501_ridge_models.pkl"
+        },
+        {
+            "variant": "WS_1",
+            "loccode": "502",
+            "pct_level": "PCT1",
+            "version": "4",
+            "path": "data/models/WS_1_v4_PCT1_Jenkins_502_ridge_models.pkl"
+        },
+        {
+            "variant": "WS_1",
+            "loccode": "503",
+            "pct_level": "PCT1",
+            "version": "4",
+            "path": "data/models/WS_1_v4_PCT1_Jenkins_503_ridge_models.pkl"
+        },
+        {
+            "variant": "WS_1",
+            "loccode": "501",
+            "pct_level": "PCT2",
+            "version": "4",
+            "path": "data/models/WS_1_v4_PCT2_Jenkins_501_ridge_models.pkl"
+        },
+        {
+            "variant": "WS_1",
+            "loccode": "502",
+            "pct_level": "PCT2",
+            "version": "4",
+            "path": "data/models/WS_1_v4_PCT2_Jenkins_502_ridge_models.pkl"
+        },
+        {
+            "variant": "WS_1",
+            "loccode": "503",
+            "pct_level": "PCT2",
+            "version": "4",
+            "path": "data/models/WS_1_v4_PCT2_Jenkins_503_ridge_models.pkl"
+        }
+    ]
+}

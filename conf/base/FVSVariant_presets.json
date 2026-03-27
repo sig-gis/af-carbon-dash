@@ -1,19 +1,38 @@
 {
+    "CR_1": {
+        "survival": 65,
+        "si": 110,
+        "default_tpa": [60, 15, 20, 20],
+        "_tpa_cap": 435
+    },
+    "CR_2": {
+        "survival": 65,
+        "si": 110,
+        "default_tpa": [40, 20, 30, 20],
+        "_tpa_cap": 435
+    },
     "EC": {
         "survival": 72,
         "si": 122,
-        "tpa_pp": 55,
-        "tpa_df": 15,
-        "tpa_wl": 20,
+        "default_tpa": [55, 15, 20],
+        "_tpa_cap": 435
+    },
+    "EM": {
+        "survival": 70,
+        "si": 120,
+        "default_tpa": [60, 15, 20, 20],
         "_tpa_cap": 435
     },
     "PN": {
         "survival": 70,
         "si": 125,
-        "tpa_df": 60,
-        "tpa_wh": 15,
-        "tpa_rc": 20,
-        "tpa_ss": 20,
+        "default_tpa": [60, 15, 20, 20],
+        "_tpa_cap": 435
+    },
+    "WS_1": {
+        "survival": 70,
+        "si": 120,
+        "default_tpa": [60, 15, 20, 20],
         "_tpa_cap": 435
     }
 }
