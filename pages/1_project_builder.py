@@ -12,7 +12,7 @@ import zipfile
 from geopy.geocoders import Nominatim
 
 from utils.functions.helper import  H
-from utils.functions.site_select import load_geojson_fragment, load_geojson_or_shapefile, build_map, show_clicked_variant, display_selected_info
+from utils.functions.site_select import load_geojson_fragment, load_geojson_or_shapefile, build_map, show_clicked_variant, display_selected_info, auto_select_variant_from_point
 from utils.functions.plant_design import run_chart
 
 # Page Configuration
@@ -102,6 +102,10 @@ if st.session_state.active_tab == "Site Selection Map":
 
     if "upload_file" not in st.session_state:
         st.session_state.upload_file = []
+
+    # Load supported FVS variant polygons once so address lookups can auto-select
+    # variant before map rendering.
+    geojson_str, tooltip_fields = load_geojson_fragment(simplified_geojson, local_shapefile)
         
     with st.expander(label="Add Point by latitude/longitude or look up an address", expanded=False):
         st.subheader("Go to Lat/Lon") 
@@ -147,6 +151,14 @@ if st.session_state.active_tab == "Site Selection Map":
                 # Track last added
                 st.session_state["last_added_type"] = "point"
                 st.session_state["last_point"] = new_pt
+
+                # Auto-select variant from the geocoded address point
+                matched = auto_select_variant_from_point(new_pt, geojson_str)
+                if matched:
+                    st.success("Address matched a supported FVS variant. Variant auto-selected.")
+                    st.rerun()
+                else:
+                    st.warning("Address found, but it does not intersect a supported FVS variant polygon.")
             else:
                 st.error("Address not found.")
         else:
@@ -214,7 +226,6 @@ if st.session_state.active_tab == "Site Selection Map":
     )
 
     # Load GeoJSON and Map
-    geojson_str, tooltip_fields = load_geojson_fragment(simplified_geojson, local_shapefile)
     st.session_state.setdefault("map_view", {"center": [45.5, -118], "zoom": 6})
 
     m = build_map(

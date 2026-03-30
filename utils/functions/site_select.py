@@ -327,6 +327,54 @@ def _loccode_str(v):
     except Exception:
         return None
 
+
+def auto_select_variant_from_point(point, geojson_str):
+    """
+    Resolve and set the selected variant/session state from a lat/lon point.
+    Returns the matched feature properties if found, else None.
+    """
+    if point is None or not geojson_str:
+        return None
+
+    try:
+        gjson = json.loads(geojson_str)
+        features = gjson.get("features", [])
+    except Exception:
+        return None
+
+    for feat in features:
+        geom_json = feat.get("geometry")
+        if not geom_json:
+            continue
+
+        try:
+            geom = shape(geom_json)
+        except Exception:
+            continue
+
+        if not geom.intersects(point):
+            continue
+
+        props = feat.get("properties", {}) or {}
+        map_variant = props.get("FVSVariant", "PN")
+        loccode = _loccode_str(props.get("FVSLocCode")) or "609"
+
+        st.session_state["clicked_feature"] = feat
+        st.session_state["clicked_props"] = props
+        st.session_state["selected_variant"] = map_variant
+        st.session_state["selected_varloc_name"] = props.get("FVSLocName", "Olympic National Forest")
+        st.session_state["selected_varloc_code"] = loccode
+        st.session_state["FVSLocCode"] = loccode
+
+        # Resolve sub-variant at selection time
+        from utils.functions.plant_design import _resolve_sub_variants
+        sub_variants = _resolve_sub_variants(map_variant, loccode)
+        st.session_state["active_variant"] = sub_variants[0] if sub_variants else map_variant
+
+        return props
+
+    return None
+
 @st.fragment
 def show_clicked_variant(map_data):
     """Update session state with the last clicked feature and its properties."""
