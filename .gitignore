@@ -12,13 +12,16 @@ wheels/
 # local conf files
 conf/local/*
 
+.vscode/*
+
+dashboard_container/*
+
 # data
 data/*
 !data/.gitkeep
 !data/FVSVariant_presets.json
-!data/models/
-data/models/*
-!data/models/.gitkeep
+# !data/FVSVariantMap20210525/
+# !data/FVSVariantMap20210525/*
 
 #temp files
 tmp/*
