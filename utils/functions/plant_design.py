@@ -170,6 +170,7 @@ def planting_sliders():
 
     # Summary
     total_tpa = sum(int(st.session_state.get(k, 0)) for k in sp_keys)
+    st.session_state["total_tpa"] = total_tpa
     st.markdown(f"**Total TPA:** {total_tpa}", unsafe_allow_html=False, help=H("planting.total_tpa_label"), width="stretch")
     if total_tpa > tpa_cap:
         st.warning(f"Total initial TPA exceeds {tpa_cap} and may present an unrealistic scenario. Consider adjusting sliders.")
@@ -230,7 +231,7 @@ def carbon_chart():
         "SDI":     {"label": "Stand density index",             "unit": "index",      "unit_project": "index",    "scales": False},
         "TCuFt":   {"label": "Total cubic volume",             "unit": "cu ft/acre", "unit_project": "cu ft",    "scales": True},
         "MCuFt":   {"label": "Merchantable cubic volume",      "unit": "cu ft/acre", "unit_project": "cu ft",    "scales": True},
-        "Tpa":     {"label": "Trees per acre",                  "unit": "trees/acre", "unit_project": "trees",    "scales": True},
+        "Tpa":     {"label": "Trees per acre",                  "unit": "trees/acre", "unit_project": "trees",    "scales": False},
     }
 
     available = {col: METRIC_DEFS[col] for col in METRIC_DEFS if col in df.columns}
@@ -436,6 +437,7 @@ def credits_inputs(prefix: str = "credits_") -> dict:
         "net_acres": net_acres,
         "num_plots": num_plots,
         "cost_per_cfi_plot": cost_per_cfi_plot,
+        "total_tpa": st.session_state.get("total_tpa", 0),
         "price_per_ert_initial": float(price_per_ert_initial),
         "credit_price_increase": float(credit_price_increase_perc) / 100.0,
         "registry_fees": registry_fees,
