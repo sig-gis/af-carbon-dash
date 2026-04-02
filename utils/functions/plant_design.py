@@ -3,9 +3,11 @@ import json
 import pandas as pd               
 import numpy as np                 
 import numpy_financial as npf     
+from matplotlib import colors as mcolors
 from pathlib import Path           
 from scipy.interpolate import make_interp_spline  
-import altair as alt  
+import plotly.graph_objects as go
+from plotly.colors import qualitative
 import requests
 import os
 from urllib.parse import urlparse
@@ -48,8 +50,164 @@ def _resolve_sub_variants(map_variant: str, loccode: str) -> list[str]:
 API_BASE_URL = get_api_base_url()
 
 CHART_BASE_YEAR = 2024
+FADE_START_AGE = 40
+MIN_FADE_ALPHA = 0.15
 
 PROTOCOL_ORDER = ["ACR", "CAR", "VERRA", "GS", "ISO"]
+
+
+def _alpha_for_age(age: float, max_age: float, fade_start: int = FADE_START_AGE, min_alpha: float = MIN_FADE_ALPHA) -> float:
+    """Return opacity for a line segment/marker based on project age."""
+    if age <= fade_start or max_age <= fade_start:
+        return 1.0
+    t = min(max((age - fade_start) / max(max_age - fade_start, 1.0), 0.0), 1.0)
+    return 1.0 - t * (1.0 - min_alpha)
+
+
+def _rgba_with_alpha(color: str, alpha: float) -> str:
+    """Convert a matplotlib/hex color into an rgba(...) string with custom alpha."""
+    r, g, b, _ = mcolors.to_rgba(color)
+    return f"rgba({int(r * 255)}, {int(g * 255)}, {int(b * 255)}, {alpha:.3f})"
+
+
+def _add_fading_line_series(
+    fig: go.Figure,
+    series_df: pd.DataFrame,
+    x_col: str,
+    y_col: str,
+    color: str,
+    label: str | None,
+    showlegend: bool,
+):
+    """Add a single series to a Plotly figure, fading opacity after project year 40."""
+    if series_df.empty:
+        return
+
+    x = series_df[x_col].astype(float).to_numpy()
+    y = series_df[y_col].astype(float).to_numpy()
+
+    if len(x) == 1:
+        age = x[0] - CHART_BASE_YEAR
+        marker_color = _rgba_with_alpha(color, _alpha_for_age(age, age))
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=y,
+                mode="markers",
+                marker=dict(color=[marker_color], size=7),
+                name=label,
+                legendgroup=label,
+                showlegend=showlegend,
+                hovertemplate=f"Year: %{{x:.0f}}<br>{y_col}: %{{y:,.2f}}" + (f"<br>Series: {label}" if label else "") + "<extra></extra>",
+            )
+        )
+        return
+
+    max_age = float(np.max(x) - CHART_BASE_YEAR)
+
+    # Draw each line segment independently so opacity can vary over time.
+    for idx in range(len(x) - 1):
+        x0, x1 = x[idx], x[idx + 1]
+        y0, y1 = y[idx], y[idx + 1]
+        mid_age = ((x0 + x1) / 2.0) - CHART_BASE_YEAR
+        seg_alpha = _alpha_for_age(mid_age, max_age)
+        fig.add_trace(
+            go.Scatter(
+                x=[x0, x1],
+                y=[y0, y1],
+                mode="lines",
+                line=dict(color=_rgba_with_alpha(color, seg_alpha), width=3),
+                name=label,
+                legendgroup=label,
+                showlegend=showlegend and idx == 0,
+                hoverinfo="skip",
+            )
+        )
+
+    marker_colors = [
+        _rgba_with_alpha(color, _alpha_for_age((xi - CHART_BASE_YEAR), max_age))
+        for xi in x
+    ]
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=y,
+            mode="markers",
+            marker=dict(color=marker_colors, size=7),
+            name=label,
+            legendgroup=label,
+            showlegend=False,
+            hovertemplate=f"Year: %{{x:.0f}}<br>{y_col}: %{{y:,.2f}}" + (f"<br>Series: {label}" if label else "") + "<extra></extra>",
+        )
+    )
+
+
+def _plot_fading_line_chart(
+    data: pd.DataFrame,
+    x_col: str,
+    y_col: str,
+    title: str,
+    y_title: str,
+    include_years: list[int],
+    series_col: str | None = None,
+):
+    """Render a Plotly line chart where line opacity fades after project year 40."""
+    fig = go.Figure()
+
+    if series_col:
+        series_vals = data[series_col].dropna().unique().tolist()
+        if series_col == "Protocol":
+            ordered = [p for p in PROTOCOL_ORDER if p in series_vals]
+            remaining = [s for s in series_vals if s not in ordered]
+            series_vals = ordered + sorted(remaining)
+        palette = qualitative.Plotly
+        color_map = {s: palette[i % len(palette)] for i, s in enumerate(series_vals)}
+
+        for s in series_vals:
+            s_df = data[data[series_col] == s].sort_values(x_col)
+            _add_fading_line_series(
+                fig=fig,
+                series_df=s_df,
+                x_col=x_col,
+                y_col=y_col,
+                color=color_map[s],
+                label=str(s),
+                showlegend=True,
+            )
+    else:
+        _add_fading_line_series(
+            fig=fig,
+            series_df=data.sort_values(x_col),
+            x_col=x_col,
+            y_col=y_col,
+            color=qualitative.Plotly[0],
+            label=None,
+            showlegend=False,
+        )
+
+    fig.update_layout(
+        title=title,
+        template="plotly_white",
+        height=400,
+        margin=dict(l=20, r=20, t=50, b=20),
+        legend_title=series_col if series_col else None,
+    )
+    fig.update_xaxes(
+        title_text="Year",
+        tickvals=include_years,
+        tickformat="d",
+        tickangle=30,
+        range=[CHART_BASE_YEAR, max(include_years)],
+        showgrid=True,
+        gridcolor="rgba(0,0,0,0.15)",
+    )
+    fig.update_yaxes(
+        title_text=y_title,
+        showgrid=True,
+        gridcolor="rgba(0,0,0,0.15)",
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def _five_year_values(max_year: int, start_year: int = CHART_BASE_YEAR) -> list[int]:
@@ -274,15 +432,14 @@ def carbon_chart():
             df_m = _prepend_zero_year_row(plot_df[["Year", col]].copy(), value_col=col, base_year=CHART_BASE_YEAR)
             inc = _five_year_values(df_m["Year"].max(), start_year=CHART_BASE_YEAR)
             df_m = df_m[df_m["Year"].isin(inc)]
-            chart = (
-                alt.Chart(df_m).mark_line(point=True).encode(
-                    x=alt.X("Year:Q", title="Year", axis=alt.Axis(values=inc, format="d", labelAngle=30),
-                            scale=alt.Scale(domain=[CHART_BASE_YEAR, max(inc)])),
-                    y=alt.Y(f"{col}:Q", title=f"{label} ({unit})"),
-                    tooltip=["Year", col],
-                ).properties(title=label, height=350)
+            _plot_fading_line_chart(
+                data=df_m,
+                x_col="Year",
+                y_col=col,
+                title=label,
+                y_title=f"{label} ({unit})",
+                include_years=inc,
             )
-            st.altair_chart(chart, use_container_width=True)
             # QMD disclaimer per Dave: 2029 values are unreliable
             if col == "QMD":
                 st.caption("Note: QMD predictions at year 2029 are unreliable and should be interpreted with caution.")
@@ -296,15 +453,14 @@ def carbon_chart():
         plot_df = _prepend_zero_year_row(plot_df, value_col="ABLD_C", base_year=CHART_BASE_YEAR)
         include_years = _five_year_values(plot_df["Year"].max(), start_year=CHART_BASE_YEAR)
         plot_df = plot_df[plot_df["Year"].isin(include_years)]
-
-        line = alt.Chart(plot_df).mark_line(point=True).encode(
-            x=alt.X('Year:Q', title='Year',
-                     axis=alt.Axis(values=include_years, format='d', labelAngle=30),
-                     scale=alt.Scale(domain=[CHART_BASE_YEAR, max(include_years)])),
-            y=alt.Y('ABLD_C:Q', title=chart_title),
-            tooltip=['Year', 'ABLD_C']
-        ).properties(title="Cumulative " + chart_title, width=600, height=400)
-        st.altair_chart(line, use_container_width=True)
+        _plot_fading_line_chart(
+            data=plot_df,
+            x_col="Year",
+            y_col="ABLD_C",
+            title="Cumulative " + chart_title,
+            y_title=chart_title,
+            include_years=include_years,
+        )
 
     # Summary output
     if "ABLD_C" in plot_df.columns:
@@ -367,24 +523,15 @@ def carbon_units():
         )
         include_years = _five_year_values(plot_df['Year'].max(), start_year=CHART_BASE_YEAR)
         plot_df = plot_df[plot_df['Year'].isin(include_years)]
-
-        CU_chart = alt.Chart(plot_df).mark_line(point=True).encode(
-            x=alt.X(
-                'Year:Q',
-                title='Year',
-                axis=alt.Axis(values=include_years, format='d', labelAngle=30),
-                scale=alt.Scale(domain=[CHART_BASE_YEAR, max(include_years)])
-            ),
-            y=alt.Y('CU:Q', title='CUs ' + chart_title),
-            color='Protocol:N',
-            tooltip=['Year', 'CU', 'Protocol']
-        ).properties(
+        _plot_fading_line_chart(
+            data=plot_df,
+            x_col="Year",
+            y_col="CU",
             title='Annual CU Estimates ' + chart_title,
-            width=600,
-            height=400
-        ).configure_axis(grid=True, gridOpacity=0.3)
-
-        st.altair_chart(CU_chart, use_container_width=True)
+            y_title='CUs ' + chart_title,
+            include_years=include_years,
+            series_col="Protocol",
+        )
 
 def credits_inputs(prefix: str = "credits_") -> dict:
     """
@@ -514,30 +661,15 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
         plot_df['Net_Revenue'] = plot_df['Net_Revenue'] / params["net_acres"]
 
     chart_title = "Total" if toggle_nr else "Per Acre"
-
-    chart = (
-        alt.Chart(plot_df)
-        .mark_line(point=True)
-        .encode(
-        x=alt.X(
-            'Year:Q',
-            title='Year',
-            axis=alt.Axis(values=include_years, format='d', labelAngle=30),
-            scale=alt.Scale(domain=[CHART_BASE_YEAR, max(include_years)])
-        ),
-        y=alt.Y('Net_Revenue:Q', title= chart_title + ' Net Revenue'),
-        color=alt.Color('Protocol:N', title='Protocol'),
-        tooltip=['Year', 'Net_Revenue', 'Protocol']
+    _plot_fading_line_chart(
+        data=plot_df,
+        x_col="Year",
+        y_col="Net_Revenue",
+        title=chart_title + f' Estimated Credits for {params["net_acres"]:,} acres project',
+        y_title=chart_title + ' Net Revenue',
+        include_years=include_years,
+        series_col="Protocol",
     )
-    .properties(
-        title= chart_title + f' Estimated Credits for {params["net_acres"]:,} acres project',
-        width=600,
-        height=400
-    )
-    .configure_axis(grid=True, gridOpacity=0.3)
-    )
-
-    st.altair_chart(chart, use_container_width=True)
 
     summaries_df_display = summaries_df.copy()
     summaries_df_display['Total Net Revenue, $'] = summaries_df_display['total_net'].map('${:,.2f}'.format)

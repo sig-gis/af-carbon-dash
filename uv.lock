@@ -14,7 +14,6 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "aiofiles" },
-    { name = "altair" },
     { name = "dataframe-image" },
     { name = "earthengine-api" },
     { name = "fastapi" },
@@ -31,6 +30,7 @@ dependencies = [
     { name = "numpy-financial" },
     { name = "pandas" },
     { name = "pillow" },
+    { name = "plotly" },
     { name = "pyyaml" },
     { name = "requests" },
     { name = "scikit-learn" },
@@ -47,7 +47,6 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "aiofiles", specifier = ">=25.1.0" },
-    { name = "altair", specifier = ">=5.5.0" },
     { name = "dataframe-image", specifier = ">=0.2.7" },
     { name = "earthengine-api", specifier = ">=1.6.4" },
     { name = "fastapi", specifier = ">=0.124.4" },
@@ -63,6 +62,7 @@ requires-dist = [
     { name = "numpy-financial", specifier = ">=1.0.0" },
     { name = "pandas", specifier = ">=2.3.1" },
     { name = "pillow", specifier = ">=11.3.0" },
+    { name = "plotly", specifier = ">=6.3.0" },
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "requests", specifier = ">=2.32.4" },
     { name = "scikit-learn", specifier = ">=1.7.2" },
