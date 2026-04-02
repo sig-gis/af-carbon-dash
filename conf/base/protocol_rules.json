@@ -1,5 +1,15 @@
 {
-    "ACR/CAR/VERRA": {
+    "ACR": {
+        "BUF": 0.20,
+        "coeff": 1.0,
+        "apply_buf": true
+    },
+    "CAR": {
+        "BUF": 0.20,
+        "coeff": 1.0,
+        "apply_buf": true
+    },
+    "VERRA": {
         "BUF": 0.20,
         "coeff": 1.0,
         "apply_buf": true

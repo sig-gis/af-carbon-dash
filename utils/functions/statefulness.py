@@ -81,13 +81,32 @@ def _init_planting_state(variant: str, preset: dict):
 
 def _init_carbon_units_state():
     """Initialize Carbon Units inputs ONLY if missing."""
-    default_protocols = ["ACR/CAR/VERRA"]
+    default_protocols = ["ACR"]
+
+    def _normalize_protocols(values: list[str]) -> list[str]:
+        """Migrate legacy combined protocol label into explicit protocol entries."""
+        expanded = []
+        for p in values or []:
+            if p == "ACR/CAR/VERRA":
+                expanded.extend(["ACR", "CAR", "VERRA"])
+            else:
+                expanded.append(p)
+        # preserve order while removing duplicates
+        return list(dict.fromkeys(expanded))
 
     if "carbon_units_inputs" not in st.session_state:
         st.session_state["carbon_units_inputs"] = {"protocols": default_protocols}
+    else:
+        st.session_state["carbon_units_inputs"]["protocols"] = _normalize_protocols(
+            st.session_state["carbon_units_inputs"].get("protocols", default_protocols)
+        )
 
     if "carbon_units_protocols" not in st.session_state:
         st.session_state["carbon_units_protocols"] = st.session_state["carbon_units_inputs"].get("protocols", default_protocols)
+    else:
+        st.session_state["carbon_units_protocols"] = _normalize_protocols(
+            st.session_state.get("carbon_units_protocols", default_protocols)
+        )
 
 
 def _backup_keys(keys, backup_name: str = "_planting_backup"):

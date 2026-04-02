@@ -275,10 +275,17 @@ def compute_carbon_units(
     """
 
     ruleset = protocol_rules
+    default_rule = (
+        ruleset.get("ACR")
+        or ruleset.get("CAR")
+        or ruleset.get("VERRA")
+        or ruleset.get("ACR/CAR/VERRA")
+        or next(iter(ruleset.values()))
+    )
     all_protocol_dfs = []
 
     for protocol in protocols:
-        rules = ruleset.get(protocol, ruleset["ACR/CAR/VERRA"])
+        rules = ruleset.get(protocol, default_rule)
 
 
         df_base = df_carbon.copy()

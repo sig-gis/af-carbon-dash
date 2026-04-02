@@ -49,6 +49,8 @@ API_BASE_URL = get_api_base_url()
 
 CHART_BASE_YEAR = 2024
 
+PROTOCOL_ORDER = ["ACR", "CAR", "VERRA", "GS", "ISO"]
+
 
 def _five_year_values(max_year: int, start_year: int = CHART_BASE_YEAR) -> list[int]:
     """Return 5-year x-axis values from start_year through max_year (inclusive range)."""
@@ -515,22 +517,22 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
         alt.Chart(plot_df)
         .mark_line(point=True)
         .encode(
-            x=alt.X(
-                'Year:Q',
-                title='Year',
-                axis=alt.Axis(values=include_years, format='d', labelAngle=30),
-                scale=alt.Scale(domain=[CHART_BASE_YEAR, max(include_years)])
-            ),
-            y=alt.Y('Net_Revenue:Q', title= chart_title + ' Net Revenue'),
-            color=alt.Color('Protocol:N', title='Protocol'),
-            tooltip=['Year', 'Net_Revenue', 'Protocol']
-        )
-        .properties(
-            title= chart_title + f' Estimated Credits for {params["net_acres"]:,} acres project',
-            width=600,
-            height=400
-        )
-        .configure_axis(grid=True, gridOpacity=0.3)
+        x=alt.X(
+            'Year:Q',
+            title='Year',
+            axis=alt.Axis(values=include_years, format='d', labelAngle=30),
+            scale=alt.Scale(domain=[CHART_BASE_YEAR, max(include_years)])
+        ),
+        y=alt.Y('Net_Revenue:Q', title= chart_title + ' Net Revenue'),
+        color=alt.Color('Protocol:N', title='Protocol'),
+        tooltip=['Year', 'Net_Revenue', 'Protocol']
+    )
+    .properties(
+        title= chart_title + f' Estimated Credits for {params["net_acres"]:,} acres project',
+        width=600,
+        height=400
+    )
+    .configure_axis(grid=True, gridOpacity=0.3)
     )
 
     st.altair_chart(chart, use_container_width=True)
@@ -729,7 +731,9 @@ def run_chart():
             # render widget using key only to enable restoring backups
             protocols = st.multiselect(
                 "Select Protocol(s)",
-                options=["ACR/CAR/VERRA", 
+                options=["ACR",
+                         "CAR",
+                         "VERRA",
                          "GS",  
                          "ISO"],
                 key="carbon_units_protocols",
