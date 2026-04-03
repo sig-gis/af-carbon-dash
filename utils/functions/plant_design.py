@@ -51,17 +51,35 @@ API_BASE_URL = get_api_base_url()
 
 CHART_BASE_YEAR = 2024
 FADE_START_AGE = 40
-MIN_FADE_ALPHA = 0.15
+# More aggressive fade profile for clearer visual contrast after cutoff.
+MIN_FADE_ALPHA = 0.0
+FADE_EXPONENT = 0.25
 
 PROTOCOL_ORDER = ["ACR", "CAR", "VERRA", "GS", "ISO"]
 
 
-def _alpha_for_age(age: float, max_age: float, fade_start: int = FADE_START_AGE, min_alpha: float = MIN_FADE_ALPHA) -> float:
+def _alpha_for_age(
+    age: float,
+    max_age: float,
+    fade_start: int = FADE_START_AGE,
+    min_alpha: float = MIN_FADE_ALPHA,
+    fade_exponent: float = FADE_EXPONENT,
+) -> float:
     """Return opacity for a line segment/marker based on project age."""
-    if age <= fade_start or max_age <= fade_start:
+    # Keep the original behavior for long-horizon series, but ensure shorter
+    # horizons still show a visible fade near the tail end.
+    effective_fade_start = float(fade_start)
+    if max_age <= fade_start:
+        # Begin fading over roughly the last 40% of the available horizon.
+        effective_fade_start = max(0.0, float(max_age) * 0.6)
+
+    # Fade begins on and after fade_start (not after it).
+    if age < effective_fade_start or max_age <= 0:
         return 1.0
-    t = min(max((age - fade_start) / max(max_age - fade_start, 1.0), 0.0), 1.0)
-    return 1.0 - t * (1.0 - min_alpha)
+    t = min(max((age - effective_fade_start) / max(max_age - effective_fade_start, 1.0), 0.0), 1.0)
+    # Exponent < 1 makes fade drop faster right after fade_start.
+    t_shaped = t ** max(float(fade_exponent), 1e-6)
+    return 1.0 - t_shaped * (1.0 - min_alpha)
 
 
 def _rgba_with_alpha(color: str, alpha: float) -> str:
