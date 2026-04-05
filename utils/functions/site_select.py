@@ -25,7 +25,7 @@ def _fetch_geojson_from_api() -> str | None:
         resp.raise_for_status()
         return json.dumps(resp.json())
     except Exception as e:
-        logger.debug("Could not fetch GeoJSON from API: %s", e)
+        logger.warning("Could not fetch GeoJSON from API: %s", e)
         return None
 
 
@@ -58,13 +58,20 @@ def load_geojson_fragment(simplified_geojson_path, shapefile_path, tolerance_deg
     if geojson_str is None:
         if os.path.exists(simplified_geojson_path):
             geojson_str = read_geojson_text(simplified_geojson_path)
-        else:
+        elif os.path.exists(shapefile_path):
             try:
                 geojson_str = simplify_geojson(shapefile_path, tolerance_deg=tolerance_deg)
             except Exception as e:
                 st.error(f"Failed to load shapefile: {e}")
                 st.stop()
                 return None, None
+        else:
+            st.warning(
+                "No FVS variant data available. "
+                "Upload models via the Model Management page to populate the map, "
+                "or check that the API is running."
+            )
+            return None, None
 
     # Extract tooltip fields
     try:
