@@ -40,6 +40,7 @@ RUN uv sync --locked --no-install-project
 COPY model_service/ ./model_service/
 COPY conf/ ./conf/
 COPY utils/ ./utils/
+COPY data/ ./data/
 
 # Install project itself
 RUN uv sync --locked

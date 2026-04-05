@@ -11,6 +11,8 @@ from typing import List, Dict
 from scipy.interpolate import make_interp_spline
 from sklearn.preprocessing import PolynomialFeatures
 
+from model_service.store import get_store
+
 logger = logging.getLogger(__name__)
 
 APP_ROOT = Path(__file__).resolve().parent.parent
@@ -20,8 +22,8 @@ FVS_MODEL_CACHE_SIZE = 16
 
 
 def _load_registry() -> list[dict]:
-    with open(BASE_PATH / "model_registry.json", "r") as f:
-        return json.load(f).get("models", [])
+    store = get_store()
+    return store.get_json("registry.json").get("models", [])
 
 
 @lru_cache(maxsize=FVS_MODEL_CACHE_SIZE)
@@ -48,9 +50,12 @@ def get_fvs_models(variant: str, loccode: str, pct_level: str = "PCT0") -> dict 
         )
         return None
 
-    model_path = APP_ROOT / entry["path"]
-    if not model_path.exists():
-        logger.warning("Model file not found: %s", model_path)
+    store = get_store()
+    filename = entry.get("filename") or Path(entry["path"]).name
+    try:
+        model_path = store.get_file(f"models/{filename}")
+    except FileNotFoundError:
+        logger.warning("Model file not found in store: models/%s", filename)
         return None
 
     models = joblib.load(model_path)
