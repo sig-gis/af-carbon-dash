@@ -72,8 +72,7 @@ jobs:
         run: |
           gcloud builds submit \
             --project="${{ env.GCP_PROJECT_ID }}" \
-            --tag "${{ env.DASH_IMAGE }}" \
-            --config=/dev/stdin <<'EOF'
+            --config=/dev/stdin <<EOF
           steps:
             - name: gcr.io/cloud-builders/docker
               args: ['build', '-f', 'Dockerfile.dashboard', '-t', '${{ env.DASH_IMAGE }}', '.']
