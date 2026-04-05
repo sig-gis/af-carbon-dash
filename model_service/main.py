@@ -1,6 +1,9 @@
+from contextlib import asynccontextmanager
+import logging
+
 from fastapi import FastAPI, HTTPException
 from fastapi import Depends
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pathlib import Path
 import json
 import pandas as pd
@@ -10,13 +13,58 @@ import subprocess
 import datetime
 import os
 import tempfile
+import time
 
 from model_service.model import compute_proforma, compute_summaries, compute_carbon_scores, compute_carbon_units, get_fvs_models, predict_fvs_metrics
 from model_service.schemas import ProformaRequest, ProformaResponse, CarbonInputs, CarbonResponse, CarbonUnitsRequest, CarbonUnitsResponse, ReportRequest
+from model_service.store import get_store
+from model_service.geo import get_filtered_geojson
 
 from utils.config import get_api_base_url
 
-app = FastAPI(title="Carbon Model Service")
+logger = logging.getLogger(__name__)
+
+# Cached filtered GeoJSON (rebuilt on startup)
+_filtered_geojson: dict | None = None
+
+
+def refresh_geojson() -> None:
+    """Rebuild the cached filtered GeoJSON from the store."""
+    global _filtered_geojson
+    store = get_store()
+    try:
+        _filtered_geojson = get_filtered_geojson(store)
+    except FileNotFoundError:
+        logger.warning("Full GeoJSON not found in store; filtered GeoJSON unavailable")
+        _filtered_geojson = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Pre-download models and build GeoJSON cache on startup."""
+    t0 = time.time()
+    store = get_store()
+
+    registry = store.get_json("registry.json").get("models", [])
+    loaded = 0
+    for entry in registry:
+        filename = entry.get("filename") or Path(entry.get("path", "")).name
+        if not filename:
+            continue
+        try:
+            store.get_file(f"models/{filename}")
+            loaded += 1
+        except Exception as e:
+            logger.warning("Failed to preload model %s: %s", filename, e)
+
+    logger.info("Preloaded %d/%d models in %.1fs", loaded, len(registry), time.time() - t0)
+
+    refresh_geojson()
+
+    yield
+
+
+app = FastAPI(title="Carbon Model Service", lifespan=lifespan)
 
 API_BASE_URL = get_api_base_url()
 
@@ -100,6 +148,30 @@ def get_variant_species():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/geo/variants")
+def geo_variants():
+    """Return filtered GeoJSON containing only locations with registered models."""
+    if _filtered_geojson is None:
+        raise HTTPException(status_code=503, detail="GeoJSON not available")
+    return JSONResponse(content=_filtered_geojson)
+
+
+@app.get("/models/registry")
+def get_model_registry():
+    """Return the current model registry."""
+    store = get_store()
+    return store.get_json("registry.json")
+
+
+@app.post("/geo/refresh")
+def geo_refresh():
+    """Rebuild the filtered GeoJSON cache from the current registry."""
+    refresh_geojson()
+    n = len(_filtered_geojson.get("features", [])) if _filtered_geojson else 0
+    return {"status": "ok", "features": n}
+
 
 @app.post("/proforma/compute", response_model=ProformaResponse)
 def run_proforma(req: ProformaRequest):

@@ -5,15 +5,38 @@ import geopandas as gpd
 import os
 import tempfile
 import numpy as np
+import logging
+import requests
 from pathlib import Path
 import io
 from shapely.geometry import shape, box
+
+from utils.config import get_api_base_url
+
+logger = logging.getLogger(__name__)
+
+
+@st.cache_data(ttl=300)
+def _fetch_geojson_from_api() -> str | None:
+    """Try to fetch filtered GeoJSON from the API's /geo/variants endpoint."""
+    try:
+        base_url = get_api_base_url()
+        resp = requests.get(f"{base_url}/geo/variants", timeout=10)
+        resp.raise_for_status()
+        return json.dumps(resp.json())
+    except Exception as e:
+        logger.debug("Could not fetch GeoJSON from API: %s", e)
+        return None
+
 
 @st.fragment
 def load_geojson_fragment(simplified_geojson_path, shapefile_path, tolerance_deg=0.001, skip_keys={"Shape_Area", "Shape_Leng"}, max_tooltip_fields=4):
     """
     Loads a GeoJSON (or simplifies a shapefile if GeoJSON doesn't exist),
     returns the geojson string and filtered tooltip fields.
+
+    Tries the API's /geo/variants endpoint first (returns GeoJSON
+    dynamically filtered to registered models). Falls back to local files.
     """
     @st.cache_data
     def simplify_geojson(path: Path, tolerance_deg: float = 0.001) -> str:
@@ -23,21 +46,25 @@ def load_geojson_fragment(simplified_geojson_path, shapefile_path, tolerance_deg
         keep = [c for c in ["FVSVariant", "FVSVarName", "FVSLocName"] if c in gdf.columns]
         gdf = gdf[keep + ["geometry"]] if keep else gdf[["geometry"]]
         return gdf.to_json(na="drop")
-    
+
     @st.cache_data
     def read_geojson_text(path: Path) -> str:
         return Path(path).read_text(encoding="utf-8")
 
-    # Load GeoJSON
-    if os.path.exists(simplified_geojson_path):
-        geojson_str = read_geojson_text(simplified_geojson_path)
-    else:
-        try:
-            geojson_str = simplify_geojson(shapefile_path, tolerance_deg=tolerance_deg)
-        except Exception as e:
-            st.error(f"Failed to load shapefile: {e}")
-            st.stop()
-            return None, None
+    # Try API first (dynamic, filtered to registered models)
+    geojson_str = _fetch_geojson_from_api()
+
+    # Fall back to local files
+    if geojson_str is None:
+        if os.path.exists(simplified_geojson_path):
+            geojson_str = read_geojson_text(simplified_geojson_path)
+        else:
+            try:
+                geojson_str = simplify_geojson(shapefile_path, tolerance_deg=tolerance_deg)
+            except Exception as e:
+                st.error(f"Failed to load shapefile: {e}")
+                st.stop()
+                return None, None
 
     # Extract tooltip fields
     try:
@@ -326,6 +353,54 @@ def _loccode_str(v):
         return f"{int(v):03d}"
     except Exception:
         return None
+
+
+def auto_select_variant_from_point(point, geojson_str):
+    """
+    Resolve and set the selected variant/session state from a lat/lon point.
+    Returns the matched feature properties if found, else None.
+    """
+    if point is None or not geojson_str:
+        return None
+
+    try:
+        gjson = json.loads(geojson_str)
+        features = gjson.get("features", [])
+    except Exception:
+        return None
+
+    for feat in features:
+        geom_json = feat.get("geometry")
+        if not geom_json:
+            continue
+
+        try:
+            geom = shape(geom_json)
+        except Exception:
+            continue
+
+        if not geom.intersects(point):
+            continue
+
+        props = feat.get("properties", {}) or {}
+        map_variant = props.get("FVSVariant", "PN")
+        loccode = _loccode_str(props.get("FVSLocCode")) or "609"
+
+        st.session_state["clicked_feature"] = feat
+        st.session_state["clicked_props"] = props
+        st.session_state["selected_variant"] = map_variant
+        st.session_state["selected_varloc_name"] = props.get("FVSLocName", "Olympic National Forest")
+        st.session_state["selected_varloc_code"] = loccode
+        st.session_state["FVSLocCode"] = loccode
+
+        # Resolve sub-variant at selection time
+        from utils.functions.plant_design import _resolve_sub_variants
+        sub_variants = _resolve_sub_variants(map_variant, loccode)
+        st.session_state["active_variant"] = sub_variants[0] if sub_variants else map_variant
+
+        return props
+
+    return None
 
 @st.fragment
 def show_clicked_variant(map_data):
