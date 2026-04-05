@@ -26,22 +26,25 @@ jobs:
         id: env
         run: |
           if [[ "${{ github.ref_name }}" == "main" ]]; then
-            echo "suffix=-prod" >> "$GITHUB_OUTPUT"
+            echo "api_suffix=-prod" >> "$GITHUB_OUTPUT"
+            echo "dash_suffix=-prod" >> "$GITHUB_OUTPUT"
+            echo "bucket_suffix=-prod" >> "$GITHUB_OUTPUT"
             echo "env_name=production" >> "$GITHUB_OUTPUT"
           else
-            echo "suffix=-dev" >> "$GITHUB_OUTPUT"
+            echo "api_suffix=-dev" >> "$GITHUB_OUTPUT"
+            echo "dash_suffix=" >> "$GITHUB_OUTPUT"
+            echo "bucket_suffix=-dev" >> "$GITHUB_OUTPUT"
             echo "env_name=development" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Set environment variables
         run: |
-          SUFFIX="${{ steps.env.outputs.suffix }}"
           echo "GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}" >> $GITHUB_ENV
-          echo "API_SERVICE=model-service-api${SUFFIX}" >> $GITHUB_ENV
-          echo "API_IMAGE=gcr.io/${{ secrets.GCP_PROJECT_ID }}/model-service-api${SUFFIX}:${{ github.sha }}" >> $GITHUB_ENV
-          echo "DASH_SERVICE=af-dash${SUFFIX}" >> $GITHUB_ENV
-          echo "DASH_IMAGE=gcr.io/${{ secrets.GCP_PROJECT_ID }}/af-dash${SUFFIX}:${{ github.sha }}" >> $GITHUB_ENV
-          echo "MODEL_BUCKET=af-carbon-models${SUFFIX}" >> $GITHUB_ENV
+          echo "API_SERVICE=model-service-api${{ steps.env.outputs.api_suffix }}" >> $GITHUB_ENV
+          echo "API_IMAGE=gcr.io/${{ secrets.GCP_PROJECT_ID }}/model-service-api${{ steps.env.outputs.api_suffix }}:${{ github.sha }}" >> $GITHUB_ENV
+          echo "DASH_SERVICE=af-dash${{ steps.env.outputs.dash_suffix }}" >> $GITHUB_ENV
+          echo "DASH_IMAGE=gcr.io/${{ secrets.GCP_PROJECT_ID }}/af-dash${{ steps.env.outputs.dash_suffix }}:${{ github.sha }}" >> $GITHUB_ENV
+          echo "MODEL_BUCKET=af-carbon-models${{ steps.env.outputs.bucket_suffix }}" >> $GITHUB_ENV
 
       - name: Authenticate to Google Cloud (WIF)
         uses: google-github-actions/auth@v2
@@ -61,7 +64,25 @@ jobs:
             --uniform-bucket-level-access \
             2>/dev/null || true
 
-      # ── Build both images in parallel via Cloud Build ─────────────
+      - name: Seed FVS GeoJSON if not cached
+        run: |
+          GEOJSON_KEY="geo/FVS_Variants_and_Locations_4326_simplified_full.geojson"
+          if gcloud storage ls "gs://${{ env.MODEL_BUCKET }}/${GEOJSON_KEY}" 2>/dev/null; then
+            echo "GeoJSON already cached in bucket, skipping download"
+          else
+            echo "Downloading and processing FVS shapefile from USDA..."
+            pip install -q geopandas pyyaml
+            python scripts/downloadFile.py \
+              "https://www.fs.usda.gov/fmsc/ftp/fvs/docs/overviews/FVSVariantMap20210525.zip" \
+              /tmp/fvs.zip /tmp/shapefile/FVS_Variants_and_Locations.shp
+            python scripts/convertGeoJSON.py \
+              --input /tmp/shapefile/FVS_Variants_and_Locations.shp \
+              --output /tmp/full.geojson
+            gcloud storage cp /tmp/full.geojson "gs://${{ env.MODEL_BUCKET }}/${GEOJSON_KEY}"
+            echo "GeoJSON uploaded to bucket"
+          fi
+
+      # ── Build both images via Cloud Build ─────────────────────────
       - name: Build API image
         run: |
           gcloud builds submit \
@@ -70,14 +91,15 @@ jobs:
 
       - name: Build Dashboard image
         run: |
-          gcloud builds submit \
-            --project="${{ env.GCP_PROJECT_ID }}" \
-            --config=/dev/stdin <<EOF
+          cat > /tmp/cloudbuild-dash.yaml <<EOF
           steps:
             - name: gcr.io/cloud-builders/docker
               args: ['build', '-f', 'Dockerfile.dashboard', '-t', '${{ env.DASH_IMAGE }}', '.']
           images: ['${{ env.DASH_IMAGE }}']
           EOF
+          gcloud builds submit \
+            --project="${{ env.GCP_PROJECT_ID }}" \
+            --config=/tmp/cloudbuild-dash.yaml
 
       # ── Deploy API first (dashboard needs its URL) ────────────────
       - name: Deploy API to Cloud Run
