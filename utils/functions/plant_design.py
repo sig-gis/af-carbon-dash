@@ -23,8 +23,12 @@ def _resolve_sub_variants(map_variant: str, loccode: str) -> list[str]:
     sub-variants that have models available for that loccode in the registry.
     Falls back to species config prefix matching if no registry entries found.
     """
-    from model_service.main import load_json
-    registry = load_json("model_registry.json").get("models", [])
+    try:
+        resp = requests.get(f"{get_api_base_url()}/models/registry", timeout=5)
+        resp.raise_for_status()
+        registry = resp.json().get("models", [])
+    except Exception:
+        registry = []
     vs = load_variant_species()
 
     # Find all sub-variant keys that could match this map variant
