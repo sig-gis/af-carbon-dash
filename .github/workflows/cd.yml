@@ -73,7 +73,12 @@ jobs:
           gcloud builds submit \
             --project="${{ env.GCP_PROJECT_ID }}" \
             --tag "${{ env.DASH_IMAGE }}" \
-            --dockerfile Dockerfile.dashboard
+            --config=/dev/stdin <<'EOF'
+          steps:
+            - name: gcr.io/cloud-builders/docker
+              args: ['build', '-f', 'Dockerfile.dashboard', '-t', '${{ env.DASH_IMAGE }}', '.']
+          images: ['${{ env.DASH_IMAGE }}']
+          EOF
 
       # ── Deploy API first (dashboard needs its URL) ────────────────
       - name: Deploy API to Cloud Run
