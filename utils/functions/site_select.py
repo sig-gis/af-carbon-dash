@@ -16,16 +16,33 @@ from utils.config import get_api_base_url
 logger = logging.getLogger(__name__)
 
 
-@st.cache_data(ttl=300)
+_geojson_cache: dict = {"data": None, "expires": 0}
+
+
 def _fetch_geojson_from_api() -> str | None:
-    """Try to fetch filtered GeoJSON from the API's /geo/variants endpoint."""
+    """Fetch filtered GeoJSON from the API. Caches success for 5 min, retries failures every 15s."""
+    import time
+
+    now = time.time()
+    if _geojson_cache["data"] is not None and now < _geojson_cache["expires"]:
+        return _geojson_cache["data"]
+
+    # Don't retry failures too aggressively
+    if _geojson_cache["data"] is None and now < _geojson_cache["expires"]:
+        return None
+
     try:
         base_url = get_api_base_url()
-        resp = requests.get(f"{base_url}/geo/variants", timeout=10)
+        resp = requests.get(f"{base_url}/geo/variants", timeout=30)
         resp.raise_for_status()
-        return json.dumps(resp.json())
+        data = json.dumps(resp.json())
+        _geojson_cache["data"] = data
+        _geojson_cache["expires"] = now + 300  # cache success for 5 min
+        return data
     except Exception as e:
         logger.warning("Could not fetch GeoJSON from API: %s", e)
+        _geojson_cache["data"] = None
+        _geojson_cache["expires"] = now + 15  # retry failures after 15s
         return None
 
 

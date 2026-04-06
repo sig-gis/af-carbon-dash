@@ -41,23 +41,12 @@ def refresh_geojson() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Pre-download models and build GeoJSON cache on startup."""
+    """Load registry and GeoJSON cache on startup. Models are fetched lazily on first use."""
     t0 = time.time()
     store = get_store()
 
     registry = store.get_json("registry.json").get("models", [])
-    loaded = 0
-    for entry in registry:
-        filename = entry.get("filename") or Path(entry.get("path", "")).name
-        if not filename:
-            continue
-        try:
-            store.get_file(f"models/{filename}")
-            loaded += 1
-        except Exception as e:
-            logger.warning("Failed to preload model %s: %s", filename, e)
-
-    logger.info("Preloaded %d/%d models in %.1fs", loaded, len(registry), time.time() - t0)
+    logger.info("Registry loaded: %d models (%.1fs)", len(registry), time.time() - t0)
 
     refresh_geojson()
 
