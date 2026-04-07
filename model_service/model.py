@@ -169,7 +169,6 @@ def compute_proforma(df_ert_ac: pd.DataFrame, p: dict) -> pd.DataFrame:
         df['Registry_Fees'] = p['registry_fees']
         df['Issuance_Fees'] = df['CUs_Sold'] * p['issuance_fee_per_ert']
         df['Planting_Cost'] = p['planting_cost']
-        df['Seedling_Cost'] = p['seedling_cost']
 
         df['Total_Costs'] = (
             df['Validation_and_Verification']
@@ -177,7 +176,6 @@ def compute_proforma(df_ert_ac: pd.DataFrame, p: dict) -> pd.DataFrame:
             + df['Registry_Fees']
             + df['Issuance_Fees']
             + df['Planting_Cost']
-            + df['Seedling_Cost']
         )
 
         df['Net_Revenue'] = df['Total_Revenue'] - df['Total_Costs']
@@ -283,7 +281,19 @@ def compute_carbon_units(
     all_protocol_dfs = []
 
     for protocol in protocols:
-        rules = ruleset.get(protocol, ruleset["ACR/CAR/VERRA"])
+        # Backward-compatible fallback chain for legacy combined protocol key
+        rules = (
+            ruleset.get(protocol)
+            or ruleset.get("ACR")
+            or ruleset.get("CAR")
+            or ruleset.get("VERRA")
+            or ruleset.get("ACR/CAR/VERRA")
+        )
+
+        if rules is None:
+            raise KeyError(
+                "No protocol rules found for selected protocols and no fallback protocol rules are configured."
+            )
 
 
         df_base = df_carbon.copy()

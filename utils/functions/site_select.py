@@ -35,7 +35,21 @@ def _fetch_geojson_from_api() -> str | None:
         base_url = get_api_base_url()
         resp = requests.get(f"{base_url}/geo/variants", timeout=30)
         resp.raise_for_status()
-        data = json.dumps(resp.json())
+        payload = resp.json()
+
+        # If API is healthy but returns an empty filtered feature set (common in
+        # local dev before models are registered), allow downstream local-file
+        # fallback by returning None.
+        features = payload.get("features", []) if isinstance(payload, dict) else []
+        if not features:
+            logger.info(
+                "API /geo/variants returned 0 features; falling back to local GeoJSON."
+            )
+            _geojson_cache["data"] = None
+            _geojson_cache["expires"] = now + 15
+            return None
+
+        data = json.dumps(payload)
         _geojson_cache["data"] = data
         _geojson_cache["expires"] = now + 300  # cache success for 5 min
         return data

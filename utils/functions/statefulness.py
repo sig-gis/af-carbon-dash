@@ -81,7 +81,7 @@ def _init_planting_state(variant: str, preset: dict):
 
 def _init_carbon_units_state():
     """Initialize Carbon Units inputs ONLY if missing."""
-    default_protocols = ["ACR/CAR/VERRA"]
+    default_protocols = ["ACR", "CAR", "VERRA"]
 
     if "carbon_units_inputs" not in st.session_state:
         st.session_state["carbon_units_inputs"] = {"protocols": default_protocols}
