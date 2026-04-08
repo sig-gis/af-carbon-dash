@@ -421,10 +421,15 @@ def credits_inputs(prefix: str = "credits_") -> dict:
         st.caption(f"{float(anticipated_inflation_perc):,.1f}%")
         discount_rate_perc         = st.number_input("Discount Rate, %:", min_value=0.0, step=1.0, format="%.1f", key=prefix+"discount_rate", help=H("credits.inputs.discount_rate"))
         st.caption(f"{float(discount_rate_perc):,.1f}%")
-        planting_cost              = st.number_input("Initial Planting Cost, $:", min_value=0, key=prefix+"planting_cost", help=H("credits.inputs.planting_cost"))
+        planting_cost              = st.number_input(
+            "Initial Planting Cost, $:",
+            min_value=0,
+            # value=1000,
+            step=100,
+            key=prefix+"planting_cost",
+            help=H("credits.inputs.planting_cost")
+        )
         st.caption(f"${float(planting_cost):,.1f}")
-        seedling_cost              = st.number_input("Initial Seedling Cost, $:", min_value=0, key=prefix+"seedling_cost", help=H("credits.inputs.seedling_cost"))
-        st.caption(f"${float(seedling_cost):,.1f}")
 
     # backup inputs so the latest entries persist across navigation
     _backup_keys(_credits_keys(prefix), backup_name="_credits_backup")
@@ -447,7 +452,6 @@ def credits_inputs(prefix: str = "credits_") -> dict:
         "anticipated_inflation": float(anticipated_inflation_perc) / 100.0,
         "discount_rate": float(discount_rate_perc) / 100.0,
         "planting_cost": planting_cost,
-        "seedling_cost": seedling_cost,
         "year_start": year_start,
         "years_advance": years_advance,
     }
@@ -642,8 +646,7 @@ def generate_report():
         {"column1": "Issuance Fee per CU, $", "column2": str(st.session_state.get('credits_issuance_fee_per_ert', 0.0))},
         {"column1": "Anticipated Inflation, %", "column2": str(st.session_state.get('credits_anticipated_inflation', 0.0))},
         {"column1": "Discount Rate, %", "column2": str(st.session_state.get('credits_discount_rate', 0.0))},
-        {"column1": "Initial Planting Cost, $", "column2": str(st.session_state.get('credits_planting_cost', 0))},
-        {"column1": "Initial Seedling Cost, $", "column2": str(st.session_state.get('credits_seedling_cost', 0))},
+        {"column1": "Initial Planting Cost, $", "column2": str(st.session_state.get('credits_planting_cost', 1000))},
     ]
 
     # Carbon data from merged_df - map to expected column names
@@ -733,7 +736,9 @@ def run_chart():
             # render widget using key only to enable restoring backups
             protocols = st.multiselect(
                 "Select Protocol(s)",
-                options=["ACR/CAR/VERRA", 
+                options=["ACR",
+                         "CAR",
+                         "VERRA",
                          "GS",  
                          "ISO"],
                 key="carbon_units_protocols",
