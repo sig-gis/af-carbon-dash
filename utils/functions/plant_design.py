@@ -50,12 +50,11 @@ def _resolve_sub_variants(map_variant: str, loccode: str) -> list[str]:
 API_BASE_URL = get_api_base_url()
 
 CHART_BASE_YEAR = 2024
-FADE_START_AGE = 40
+FADE_START_AGE = 5
 # More aggressive fade profile for clearer visual contrast after cutoff.
-MIN_FADE_ALPHA = 0.08
+MIN_FADE_ALPHA = 0.15
 FADE_EXPONENT = 0.25
 BASE_LINE_WIDTH = 3.0
-POST_CUTOFF_WIDTH_MULTIPLIER = 20.0
 
 PROTOCOL_ORDER = ["ACR", "CAR", "VERRA", "GS", "ISO"]
 
@@ -90,21 +89,6 @@ def _rgba_with_alpha(color: str, alpha: float) -> str:
     return f"rgba({int(r * 255)}, {int(g * 255)}, {int(b * 255)}, {alpha:.3f})"
 
 
-def _line_width_for_age(
-    age: float,
-    max_age: float,
-    base_width: float = BASE_LINE_WIDTH,
-    fade_start: int = FADE_START_AGE,
-    end_multiplier: float = POST_CUTOFF_WIDTH_MULTIPLIER,
-) -> float:
-    """Return line width that grows after year-40 age and reaches end_multiplier by series end."""
-    if max_age <= fade_start or age <= fade_start:
-        return float(base_width)
-
-    u = min(max((age - fade_start) / max(max_age - fade_start, 1.0), 0.0), 1.0)
-    return float(base_width) * (1.0 + (float(end_multiplier) - 1.0) * u)
-
-
 def _add_fading_line_series(
     fig: go.Figure,
     series_df: pd.DataFrame,
@@ -113,6 +97,7 @@ def _add_fading_line_series(
     color: str,
     label: str | None,
     showlegend: bool,
+    line_dash: str = "solid",
 ):
     """Add a single series to a Plotly figure, fading opacity after project year 40."""
     if series_df.empty:
@@ -140,19 +125,18 @@ def _add_fading_line_series(
 
     max_age = float(np.max(x) - CHART_BASE_YEAR)
 
-    # Draw each line segment independently so opacity and width can vary over time.
+    # Draw each line segment independently so opacity can vary over time.
     for idx in range(len(x) - 1):
         x0, x1 = x[idx], x[idx + 1]
         y0, y1 = y[idx], y[idx + 1]
         mid_age = ((x0 + x1) / 2.0) - CHART_BASE_YEAR
         seg_alpha = _alpha_for_age(mid_age, max_age)
-        seg_width = _line_width_for_age(mid_age, max_age)
         fig.add_trace(
             go.Scatter(
                 x=[x0, x1],
                 y=[y0, y1],
                 mode="lines",
-                line=dict(color=_rgba_with_alpha(color, seg_alpha), width=seg_width),
+                line=dict(color=_rgba_with_alpha(color, seg_alpha), width=BASE_LINE_WIDTH, dash=line_dash),
                 name=label,
                 legendgroup=label,
                 showlegend=showlegend and idx == 0,
@@ -192,6 +176,11 @@ def _plot_fading_line_chart(
 
     if series_col:
         series_vals = data[series_col].dropna().unique().tolist()
+        protocol_dash_map = {
+            "ACR": "dash",
+            "CAR": "longdash",
+            "VERRA": "dot",
+        }
         if series_col == "Protocol":
             ordered = [p for p in PROTOCOL_ORDER if p in series_vals]
             remaining = [s for s in series_vals if s not in ordered]
@@ -209,6 +198,7 @@ def _plot_fading_line_chart(
                 color=color_map[s],
                 label=str(s),
                 showlegend=True,
+                line_dash=protocol_dash_map.get(str(s), "solid") if series_col == "Protocol" else "solid",
             )
     else:
         _add_fading_line_series(
