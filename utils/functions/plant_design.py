@@ -389,71 +389,140 @@ def carbon_units():
 
 def credits_inputs(prefix: str = "credits_") -> dict:
     """
-    Render Proforma inputs in the current container and return a dictionary of typed values.
+    Render per-protocol Proforma inputs as an editable table and return
+    a mapping of protocol -> typed parameter dictionary.
     """
-    # restore backup so users keep their previous values after navigation
-    _restore_backup(_credits_keys(prefix), backup_name="_credits_backup")
-    
-    # seed defaults (setdefault) will not overwrite restored/user values
-    _seed_defaults(prefix)
-    
-    st.markdown("Financial Options", help=H("credits.expander_subheader"))
-    container = st.container(height=600)
-    with container:
-        # net_acres              = st.number_input("Net Acres:", min_value=1, step=100, key=prefix+"net_acres", help=H("credits.inputs.net_acres"))
-        num_plots              = st.number_input("# Plots:", min_value=1, key=prefix+"num_plots", help=H("credits.inputs.num_plots"))
-        st.caption(f"{int(num_plots):,} plots")
-        cost_per_cfi_plot      = st.number_input("Cost/CFI Plot, $:", min_value=1, key=prefix+"cost_per_cfi_plot", help=H("credits.inputs.cost_per_cfi_plot"))
-        st.caption(f"${float(cost_per_cfi_plot):,.1f}")
-        price_per_ert_initial  = st.number_input("Initial Price/CU, $:", min_value=1.0, key=prefix+"price_per_ert_initial", help=H("credits.inputs.price_per_ert_initial"))
-        st.caption(f"${float(price_per_ert_initial):,.1f}/CU")
-        credit_price_increase_perc = st.number_input("Credit Price Increase, %:", min_value=0.0, step=1.0, format="%.1f", key=prefix+"credit_price_increase", help=H("credits.inputs.credit_price_increase"))
-        st.caption(f"{float(credit_price_increase_perc):,.1f}%")
-        registry_fees              = st.number_input("Registry Fees, $:", min_value=1, key=prefix+"registry_fees", help=H("credits.inputs.registry_fees"))
-        st.caption(f"${float(registry_fees):,.1f}")
-        validation_cost            = st.number_input("Validation Cost, $:", min_value=1, key=prefix+"validation_cost", help=H("credits.inputs.validation_cost"))
-        st.caption(f"${float(validation_cost):,.1f}")
-        verification_cost          = st.number_input("Verification Cost, $:", min_value=1, key=prefix+"verification_cost", help=H("credits.inputs.verification_cost"))
-        st.caption(f"${float(verification_cost):,.1f}")
-        issuance_fee_per_ert       = st.number_input("Issuance Fee per CU, $:", min_value=0.0, step=0.01, format="%.2f", key=prefix+"issuance_fee_per_ert", help=H("credits.inputs.issuance_fee_per_ert"))
-        st.caption(f"${float(issuance_fee_per_ert):,.2f}/CU")
-        anticipated_inflation_perc = st.number_input("Anticipated Inflation, %:", min_value=0.0, step=1.0, format="%.1f", key=prefix+"anticipated_inflation", help=H("credits.inputs.anticipated_inflation"))
-        st.caption(f"{float(anticipated_inflation_perc):,.1f}%")
-        discount_rate_perc         = st.number_input("Discount Rate, %:", min_value=0.0, step=1.0, format="%.1f", key=prefix+"discount_rate", help=H("credits.inputs.discount_rate"))
-        st.caption(f"{float(discount_rate_perc):,.1f}%")
-        planting_cost              = st.number_input(
-            "Initial Planting Cost, $:",
-            min_value=0,
-            # value=1000,
-            step=100,
-            key=prefix+"planting_cost",
-            help=H("credits.inputs.planting_cost")
-        )
-        st.caption(f"${float(planting_cost):,.1f}")
+    protocols = st.session_state.get("carbon_units_inputs", {}).get("protocols", [])
 
-    # backup inputs so the latest entries persist across navigation
-    _backup_keys(_credits_keys(prefix), backup_name="_credits_backup")
+    if not protocols:
+        st.info("Select at least one protocol in Carbon Estimates to edit project financial assumptions.")
+        return {}
+
+    defaults = _load_proforma_defaults()
+    table_state_key = f"{prefix}protocol_params"
+    protocol_state = st.session_state.get(table_state_key, {})
+
+    # Keep values only for selected protocols, and seed defaults for any newly selected ones.
+    protocol_state = {p: protocol_state[p] for p in protocols if p in protocol_state}
+    for protocol in protocols:
+        if protocol not in protocol_state:
+            protocol_state[protocol] = {
+                "num_plots": defaults.get("num_plots", 250),
+                "cost_per_cfi_plot": defaults.get("cost_per_cfi_plot", 150),
+                "price_per_ert_initial": defaults.get("price_per_ert_initial", 25.0),
+                "credit_price_increase": defaults.get("credit_price_increase", 2.0),
+                "registry_fees": defaults.get("registry_fees", 500),
+                "validation_cost": defaults.get("validation_cost", 45000),
+                "verification_cost": defaults.get("verification_cost", 25000),
+                "issuance_fee_per_ert": defaults.get("issuance_fee_per_ert", 0.15),
+                "anticipated_inflation": defaults.get("anticipated_inflation", 0.0),
+                "discount_rate": defaults.get("discount_rate", 6.0),
+                "planting_cost": defaults.get("planting_cost", 1000),
+            }
+
+    st.session_state[table_state_key] = protocol_state
+    st.markdown("Financial Options by Protocol", help=H("credits.expander_subheader"))
+
+    table_df = pd.DataFrame(
+        [
+            {
+                "Protocol": protocol,
+                "num_plots": protocol_state[protocol]["num_plots"],
+                "cost_per_cfi_plot": protocol_state[protocol]["cost_per_cfi_plot"],
+                "registry_fees": protocol_state[protocol]["registry_fees"],
+                "issuance_fee_per_ert": protocol_state[protocol]["issuance_fee_per_ert"],
+                "validation_cost": protocol_state[protocol]["validation_cost"],
+                "verification_cost": protocol_state[protocol]["verification_cost"],
+                "anticipated_inflation": protocol_state[protocol]["anticipated_inflation"],
+                "discount_rate": protocol_state[protocol]["discount_rate"],
+                "price_per_ert_initial": protocol_state[protocol]["price_per_ert_initial"],
+                "credit_price_increase": protocol_state[protocol]["credit_price_increase"],
+                "planting_cost": protocol_state[protocol]["planting_cost"],
+            }
+            for protocol in protocols
+        ]
+    )
+
+    edited_df = st.data_editor(
+        table_df,
+        key=f"{prefix}financials_table",
+        use_container_width=True,
+        hide_index=True,
+        num_rows="fixed",
+        disabled=["Protocol"],
+        column_config={
+            "Protocol": st.column_config.TextColumn("Protocol"),
+            "num_plots": st.column_config.NumberColumn("Plots", min_value=1, step=1, format="%d"),
+            "cost_per_cfi_plot": st.column_config.NumberColumn("Cost/CFI Plot", min_value=1, step=1, format="$ %.2f"),
+            "registry_fees": st.column_config.NumberColumn("Registry Fee", min_value=0.0, step=1, format="$ %.2f"),
+            "issuance_fee_per_ert": st.column_config.NumberColumn("Issuance Fee", min_value=0.0, step=0.01, format="$ %.4f"),
+            "validation_cost": st.column_config.NumberColumn("Validation Cost", min_value=0.0, step=1, format="$ %.2f"),
+            "verification_cost": st.column_config.NumberColumn("Verification Cost", min_value=0.0, step=1, format="$ %.2f"),
+            "anticipated_inflation": st.column_config.NumberColumn("Anticipated Inflation", min_value=0.0, step=0.1, format="%.2f"),
+            "discount_rate": st.column_config.NumberColumn("Discount Rate", min_value=0.0, step=0.1, format="%.2f"),
+            "price_per_ert_initial": st.column_config.NumberColumn("Initial Price / CU", min_value=0.0, step=0.1, format="$ %.2f"),
+            "credit_price_increase": st.column_config.NumberColumn("Credit Price Increase", min_value=0.0, step=0.1, format="%.2f"),
+            "planting_cost": st.column_config.NumberColumn("Initial Planting Cost", min_value=0.0, step=100, format="$ %.2f"),
+        },
+    )
+
+    # Persist edited values by protocol.
+    protocol_state = {
+        row["Protocol"]: {
+            "num_plots": int(row["num_plots"]),
+            "cost_per_cfi_plot": float(row["cost_per_cfi_plot"]),
+            "price_per_ert_initial": float(row["price_per_ert_initial"]),
+            "credit_price_increase": float(row["credit_price_increase"]),
+            "registry_fees": float(row["registry_fees"]),
+            "validation_cost": float(row["validation_cost"]),
+            "verification_cost": float(row["verification_cost"]),
+            "issuance_fee_per_ert": float(row["issuance_fee_per_ert"]),
+            "anticipated_inflation": float(row["anticipated_inflation"]),
+            "discount_rate": float(row["discount_rate"]),
+            "planting_cost": float(row["planting_cost"]),
+        }
+        for _, row in edited_df.iterrows()
+    }
+    st.session_state[table_state_key] = protocol_state
+
+    # Keep legacy single-value keys populated for report/export compatibility.
+    first_protocol = protocols[0]
+    first_row = protocol_state[first_protocol]
+    st.session_state[f"{prefix}num_plots"] = first_row["num_plots"]
+    st.session_state[f"{prefix}cost_per_cfi_plot"] = first_row["cost_per_cfi_plot"]
+    st.session_state[f"{prefix}price_per_ert_initial"] = first_row["price_per_ert_initial"]
+    st.session_state[f"{prefix}credit_price_increase"] = first_row["credit_price_increase"]
+    st.session_state[f"{prefix}registry_fees"] = first_row["registry_fees"]
+    st.session_state[f"{prefix}validation_cost"] = first_row["validation_cost"]
+    st.session_state[f"{prefix}verification_cost"] = first_row["verification_cost"]
+    st.session_state[f"{prefix}issuance_fee_per_ert"] = first_row["issuance_fee_per_ert"]
+    st.session_state[f"{prefix}anticipated_inflation"] = first_row["anticipated_inflation"]
+    st.session_state[f"{prefix}discount_rate"] = first_row["discount_rate"]
+    st.session_state[f"{prefix}planting_cost"] = first_row["planting_cost"]
 
     # constants (constrained by modeling backend)
-    year_start     = 2024
-    years_advance  = 35
+    year_start = 2024
+    years_advance = 35
     net_acres = st.session_state["net_acres"]
 
     return {
-        "net_acres": net_acres,
-        "num_plots": num_plots,
-        "cost_per_cfi_plot": cost_per_cfi_plot,
-        "price_per_ert_initial": float(price_per_ert_initial),
-        "credit_price_increase": float(credit_price_increase_perc) / 100.0,
-        "registry_fees": registry_fees,
-        "validation_cost": validation_cost,
-        "verification_cost": verification_cost,
-        "issuance_fee_per_ert": float(issuance_fee_per_ert),
-        "anticipated_inflation": float(anticipated_inflation_perc) / 100.0,
-        "discount_rate": float(discount_rate_perc) / 100.0,
-        "planting_cost": planting_cost,
-        "year_start": year_start,
-        "years_advance": years_advance,
+        protocol: {
+            "net_acres": net_acres,
+            "num_plots": values["num_plots"],
+            "cost_per_cfi_plot": values["cost_per_cfi_plot"],
+            "price_per_ert_initial": values["price_per_ert_initial"],
+            "credit_price_increase": values["credit_price_increase"] / 100.0,
+            "registry_fees": values["registry_fees"],
+            "validation_cost": values["validation_cost"],
+            "verification_cost": values["verification_cost"],
+            "issuance_fee_per_ert": values["issuance_fee_per_ert"],
+            "anticipated_inflation": values["anticipated_inflation"] / 100.0,
+            "discount_rate": values["discount_rate"] / 100.0,
+            "planting_cost": values["planting_cost"],
+            "year_start": year_start,
+            "years_advance": years_advance,
+        }
+        for protocol, values in protocol_state.items()
     }
 
 def credits_results(params: dict, prefix: str = "credits_") -> dict:
@@ -466,25 +535,43 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
         st.stop()
 
     # Extract merged CU data per protocol
-    df_ert_ac = st.session_state.merged_df[['Year', 'CU', 'Protocol']].copy()
-    df_ert_ac = df_ert_ac.replace([np.inf, -np.inf], np.nan)
-    df_ert_ac = df_ert_ac.dropna(subset=['CU'])
+    df_ert_ac_all = st.session_state.merged_df[['Year', 'CU', 'Protocol']].copy()
+    df_ert_ac_all = df_ert_ac_all.replace([np.inf, -np.inf], np.nan)
+    df_ert_ac_all = df_ert_ac_all.dropna(subset=['CU'])
 
-    payload = {
-        "df_ert_ac": df_ert_ac.to_dict(orient="records"),
-        "params": normalize_params(params),
-    }
+    if not params:
+        st.info("No protocol financial assumptions available. Select at least one protocol.")
+        return None
 
-    json.dumps(payload)
-    resp = requests.post(
-        f"{API_BASE_URL}/proforma/compute",
-        json=payload,
-        timeout=10,
-    )
+    proforma_frames = []
+    summary_frames = []
 
-    resp.raise_for_status()
+    for protocol, protocol_params in params.items():
+        df_protocol = df_ert_ac_all[df_ert_ac_all["Protocol"] == protocol].copy()
+        if df_protocol.empty:
+            continue
 
-    df_pf = pd.DataFrame(resp.json()["proforma_rows"])
+        payload = {
+            "df_ert_ac": df_protocol.to_dict(orient="records"),
+            "params": normalize_params(protocol_params),
+        }
+
+        json.dumps(payload)
+        resp = requests.post(
+            f"{API_BASE_URL}/proforma/compute",
+            json=payload,
+            timeout=10,
+        )
+        resp.raise_for_status()
+
+        proforma_frames.append(pd.DataFrame(resp.json()["proforma_rows"]))
+        summary_frames.append(pd.DataFrame(resp.json()["summaries"]))
+
+    if not proforma_frames:
+        st.error("No protocol financial results were generated.")
+        return None
+
+    df_pf = pd.concat(proforma_frames, ignore_index=True)
 
     # Drop rows with NaN Net_Revenue to avoid chart issues
     df_pf = df_pf.dropna(subset=['Net_Revenue'])
@@ -493,10 +580,11 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
     st.session_state["proforma_df"] = df_pf.copy()
 
     # Summary metrics per protocol
-    year_start = params['year_start']
+    first_params = next(iter(params.values()))
+    year_start = first_params['year_start']
     year_stop = int(df_pf['Year'].max())
 
-    summaries_df = pd.DataFrame(resp.json()["summaries"])
+    summaries_df = pd.concat(summary_frames, ignore_index=True)
 
     # Chart alignment: start at 2024 (0), then show every 5 years
     include_years = _five_year_values(year_stop, start_year=CHART_BASE_YEAR)
@@ -515,7 +603,7 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
     if toggle_nr:
         plot_df['Net_Revenue'] = plot_df['Net_Revenue']
     else :
-        plot_df['Net_Revenue'] = plot_df['Net_Revenue'] / params["net_acres"]
+        plot_df['Net_Revenue'] = plot_df['Net_Revenue'] / first_params["net_acres"]
 
     chart_title = "Total" if toggle_nr else "Per Acre"
 
@@ -534,7 +622,7 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
             tooltip=['Year', 'Net_Revenue', 'Protocol']
         )
         .properties(
-            title= chart_title + f' Estimated Credits for {params["net_acres"]:,} acres project',
+            title= chart_title + f' Estimated Credits for {first_params["net_acres"]:,} acres project',
             width=600,
             height=400
         )
@@ -755,10 +843,7 @@ def run_chart():
 
     # Row 3: Proforma inputs | Credits chart + summary
     with st.expander(label="Project Financials", expanded=True):
-        col5, col6 = st.columns([1,2], gap="large")
-        with col5:
-            proforma_params = credits_inputs(prefix="credits_")
-        with col6:
-            credits_results(proforma_params) 
+        proforma_params = credits_inputs(prefix="credits_")
+        credits_results(proforma_params)
 
     
