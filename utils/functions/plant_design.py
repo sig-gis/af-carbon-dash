@@ -195,13 +195,36 @@ def carbon_chart():
     variant = st.session_state.get("active_variant", st.session_state.get("selected_variant", "PN"))
     loccode = st.session_state.get("selected_varloc_code", "609")
 
+    _PCT_LABELS = {"PCT0": "None", "PCT1": "Light", "PCT2": "Moderate"}
+    # Fetch available PCT levels with retention percentages for this variant/location
+    try:
+        _pct_resp = requests.get(
+            f"{API_BASE_URL}/models/pct-info",
+            params={"variant": variant, "loccode": loccode},
+            timeout=5,
+        )
+        _pct_resp.raise_for_status()
+        _pct_info = {p["pct_level"]: p.get("pct_retention") for p in _pct_resp.json()}
+    except Exception:
+        _pct_info = {"PCT0": None, "PCT1": None, "PCT2": None}
+
+    _pct_options = sorted(_pct_info.keys())
+
+    def _fmt_pct(code: str) -> str:
+        label = _PCT_LABELS.get(code, code)
+        ret = _pct_info.get(code)
+        return f"{label} — {ret}%" if ret is not None else label
+
     pct_level = st.selectbox(
         "Pre-commercial Thin (PCT)",
-        options=["PCT0", "PCT1", "PCT2"],
-        format_func=lambda x: {"PCT0": "None", "PCT1": "Light", "PCT2": "Moderate"}[x],
+        options=_pct_options,
+        format_func=_fmt_pct,
         key="pct_level",
         help=H("planting.pct_level"),
     )
+
+    # Store retention % in session state for reports
+    st.session_state["pct_retention"] = _pct_info.get(pct_level)
 
     payload = {
         "variant": variant,
@@ -617,6 +640,8 @@ def generate_report():
         {"column1": "Survival Rate, %", "column2": st.session_state.get('survival', 70)},
         {"column1": "Site Index", "column2": str(st.session_state.get('si', 120))},
         {"column1": "Included Protocols", "column2": ", ".join(st.session_state.get("carbon_units_inputs", {}).get("protocols", []))},
+        {"column1": "PCT Level", "column2": st.session_state.get("pct_level", "PCT0")},
+        {"column1": "PCT Retention, %", "column2": str(st.session_state.get("pct_retention", ""))},
     ]
 
     # Species mix — built dynamically from variant species config

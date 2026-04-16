@@ -154,6 +154,33 @@ def get_model_registry():
     return store.get_json("registry.json")
 
 
+@app.get("/models/pct-info")
+def get_pct_info(variant: str, loccode: str):
+    """Return available PCT levels and retention percentages for a variant/location."""
+    store = get_store()
+    registry = store.get_json("registry.json").get("models", [])
+    matches = [
+        m for m in registry
+        if m.get("variant") == variant and m.get("loccode") == loccode
+    ]
+    if not matches:
+        # Fallback: return all PCT levels with no retention data
+        return [
+            {"pct_level": p, "pct_retention": None}
+            for p in ["PCT0", "PCT1", "PCT2"]
+        ]
+    return sorted(
+        [
+            {
+                "pct_level": m.get("pct_level", "PCT0"),
+                "pct_retention": m.get("pct_retention"),
+            }
+            for m in matches
+        ],
+        key=lambda x: x["pct_level"],
+    )
+
+
 @app.post("/geo/refresh")
 def geo_refresh():
     """Rebuild the filtered GeoJSON cache from the current registry."""
