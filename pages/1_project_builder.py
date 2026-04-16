@@ -12,7 +12,7 @@ import zipfile
 from geopy.geocoders import Nominatim
 
 from utils.functions.helper import  H
-from utils.functions.site_select import load_geojson_fragment, load_geojson_or_shapefile, build_map, show_clicked_variant, display_selected_info, auto_select_variant_from_point
+from utils.functions.site_select import load_geojson_fragment, load_geojson_or_shapefile, build_map, build_highlight_layer, show_clicked_variant, display_selected_info, auto_select_variant_from_point, _process_pending_click
 from utils.functions.plant_design import run_chart
 
 # Page Configuration
@@ -83,19 +83,9 @@ if st.session_state.active_tab == "Site Selection Map":
             help=H("site.title"),
         )
 
-    with col2:
-        # Only show the "Continue" button if a variant is selected
-        if st.session_state.get("selected_variant"):
-            if st.button(
-                "➡️ Planting Design",
-                use_container_width=True,
-                help=H("site.button_forward_to_planting"),
-                type='primary'
-            ):
-                st.session_state.active_tab = "Planting Design"
-                st.rerun()
-        else:
-            st.empty()
+    # Placeholder — filled after map click processing so the button
+    # reflects the latest selection without a second rerun.
+    _button_slot = col2.empty()
 
     if "points" not in st.session_state:
         st.session_state.points = []
@@ -225,17 +215,23 @@ if st.session_state.active_tab == "Site Selection Map":
         help=H("site.subheader_select_variant")
     )
 
-    # Load GeoJSON and Map
+    # Process any pending map click BEFORE building the map
+    # so the highlight renders in the same pass.
+    _process_pending_click()
+
     st.session_state.setdefault("map_view", {"center": [45.5, -118], "zoom": 6})
 
     m = build_map(
         geojson_str,
         points=st.session_state.points,
-        upload = uploaded_geojson_str,
+        upload=uploaded_geojson_str,
         center=tuple(st.session_state["map_view"]["center"]),
         zoom=int(st.session_state["map_view"]["zoom"]),
         tooltip_fields=tooltip_fields,
-        highlight_feature=st.session_state.get("clicked_feature")
+    )
+
+    highlight_fg = build_highlight_layer(
+        st.session_state.get("clicked_feature")
     )
 
     map_data = st_folium(
@@ -243,10 +239,24 @@ if st.session_state.active_tab == "Site Selection Map":
         key="fvs_map",
         height=500,
         use_container_width=True,
+        returned_objects=["last_active_drawing"],
+        feature_group_to_add=highlight_fg,
     )
 
     show_clicked_variant(map_data)
     display_selected_info()
+
+    # Fill the button placeholder now that click state is up to date
+    if st.session_state.get("selected_variant"):
+        with _button_slot:
+            if st.button(
+                "➡️ Planting Design",
+                use_container_width=True,
+                help=H("site.button_forward_to_planting"),
+                type="primary",
+            ):
+                st.session_state.active_tab = "Planting Design"
+                st.rerun()
 
     if reset_button:
         # Remove from session state

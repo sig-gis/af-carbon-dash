@@ -212,8 +212,7 @@ def load_geojson_or_shapefile(uploaded_files, tolerance_deg=0.001,
 
     return geojson_str, tooltip_fields
 
-@st.fragment
-def build_map(geojson_str, points=None, upload=None, center=(37.8, -96.9), zoom=5, tooltip_fields=None, highlight_feature=None):
+def build_map(geojson_str, points=None, upload=None, center=(37.8, -96.9), zoom=5, tooltip_fields=None):
     """
     Build and return a Folium map. Determines center/zoom based on user
     interactions, filters base GeoJSON to uploaded geometry bounds, renders
@@ -356,14 +355,6 @@ def build_map(geojson_str, points=None, upload=None, center=(37.8, -96.9), zoom=
             gj.add_child(folium.GeoJsonTooltip(fields=tooltip_fields, aliases=tooltip_fields, sticky=True))
         gj.add_to(m)
 
-    # Highlight only the last clicked feature
-    if highlight_feature:
-        folium.GeoJson(
-            highlight_feature["geometry"],
-            name="Selected Boundary",
-            style_function=lambda x: {"fillColor": "yellow", "color": "red", "weight": 3, "fillOpacity": 0.2},
-        ).add_to(m)
-
     # Add points
     if points:
         for pt in points:
@@ -440,32 +431,68 @@ def auto_select_variant_from_point(point, geojson_str):
 
     return None
 
-@st.fragment
+def build_highlight_layer(feature: dict | None) -> folium.FeatureGroup | None:
+    """Build a FeatureGroup for the selected feature highlight.
+
+    Passed to st_folium via ``feature_group_to_add`` so the highlight
+    is applied as a JS update without replacing the base map iframe.
+    """
+    if feature is None:
+        return None
+    geom = feature.get("geometry")
+    if geom is None:
+        return None
+    fg = folium.FeatureGroup(name="Selected Boundary")
+    folium.GeoJson(
+        geom,
+        style_function=lambda x: {
+            "fillColor": "yellow",
+            "color": "red",
+            "weight": 3,
+            "fillOpacity": 0.2,
+        },
+    ).add_to(fg)
+    return fg
+
+
+def _process_pending_click():
+    """Process a map click that was saved on the previous render.
+
+    Call this BEFORE building the map so the highlight is included
+    in the same render pass.
+    """
+    pending = st.session_state.pop("_pending_map_click", None)
+    if pending is None:
+        return False
+
+    feat = pending
+    props = feat.get("properties", {}) or {}
+    map_variant = props.get("FVSVariant", "PN")
+    loccode = _loccode_str(props.get("FVSLocCode")) or "609"
+
+    st.session_state["clicked_feature"] = feat
+    st.session_state["clicked_props"] = props
+    st.session_state["selected_variant"] = map_variant
+    st.session_state["selected_varloc_name"] = props.get("FVSLocName", "Olympic National Forest")
+    st.session_state["selected_varloc_code"] = loccode
+    st.session_state["FVSLocCode"] = loccode
+
+    from utils.functions.plant_design import _resolve_sub_variants
+    sub_variants = _resolve_sub_variants(map_variant, loccode)
+    st.session_state["active_variant"] = sub_variants[0] if sub_variants else map_variant
+    return True
+
+
 def show_clicked_variant(map_data):
-    """Update session state with the last clicked feature and its properties."""
+    """Detect a new map click and queue it for processing on the next render."""
     if map_data and map_data.get("last_active_drawing"):
         feat = map_data["last_active_drawing"]
         props = feat.get("properties", {})
 
-        if props:
-            if st.session_state.get("clicked_feature") != feat:
-                st.session_state["clicked_feature"] = feat
-                st.session_state["clicked_props"] = props
-                map_variant = props.get("FVSVariant", "PN")
-                loccode = _loccode_str(props.get("FVSLocCode")) or "609"
-                st.session_state["selected_variant"] = map_variant
-                st.session_state["selected_varloc_name"] = props.get("FVSLocName", "Olympic National Forest")
-                st.session_state["selected_varloc_code"] = loccode
-                st.session_state["FVSLocCode"] = loccode
+        if props and st.session_state.get("clicked_feature") != feat:
+            st.session_state["_pending_map_click"] = feat
+            st.rerun()
 
-                # Resolve sub-variant at selection time
-                from utils.functions.plant_design import _resolve_sub_variants
-                sub_variants = _resolve_sub_variants(map_variant, loccode)
-                st.session_state["active_variant"] = sub_variants[0] if sub_variants else map_variant
-
-                st.rerun()
-
-@st.fragment
 def display_selected_info():
     """
     Display the selected variant's properties in the UI, filtering out internal
