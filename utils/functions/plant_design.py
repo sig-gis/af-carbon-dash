@@ -232,7 +232,7 @@ def carbon_chart():
         "SDI":     {"label": "Stand density index",             "unit": "index",      "unit_project": "index",    "scales": False},
         "TCuFt":   {"label": "Total cubic volume",             "unit": "cu ft/acre", "unit_project": "cu ft",    "scales": True},
         "MCuFt":   {"label": "Merchantable cubic volume",      "unit": "cu ft/acre", "unit_project": "cu ft",    "scales": True},
-        "Tpa":     {"label": "Trees per acre",                  "unit": "trees/acre", "unit_project": "trees",    "scales": True},
+        "Tpa":     {"label": "Trees per acre",                  "unit": "trees/acre", "unit_project": "trees/acre", "scales": False},
     }
 
     available = {col: METRIC_DEFS[col] for col in METRIC_DEFS if col in df.columns}
@@ -452,17 +452,17 @@ def credits_inputs(prefix: str = "credits_") -> dict:
         disabled=["Protocol"],
         column_config={
             "Protocol": st.column_config.TextColumn("Protocol"),
-            "num_plots": st.column_config.NumberColumn("Plots", min_value=1, step=1, format="%d"),
-            "cost_per_cfi_plot": st.column_config.NumberColumn("Cost/CFI Plot", min_value=1, step=1, format="$ %.2f"),
-            "registry_fees": st.column_config.NumberColumn("Registry Fee", min_value=0.0, step=1, format="$ %.2f"),
-            "issuance_fee_per_ert": st.column_config.NumberColumn("Issuance Fee", min_value=0.0, step=0.01, format="$ %.4f"),
-            "validation_cost": st.column_config.NumberColumn("Validation Cost", min_value=0.0, step=1, format="$ %.2f"),
-            "verification_cost": st.column_config.NumberColumn("Verification Cost", min_value=0.0, step=1, format="$ %.2f"),
-            "anticipated_inflation": st.column_config.NumberColumn("Anticipated Inflation", min_value=0.0, step=0.1, format="%.2f"),
-            "discount_rate": st.column_config.NumberColumn("Discount Rate", min_value=0.0, step=0.1, format="%.2f"),
-            "price_per_ert_initial": st.column_config.NumberColumn("Initial Price / CU", min_value=0.0, step=0.1, format="$ %.2f"),
-            "credit_price_increase": st.column_config.NumberColumn("Credit Price Increase", min_value=0.0, step=0.1, format="%.2f"),
-            "planting_cost": st.column_config.NumberColumn("Initial Planting Cost", min_value=0.0, step=100, format="$ %.2f"),
+            "num_plots": st.column_config.NumberColumn("Plots", min_value=1, step=1, format="%d", help=H("credits.inputs.num_plots")),
+            "cost_per_cfi_plot": st.column_config.NumberColumn("Cost/CFI Plot", min_value=1, step=1, format="$ %.2f", help=H("credits.inputs.cost_per_cfi_plot")),
+            "registry_fees": st.column_config.NumberColumn("Registry Fee", min_value=0.0, step=1, format="$ %.2f", help=H("credits.inputs.registry_fees")),
+            "issuance_fee_per_ert": st.column_config.NumberColumn("Issuance Fee", min_value=0.0, step=0.01, format="$ %.4f", help=H("credits.inputs.issuance_fee_per_ert")),
+            "validation_cost": st.column_config.NumberColumn("Validation Cost", min_value=0.0, step=1, format="$ %.2f", help=H("credits.inputs.validation_cost")),
+            "verification_cost": st.column_config.NumberColumn("Verification Cost", min_value=0.0, step=1, format="$ %.2f", help=H("credits.inputs.verification_cost")),
+            "anticipated_inflation": st.column_config.NumberColumn("Anticipated Inflation", min_value=0.0, step=0.1, format="%.2f", help=H("credits.inputs.anticipated_inflation")),
+            "discount_rate": st.column_config.NumberColumn("Discount Rate", min_value=0.0, step=0.1, format="%.2f", help=H("credits.inputs.discount_rate")),
+            "price_per_ert_initial": st.column_config.NumberColumn("Initial Price / CU", min_value=0.0, step=0.1, format="$ %.2f", help=H("credits.inputs.price_per_ert_initial")),
+            "credit_price_increase": st.column_config.NumberColumn("Credit Price Increase", min_value=0.0, step=0.1, format="%.2f", help=H("credits.inputs.credit_price_increase")),
+            "planting_cost": st.column_config.NumberColumn("Initial Planting Cost", min_value=0.0, step=100, format="$ %.2f", help=H("credits.inputs.planting_cost")),
         },
     )
 
@@ -809,37 +809,34 @@ def run_chart():
         with col2:
             carbon_chart()
 
-    # Row 2: Acreage & Protocol | Carbon units chart
+    # Row 2: Protocol selector -> acreage toggle -> Carbon units chart
     with st.expander(label="Carbon Estimates", expanded=True):
-        col3, col4 = st.columns([1,2], gap="large")
-        with col3:
-            if "carbon_df" not in st.session_state:
-                st.error("No carbon data found. Adjust sliders above first.")
-                st.stop()
-            
-            # restore backup and init state for carbon units
-            _restore_backup(_carbon_units_keys(), backup_name="_carbon_units_backup")
-            _init_carbon_units_state()
+        if "carbon_df" not in st.session_state:
+            st.error("No carbon data found. Adjust sliders above first.")
+            st.stop()
 
-            # render widget using key only to enable restoring backups
-            protocols = st.multiselect(
-                "Select Protocol(s)",
-                options=["ACR",
-                         "CAR",
-                         "VERRA",
-                         "GS",  
-                         "ISO"],
-                key="carbon_units_protocols",
-                help=H("carbon.protocols_multiselect")
-            )
+        # restore backup and init state for carbon units
+        _restore_backup(_carbon_units_keys(), backup_name="_carbon_units_backup")
+        _init_carbon_units_state()
 
-            st.session_state["carbon_units_inputs"] = {"protocols": protocols}
+        # render widget using key only to enable restoring backups
+        protocols = st.multiselect(
+            "Select Protocol(s)",
+            options=["ACR",
+                     "CAR",
+                     "VERRA",
+                     "GS",  
+                     "ISO"],
+            key="carbon_units_protocols",
+            help=H("carbon.protocols_multiselect")
+        )
 
-            # backup latest selections for carbon units
-            _backup_keys(_carbon_units_keys(), backup_name="_carbon_units_backup")
+        st.session_state["carbon_units_inputs"] = {"protocols": protocols}
 
-        with col4:
-            carbon_units() 
+        # backup latest selections for carbon units
+        _backup_keys(_carbon_units_keys(), backup_name="_carbon_units_backup")
+
+        carbon_units()
 
     # Row 3: Proforma inputs | Credits chart + summary
     with st.expander(label="Project Financials", expanded=True):
