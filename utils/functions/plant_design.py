@@ -260,7 +260,7 @@ def carbon_chart():
 
     available = {col: METRIC_DEFS[col] for col in METRIC_DEFS if col in df.columns}
 
-    toggle_oc = st.toggle('Show Project Acreage', True, 'toggle_oc', H("toggle.inputs.acres"))
+    toggle_oc = st.toggle('Show Total Project Acreage', True, 'toggle_oc', H("toggle.inputs.acres"))
     net_acres = st.session_state["net_acres"]
 
     plot_df = df.copy()
@@ -374,7 +374,7 @@ def carbon_units():
         
         st.session_state.merged_df = final_df
 
-        toggle_ce = st.toggle('Show Project Acreage', True, 'toggle_ce', H("toggle.inputs.acres"))
+        toggle_ce = st.toggle('Show Total Project Acreage', True, 'toggle_ce', H("toggle.inputs.acres"))
 
         # Adjust chart values based on toggle
         plot_df = final_df.copy()
@@ -409,6 +409,23 @@ def carbon_units():
         ).configure_axis(grid=True, gridOpacity=0.3)
 
         st.altair_chart(CU_chart, use_container_width=True)
+
+        # Display the same interval-filtered values from the chart in table form.
+        table_df = (
+            plot_df.pivot_table(index="Year", columns="Protocol", values="CU", aggfunc="first")
+            .reindex(columns=protocols)
+            .reset_index()
+            .sort_values("Year")
+        )
+
+        if not table_df.empty:
+            table_df["Year"] = table_df["Year"].astype(int)
+            st.markdown("**Annual CU Estimates**")
+            st.dataframe(
+                table_df.style.format({col: "{:,.2f}" for col in table_df.columns if col != "Year"}),
+                use_container_width=True,
+                hide_index=True,
+            )
 
 def credits_inputs(prefix: str = "credits_") -> dict:
     """
@@ -621,7 +638,7 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
 
     plot_df = df_chart.copy()
 
-    toggle_nr = st.toggle('Show Project Acreage', True, 'toggle_nr', H("toggle.inputs.acres"))
+    toggle_nr = st.toggle('Show Total Project Acreage', True, 'toggle_nr', H("toggle.inputs.acres"))
 
     if toggle_nr:
         plot_df['Net_Revenue'] = plot_df['Net_Revenue']
@@ -657,10 +674,10 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
     summaries_df_display = summaries_df.copy()
     summaries_df_display['Total Net Revenue, $'] = summaries_df_display['total_net'].map('${:,.2f}'.format)
     summaries_df_display['NPV (Year 20)'] = summaries_df_display['npv_yr20'].map('${:,.2f}'.format)
-    summaries_df_display['NPV / Acre'] = summaries_df_display['npv_per_acre'].map('${:,.2f}'.format)
+    summaries_df_display['NPV (Year 20) / Acre'] = summaries_df_display['npv_per_acre'].map('${:,.2f}'.format)
 
     # Keep only the columns to show
-    summaries_df_display = summaries_df_display[['Protocol', 'Total Net Revenue, $', 'NPV (Year 20)', 'NPV / Acre']]
+    summaries_df_display = summaries_df_display[['Protocol', 'Total Net Revenue, $', 'NPV (Year 20)', 'NPV (Year 20) / Acre']]
 
     st.subheader("Project Financials Summary", anchor=None, help=H("credits.summary_subheader"), divider=False, width="stretch")
     st.table(summaries_df_display.set_index('Protocol'))
