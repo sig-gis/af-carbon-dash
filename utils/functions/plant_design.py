@@ -53,12 +53,34 @@ API_BASE_URL = get_api_base_url()
 
 CHART_BASE_YEAR = 2024
 
+# Keep protocol line colors stable regardless of selection/removal order.
+PROTOCOL_COLOR_MAP = {
+    "ACR": "#1f77b4",
+    "CAR": "#ff7f0e",
+    "VERRA": "#2ca02c",
+    "GS": "#d62728",
+    "ISO": "#9467bd",
+}
+
 
 def _five_year_values(max_year: int, start_year: int = CHART_BASE_YEAR) -> list[int]:
     """Return 5-year x-axis values from start_year through max_year (inclusive range)."""
     if max_year < start_year:
         return [start_year]
     return list(range(start_year, int(max_year) + 1, 5))
+
+
+def _protocol_color_scale(protocols: list[str]) -> alt.Scale:
+    """Build a deterministic Altair color scale for selected protocols."""
+    domain = [p for p in protocols if p in PROTOCOL_COLOR_MAP]
+    # Fallback color for any unknown protocol names
+    unknown = [p for p in protocols if p not in PROTOCOL_COLOR_MAP]
+    domain.extend(unknown)
+
+    color_range = [PROTOCOL_COLOR_MAP[p] for p in domain if p in PROTOCOL_COLOR_MAP]
+    color_range.extend(["#7f7f7f"] * len(unknown))
+
+    return alt.Scale(domain=domain, range=color_range)
 
 
 def _prepend_zero_year_row(
@@ -400,7 +422,11 @@ def carbon_units():
                 scale=alt.Scale(domain=[CHART_BASE_YEAR, max(include_years)])
             ),
             y=alt.Y('CU:Q', title='CUs ' + chart_title),
-            color='Protocol:N',
+            color=alt.Color(
+                'Protocol:N',
+                title='Protocol',
+                scale=_protocol_color_scale(protocols),
+            ),
             tooltip=['Year', 'CU', 'Protocol']
         ).properties(
             title='Annual CU Estimates ' + chart_title,
@@ -658,7 +684,11 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
                 scale=alt.Scale(domain=[CHART_BASE_YEAR, max(include_years)])
             ),
             y=alt.Y('Net_Revenue:Q', title= chart_title + ' Net Revenue'),
-            color=alt.Color('Protocol:N', title='Protocol'),
+            color=alt.Color(
+                'Protocol:N',
+                title='Protocol',
+                scale=_protocol_color_scale(list(params.keys())),
+            ),
             tooltip=['Year', 'Net_Revenue', 'Protocol']
         )
         .properties(
