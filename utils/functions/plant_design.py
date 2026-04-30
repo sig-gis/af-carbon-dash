@@ -51,6 +51,13 @@ API_BASE_URL = get_api_base_url()
 
 CHART_BASE_YEAR = 2024
 FADE_START_AGE = 5
+# Background hatch begins this many years after CHART_BASE_YEAR.
+HATCH_START_AGE = 40
+# Subtle future-period shading/hatch styling.
+HATCH_BG_ALPHA = 0.08
+HATCH_LINE_ALPHA = 0.18
+HATCH_STEP_YEARS = 2.0
+HATCH_SLOPE_YEARS = 4.0
 # More aggressive fade profile for clearer visual contrast after cutoff.
 MIN_FADE_ALPHA = 0.15
 FADE_EXPONENT = 0.25
@@ -99,7 +106,7 @@ def _add_fading_line_series(
     showlegend: bool,
     line_dash: str = "solid",
 ):
-    """Add a single series to a Plotly figure, fading opacity after project year 40."""
+    """Add a single series to a Plotly figure with constant-opacity lines/markers."""
     if series_df.empty:
         return
 
@@ -107,8 +114,7 @@ def _add_fading_line_series(
     y = series_df[y_col].astype(float).to_numpy()
 
     if len(x) == 1:
-        age = x[0] - CHART_BASE_YEAR
-        marker_color = _rgba_with_alpha(color, _alpha_for_age(age, age))
+        marker_color = _rgba_with_alpha(color, 1.0)
         fig.add_trace(
             go.Scatter(
                 x=x,
@@ -123,20 +129,16 @@ def _add_fading_line_series(
         )
         return
 
-    max_age = float(np.max(x) - CHART_BASE_YEAR)
-
-    # Draw each line segment independently so opacity can vary over time.
+    # Draw each line segment independently (keeps protocol dash behavior unchanged).
     for idx in range(len(x) - 1):
         x0, x1 = x[idx], x[idx + 1]
         y0, y1 = y[idx], y[idx + 1]
-        mid_age = ((x0 + x1) / 2.0) - CHART_BASE_YEAR
-        seg_alpha = _alpha_for_age(mid_age, max_age)
         fig.add_trace(
             go.Scatter(
                 x=[x0, x1],
                 y=[y0, y1],
                 mode="lines",
-                line=dict(color=_rgba_with_alpha(color, seg_alpha), width=BASE_LINE_WIDTH, dash=line_dash),
+                line=dict(color=_rgba_with_alpha(color, 1.0), width=BASE_LINE_WIDTH, dash=line_dash),
                 name=label,
                 legendgroup=label,
                 showlegend=showlegend and idx == 0,
@@ -144,10 +146,7 @@ def _add_fading_line_series(
             )
         )
 
-    marker_colors = [
-        _rgba_with_alpha(color, _alpha_for_age((xi - CHART_BASE_YEAR), max_age))
-        for xi in x
-    ]
+    marker_colors = [_rgba_with_alpha(color, 1.0) for _ in x]
     fig.add_trace(
         go.Scatter(
             x=x,
@@ -170,9 +169,58 @@ def _plot_fading_line_chart(
     y_title: str,
     include_years: list[int],
     series_col: str | None = None,
+    show_future_hatch: bool = False,
 ):
     """Render a Plotly line chart where line opacity fades after project year 40."""
     fig = go.Figure()
+
+    # Add subtle hatched background for the "future" period (year 40 onward).
+    # Plotly does not support native hatch fills for layout shapes, so we emulate
+    # hatching with a shaded rectangle plus diagonal line shapes.
+    hatch_start_year = CHART_BASE_YEAR + HATCH_START_AGE
+    x_end = max(include_years) if include_years else CHART_BASE_YEAR
+    if show_future_hatch and x_end > hatch_start_year and not data.empty and y_col in data.columns:
+        y_series = data[y_col].astype(float).replace([np.inf, -np.inf], np.nan).dropna()
+        if not y_series.empty:
+            y_min = float(y_series.min())
+            y_max = float(y_series.max())
+            if y_min == y_max:
+                pad = max(abs(y_min) * 0.05, 1.0)
+                y_min -= pad
+                y_max += pad
+
+            # Light background tint behind future region.
+            fig.add_shape(
+                type="rect",
+                x0=hatch_start_year,
+                x1=x_end,
+                y0=y_min,
+                y1=y_max,
+                xref="x",
+                yref="y",
+                line=dict(width=0),
+                fillcolor=f"rgba(120,120,120,{HATCH_BG_ALPHA:.3f})",
+                layer="below",
+            )
+
+            # Diagonal hatch simulation.
+            x_cursor = hatch_start_year - (y_max - y_min)
+            while x_cursor < x_end:
+                x0 = max(hatch_start_year, x_cursor)
+                x1 = min(x_end, x_cursor + HATCH_SLOPE_YEARS)
+                if x1 > x0:
+                    fig.add_shape(
+                        type="line",
+                        x0=x0,
+                        y0=y_min,
+                        x1=x1,
+                        y1=y_max,
+                        xref="x",
+                        yref="y",
+                        line=dict(color=f"rgba(90,90,90,{HATCH_LINE_ALPHA:.3f})", width=1),
+                        layer="below",
+                    )
+                x_cursor += HATCH_STEP_YEARS
 
     if series_col:
         series_vals = data[series_col].dropna().unique().tolist()
@@ -557,6 +605,7 @@ def carbon_units():
             y_title='CUs ' + chart_title,
             include_years=include_years,
             series_col="Protocol",
+            show_future_hatch=True,
         )
 
 def credits_inputs(prefix: str = "credits_") -> dict:
@@ -695,6 +744,7 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
         y_title=chart_title + ' Net Revenue',
         include_years=include_years,
         series_col="Protocol",
+        show_future_hatch=True,
     )
 
     summaries_df_display = summaries_df.copy()
