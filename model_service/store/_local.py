@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 from pathlib import Path
 
@@ -10,12 +11,22 @@ logger = logging.getLogger(__name__)
 # Resolved once at import time — works both locally and inside Docker (/app).
 APP_ROOT = Path(__file__).resolve().parent.parent.parent
 
-# Mapping from store key prefixes to local directories.
-_PREFIX_MAP: dict[str, Path] = {
-    "models/": APP_ROOT / "data" / "models",
-    "geo/": APP_ROOT / "data" / "FVSVariantMap20210525",
-    "config/": APP_ROOT / "conf" / "base",
-}
+
+def _models_dir() -> Path:
+    """Resolve the models directory, honoring MODEL_STORE_PATH override."""
+    override = os.environ.get("MODEL_STORE_PATH")
+    if override:
+        return Path(override)
+    return APP_ROOT / "data" / "models"
+
+
+def _prefix_map() -> dict[str, Path]:
+    return {
+        "models/": _models_dir(),
+        "geo/": APP_ROOT / "data" / "FVSVariantMap20210525",
+        "config/": APP_ROOT / "conf" / "base",
+    }
+
 
 _REGISTRY_LOCAL = APP_ROOT / "conf" / "base" / "model_registry.json"
 
@@ -24,7 +35,7 @@ def _resolve(key: str) -> Path:
     """Map a store key to a local filesystem path."""
     if key == "registry.json":
         return _REGISTRY_LOCAL
-    for prefix, base_dir in _PREFIX_MAP.items():
+    for prefix, base_dir in _prefix_map().items():
         if key.startswith(prefix):
             return base_dir / key[len(prefix):]
     return APP_ROOT / key
@@ -63,7 +74,7 @@ class LocalStore:
 
     def list_keys(self, prefix: str) -> list[str]:
         base = None
-        for pfx, base_dir in _PREFIX_MAP.items():
+        for pfx, base_dir in _prefix_map().items():
             if prefix.startswith(pfx) or pfx.startswith(prefix):
                 base = base_dir
                 break

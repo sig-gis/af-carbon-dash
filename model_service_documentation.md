@@ -295,7 +295,8 @@ Summary data for each protocol.
 **Fields:**
 - `Protocol` (str): Protocol name
 - `total_net` (float): Total net revenue
-- `npv_yr20` (float): 20-year NPV
+- `npv_yr` (float): NPV over the configured horizon (see `npv_year`)
+- `npv_year` (int): The horizon used to compute `npv_yr` (e.g. 20, 40)
 - `npv_per_acre` (float): NPV per acre
 
 #### `ProformaResponse`
