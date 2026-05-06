@@ -15,8 +15,28 @@ import os
 import tempfile
 import time
 
-from model_service.model import compute_proforma, compute_summaries, compute_carbon_scores, compute_carbon_units, get_fvs_models, predict_fvs_metrics
-from model_service.schemas import ProformaRequest, ProformaResponse, CarbonInputs, CarbonResponse, CarbonUnitsRequest, CarbonUnitsResponse, ReportRequest
+from model_service.model import (
+    compute_proforma,
+    compute_summaries,
+    compute_carbon_scores,
+    compute_carbon_units,
+    get_fvs_models,
+    predict_fvs_metrics,
+    run_scenario,
+    default_scenario,
+)
+from model_service.schemas import (
+    ProformaRequest,
+    ProformaResponse,
+    CarbonInputs,
+    CarbonResponse,
+    CarbonUnitsRequest,
+    CarbonUnitsResponse,
+    ReportRequest,
+    ScenarioRequest,
+    ScenarioResponse,
+    ScenarioDefaults,
+)
 from model_service.store import get_store
 from model_service.geo import get_filtered_geojson
 
@@ -193,7 +213,8 @@ def geo_refresh():
 def run_proforma(req: ProformaRequest):
     df_ert_ac = pd.DataFrame(req.df_ert_ac)
     df_pf = compute_proforma(df_ert_ac, req.params)
-    summaries_df = compute_summaries(df_pf, req.params)
+    npv_year = int(req.params.get("npv_year", 20))
+    summaries_df = compute_summaries(df_pf, req.params, npv_years=npv_year)
 
     return {
         "proforma_rows": df_pf.to_dict(orient="records"),
@@ -259,6 +280,33 @@ def carbon_units_endpoint(req: CarbonUnitsRequest,
     return {
         "rows": df_units.to_dict(orient="records")
     }
+
+
+@app.post("/scenario/run", response_model=ScenarioResponse)
+def scenario_run(req: ScenarioRequest):
+    """
+    One round-trip evaluator: carbon → CU → proforma → summaries.
+    Optional `solve` directive runs a closed-form acreage inverse server-side.
+    """
+    try:
+        result = run_scenario(req.model_dump(exclude_none=False))
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return result
+
+
+@app.get("/scenario/defaults", response_model=ScenarioDefaults)
+def scenario_defaults(variant: str, loccode: str):
+    """
+    Return a complete defaults dict for a (variant, loccode) pair, ready to
+    feed into /scenario/run. Composes FVSVariant_presets, variant_species,
+    and proforma_presets.
+    """
+    try:
+        return default_scenario(variant, loccode)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
 
 #QUARTO REPORTING
 @app.post("/reports/generate")

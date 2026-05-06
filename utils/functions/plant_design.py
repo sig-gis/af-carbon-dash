@@ -566,6 +566,15 @@ def credits_inputs(prefix: str = "credits_") -> dict:
     st.session_state[f"{prefix}discount_rate"] = first_row["discount_rate"]
     st.session_state[f"{prefix}planting_cost"] = first_row["planting_cost"]
 
+    # NPV year-horizon selector — applies to every protocol in this run.
+    npv_year = st.selectbox(
+        "NPV Year Horizon",
+        options=[10, 15, 20, 25, 30, 35, 40],
+        index=6,  # default to 40
+        key=f"{prefix}npv_year",
+        help=H("credits.inputs.npv_year") or "Number of years from project start over which to discount cashflows for NPV.",
+    )
+
     # constants (constrained by modeling backend)
     year_start = 2024
     years_advance = 35
@@ -587,6 +596,7 @@ def credits_inputs(prefix: str = "credits_") -> dict:
             "planting_cost": values["planting_cost"],
             "year_start": year_start,
             "years_advance": years_advance,
+            "npv_year": int(npv_year),
         }
         for protocol, values in protocol_state.items()
     }
@@ -702,12 +712,16 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
     st.altair_chart(chart, use_container_width=True)
 
     summaries_df_display = summaries_df.copy()
+    npv_year_label = int(summaries_df_display['npv_year'].iloc[0])
+    npv_col = f'NPV (Year {npv_year_label})'
+    npv_per_acre_col = f'NPV (Year {npv_year_label}) / Acre'
+
     summaries_df_display['Total Net Revenue, $'] = summaries_df_display['total_net'].map('${:,.2f}'.format)
-    summaries_df_display['NPV (Year 20)'] = summaries_df_display['npv_yr20'].map('${:,.2f}'.format)
-    summaries_df_display['NPV (Year 20) / Acre'] = summaries_df_display['npv_per_acre'].map('${:,.2f}'.format)
+    summaries_df_display[npv_col] = summaries_df_display['npv_yr'].map('${:,.2f}'.format)
+    summaries_df_display[npv_per_acre_col] = summaries_df_display['npv_per_acre'].map('${:,.2f}'.format)
 
     # Keep only the columns to show
-    summaries_df_display = summaries_df_display[['Protocol', 'Total Net Revenue, $', 'NPV (Year 20)', 'NPV (Year 20) / Acre']]
+    summaries_df_display = summaries_df_display[['Protocol', 'Total Net Revenue, $', npv_col, npv_per_acre_col]]
 
     st.subheader("Project Financials Summary", anchor=None, help=H("credits.summary_subheader"), divider=False, width="stretch")
     st.table(summaries_df_display.set_index('Protocol'))

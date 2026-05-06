@@ -1,5 +1,5 @@
-from pydantic import BaseModel
-from typing import List, Dict, Any
+from pydantic import BaseModel, Field
+from typing import List, Dict, Any, Literal, Optional
 
 class ProformaRequest(BaseModel):
     df_ert_ac: List[Dict]  # rows of Year, CU, Protocol
@@ -8,7 +8,8 @@ class ProformaRequest(BaseModel):
 class ProformaSummary(BaseModel):
     Protocol: str
     total_net: float
-    npv_yr20: float
+    npv_yr: float
+    npv_year: int
     npv_per_acre: float
 
 class ProformaResponse(BaseModel):
@@ -54,3 +55,58 @@ class ReportData(BaseModel):
 
 class ReportRequest(BaseModel):
     data: ReportData
+
+
+# Scenario API: one round-trip for the full carbon → CU → proforma pipeline.
+
+class SolveDirective(BaseModel):
+    variable: Literal["net_acres"]
+    target: Literal["tnr"]
+    value: float
+
+
+class ScenarioRequest(BaseModel):
+    variant: str
+    loccode: str
+    survival: Optional[float] = None
+    si: Optional[float] = None
+    species_tpa: Optional[List[float]] = None
+    pct_level: str = "PCT0"
+    net_acres: Optional[float] = None
+    protocols: Optional[List[str]] = None
+    financial_params: Optional[Dict[str, Dict[str, float]]] = None  # per-protocol partial overrides
+    npv_year: int = 40
+    solve: Optional[SolveDirective] = None
+    return_dataframes: bool = False
+
+
+class ScenarioSummary(BaseModel):
+    Protocol: str
+    net_acres: float
+    total_net: float
+    npv_yr: float
+    npv_year: int
+    npv_per_acre: float
+
+
+class ScenarioResponse(BaseModel):
+    inputs: Dict[str, Any]  # echo of resolved inputs after defaults applied
+    summaries: List[ScenarioSummary]
+    model_source: str  # "fvs" or "coefficients"
+    proforma_rows: Optional[List[Dict]] = None
+    carbon_rows: Optional[List[Dict]] = None
+    cu_rows: Optional[List[Dict]] = None
+
+
+class ScenarioDefaults(BaseModel):
+    variant: str
+    loccode: str
+    survival: float
+    si: float
+    species_tpa: List[float]
+    species_codes: List[str]
+    pct_level: str
+    net_acres: float
+    protocols: List[str]
+    financial_params: Dict[str, Dict[str, float]]
+    npv_year: int
