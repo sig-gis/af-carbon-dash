@@ -12,16 +12,32 @@ wheels/
 # local conf files
 conf/local/*
 
+.vscode/*
+
+dashboard_container/*
+
 # data
 data/*
 !data/.gitkeep
 !data/FVSVariant_presets.json
+# !data/FVSVariantMap20210525/
+# !data/FVSVariantMap20210525/*
 
 #temp files
 tmp/*
 
 # _archive
 pages/_archive/*
+conf/base/_archive/*
 
 # streamlit secrets
 .streamlit/secrets.toml
+
+model_service/quarto/.quarto/*
+model_service/quarto/_archive/*
+model_service/quarto/data/*
+!model_service/quarto/data/fig/
+!model_service/quarto/data/fig/*
+model_service/quarto/reports/*
+model_service/quarto/reports/report_files/*
+!model_service/quarto/data/var_sp_ref.csv

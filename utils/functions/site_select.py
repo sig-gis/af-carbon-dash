@@ -5,15 +5,69 @@ import geopandas as gpd
 import os
 import tempfile
 import numpy as np
+import logging
+import requests
 from pathlib import Path
 import io
 from shapely.geometry import shape, box
+
+from utils.config import get_api_base_url
+
+logger = logging.getLogger(__name__)
+
+
+_geojson_cache: dict = {"data": None, "expires": 0}
+
+
+def _fetch_geojson_from_api() -> str | None:
+    """Fetch filtered GeoJSON from the API. Caches success for 5 min, retries failures every 15s."""
+    import time
+
+    now = time.time()
+    if _geojson_cache["data"] is not None and now < _geojson_cache["expires"]:
+        return _geojson_cache["data"]
+
+    # Don't retry failures too aggressively
+    if _geojson_cache["data"] is None and now < _geojson_cache["expires"]:
+        return None
+
+    try:
+        base_url = get_api_base_url()
+        resp = requests.get(f"{base_url}/geo/variants", timeout=30)
+        resp.raise_for_status()
+        payload = resp.json()
+
+        # If API is healthy but returns an empty filtered feature set (common in
+        # local dev before models are registered), allow downstream local-file
+        # fallback by returning None.
+        features = payload.get("features", []) if isinstance(payload, dict) else []
+        if not features:
+            logger.info(
+                "API /geo/variants returned 0 features; falling back to local GeoJSON."
+            )
+            _geojson_cache["data"] = None
+            _geojson_cache["expires"] = now + 15
+            return None
+
+        data = json.dumps(payload)
+        _geojson_cache["data"] = data
+        _geojson_cache["expires"] = now + 300  # cache success for 5 min
+        return data
+    except Exception as e:
+        logger.warning("Could not fetch GeoJSON from API: %s", e)
+        _geojson_cache["data"] = None
+        _geojson_cache["expires"] = now + 15  # retry failures after 15s
+        return None
+
 
 @st.fragment
 def load_geojson_fragment(simplified_geojson_path, shapefile_path, tolerance_deg=0.001, skip_keys={"Shape_Area", "Shape_Leng"}, max_tooltip_fields=4):
     """
     Loads a GeoJSON (or simplifies a shapefile if GeoJSON doesn't exist),
     returns the geojson string and filtered tooltip fields.
+
+    Tries the API's /geo/variants endpoint first (returns GeoJSON
+    dynamically filtered to registered models). Falls back to local files.
     """
     @st.cache_data
     def simplify_geojson(path: Path, tolerance_deg: float = 0.001) -> str:
@@ -23,20 +77,31 @@ def load_geojson_fragment(simplified_geojson_path, shapefile_path, tolerance_deg
         keep = [c for c in ["FVSVariant", "FVSVarName", "FVSLocName"] if c in gdf.columns]
         gdf = gdf[keep + ["geometry"]] if keep else gdf[["geometry"]]
         return gdf.to_json(na="drop")
-    
+
     @st.cache_data
     def read_geojson_text(path: Path) -> str:
         return Path(path).read_text(encoding="utf-8")
 
-    # Load GeoJSON
-    if os.path.exists(simplified_geojson_path):
-        geojson_str = read_geojson_text(simplified_geojson_path)
-    else:
-        try:
-            geojson_str = simplify_geojson(shapefile_path, tolerance_deg=tolerance_deg)
-        except Exception as e:
-            st.error(f"Failed to load shapefile: {e}")
-            st.stop()
+    # Try API first (dynamic, filtered to registered models)
+    geojson_str = _fetch_geojson_from_api()
+
+    # Fall back to local files
+    if geojson_str is None:
+        if os.path.exists(simplified_geojson_path):
+            geojson_str = read_geojson_text(simplified_geojson_path)
+        elif os.path.exists(shapefile_path):
+            try:
+                geojson_str = simplify_geojson(shapefile_path, tolerance_deg=tolerance_deg)
+            except Exception as e:
+                st.error(f"Failed to load shapefile: {e}")
+                st.stop()
+                return None, None
+        else:
+            st.warning(
+                "No FVS variant data available. "
+                "Upload models via the Model Management page to populate the map, "
+                "or check that the API is running."
+            )
             return None, None
 
     # Extract tooltip fields
@@ -147,8 +212,7 @@ def load_geojson_or_shapefile(uploaded_files, tolerance_deg=0.001,
 
     return geojson_str, tooltip_fields
 
-@st.fragment
-def build_map(geojson_str, points=None, upload=None, center=(37.8, -96.9), zoom=5, tooltip_fields=None, highlight_feature=None):
+def build_map(geojson_str, points=None, upload=None, center=(37.8, -96.9), zoom=5, tooltip_fields=None):
     """
     Build and return a Folium map. Determines center/zoom based on user
     interactions, filters base GeoJSON to uploaded geometry bounds, renders
@@ -191,22 +255,33 @@ def build_map(geojson_str, points=None, upload=None, center=(37.8, -96.9), zoom=
         last_center = (last_point.y, last_point.x)
         last_zoom = 12
 
-    # Fallbacks
+    # Fallbacks: fit map to bounding box of all features
+    fit_bounds = None
     if last_center is None:
         if geojson_str:
             try:
                 gjson = json.loads(geojson_str)
-                feat0 = gjson["features"][0]["geometry"]["coordinates"]
-                if isinstance(feat0[0], list):
-                    last_center = (feat0[0][0][1], feat0[0][0][0])
+                all_bounds = []
+                for feat in gjson["features"]:
+                    geom = shape(feat["geometry"])
+                    all_bounds.append(geom.bounds)  # (minx, miny, maxx, maxy)
+                if all_bounds:
+                    minx = min(b[0] for b in all_bounds)
+                    miny = min(b[1] for b in all_bounds)
+                    maxx = max(b[2] for b in all_bounds)
+                    maxy = max(b[3] for b in all_bounds)
+                    last_center = ((miny + maxy) / 2, (minx + maxx) / 2)
+                    fit_bounds = [[miny, minx], [maxy, maxx]]
                 else:
-                    last_center = (feat0[1], feat0[0])
+                    last_center = (37.8, -96.9)
             except Exception:
                 last_center = (37.8, -96.9)
         else:
             last_center = (37.8, -96.9)
 
     m = folium.Map(location=last_center, zoom_start=last_zoom, tiles="CartoDB positron")
+    if fit_bounds:
+        m.fit_bounds(fit_bounds)
 
     filtered_geojson = geojson_str
 
@@ -280,14 +355,6 @@ def build_map(geojson_str, points=None, upload=None, center=(37.8, -96.9), zoom=
             gj.add_child(folium.GeoJsonTooltip(fields=tooltip_fields, aliases=tooltip_fields, sticky=True))
         gj.add_to(m)
 
-    # Highlight only the last clicked feature
-    if highlight_feature:
-        folium.GeoJson(
-            highlight_feature["geometry"],
-            name="Selected Boundary",
-            style_function=lambda x: {"fillColor": "yellow", "color": "red", "weight": 3, "fillOpacity": 0.2},
-        ).add_to(m)
-
     # Add points
     if points:
         for pt in points:
@@ -316,22 +383,116 @@ def _loccode_str(v):
     except Exception:
         return None
 
-@st.fragment
+
+def auto_select_variant_from_point(point, geojson_str):
+    """
+    Resolve and set the selected variant/session state from a lat/lon point.
+    Returns the matched feature properties if found, else None.
+    """
+    if point is None or not geojson_str:
+        return None
+
+    try:
+        gjson = json.loads(geojson_str)
+        features = gjson.get("features", [])
+    except Exception:
+        return None
+
+    for feat in features:
+        geom_json = feat.get("geometry")
+        if not geom_json:
+            continue
+
+        try:
+            geom = shape(geom_json)
+        except Exception:
+            continue
+
+        if not geom.intersects(point):
+            continue
+
+        props = feat.get("properties", {}) or {}
+        map_variant = props.get("FVSVariant", "PN")
+        loccode = _loccode_str(props.get("FVSLocCode")) or "609"
+
+        st.session_state["clicked_feature"] = feat
+        st.session_state["clicked_props"] = props
+        st.session_state["selected_variant"] = map_variant
+        st.session_state["selected_varloc_name"] = props.get("FVSLocName", "Olympic National Forest")
+        st.session_state["selected_varloc_code"] = loccode
+        st.session_state["FVSLocCode"] = loccode
+
+        # Resolve sub-variant at selection time
+        from utils.functions.plant_design import _resolve_sub_variants
+        sub_variants = _resolve_sub_variants(map_variant, loccode)
+        st.session_state["active_variant"] = sub_variants[0] if sub_variants else map_variant
+
+        return props
+
+    return None
+
+def build_highlight_layer(feature: dict | None) -> folium.FeatureGroup | None:
+    """Build a FeatureGroup for the selected feature highlight.
+
+    Passed to st_folium via ``feature_group_to_add`` so the highlight
+    is applied as a JS update without replacing the base map iframe.
+    """
+    if feature is None:
+        return None
+    geom = feature.get("geometry")
+    if geom is None:
+        return None
+    fg = folium.FeatureGroup(name="Selected Boundary")
+    folium.GeoJson(
+        geom,
+        style_function=lambda x: {
+            "fillColor": "yellow",
+            "color": "red",
+            "weight": 3,
+            "fillOpacity": 0.2,
+        },
+    ).add_to(fg)
+    return fg
+
+
+def _process_pending_click():
+    """Process a map click that was saved on the previous render.
+
+    Call this BEFORE building the map so the highlight is included
+    in the same render pass.
+    """
+    pending = st.session_state.pop("_pending_map_click", None)
+    if pending is None:
+        return False
+
+    feat = pending
+    props = feat.get("properties", {}) or {}
+    map_variant = props.get("FVSVariant", "PN")
+    loccode = _loccode_str(props.get("FVSLocCode")) or "609"
+
+    st.session_state["clicked_feature"] = feat
+    st.session_state["clicked_props"] = props
+    st.session_state["selected_variant"] = map_variant
+    st.session_state["selected_varloc_name"] = props.get("FVSLocName", "Olympic National Forest")
+    st.session_state["selected_varloc_code"] = loccode
+    st.session_state["FVSLocCode"] = loccode
+
+    from utils.functions.plant_design import _resolve_sub_variants
+    sub_variants = _resolve_sub_variants(map_variant, loccode)
+    st.session_state["active_variant"] = sub_variants[0] if sub_variants else map_variant
+    return True
+
+
 def show_clicked_variant(map_data):
-    """Update session state with the last clicked feature and its properties."""
+    """Detect a new map click and queue it for processing on the next render."""
     if map_data and map_data.get("last_active_drawing"):
         feat = map_data["last_active_drawing"]
         props = feat.get("properties", {})
 
-        if props:
-            if st.session_state.get("clicked_feature") != feat:
-                st.session_state["clicked_feature"] = feat
-                st.session_state["clicked_props"] = props
-                st.session_state["selected_variant"] = props.get("FVSVariant", "PN")
-                st.session_state["FVSLocCode"] = _loccode_str(props.get("FVSLocCode"))
-                st.rerun()
+        if props and st.session_state.get("clicked_feature") != feat:
+            st.session_state["_pending_map_click"] = feat
+            st.rerun()
 
-@st.fragment
 def display_selected_info():
     """
     Display the selected variant's properties in the UI, filtering out internal
@@ -342,17 +503,24 @@ def display_selected_info():
 
         # st.subheader("Selected Feature Info", anchor=None, help=H("site.subheader_selected_feature_info"), divider=False, width="stretch")
         pretty_names = {
-            # "FVSLocCode": "FVS Location Code",
-            # "FVSLocName": "FVS Location Name",
-            # "FVSVarName": "FVS Variant Name",
             "FVSVariant": "FVS Variant",
+            "FVSLocName": "FVS Location Name",
+            "FVSLocCode": "FVS Location Code",
         }
-        skip_keys = {"Shape_Area", "Shape_Leng", 'FVSVariantLoc', 'FVSLocCode', 'FVSLocName', 'FVSVarName'}
+        skip_keys = {"Shape_Area", "Shape_Leng", 'FVSVariantLoc', 'FVSVarName'}
 
         for key, value in props.items():
             if key not in skip_keys:
                 display_key = pretty_names.get(key, key)
-                st.success(f"Successfully selected **{display_key}:** {value}")
+                display_value = value
+                # Show resolved sub-variant when available
+                if key == "FVSVariant":
+                    active = st.session_state.get("active_variant")
+                    if active and active != value:
+                        display_value = f"{active} (from {value})"
+                    elif active:
+                        display_value = active
+                st.success(f"Successfully selected **{display_key}:** {display_value}")
                 # st.success(f"Please continue to Planting Design, or select a different variant.")
 
 @st.fragment
@@ -365,3 +533,5 @@ def submit_map(map_data):
         clicked = map_data["last_active_drawing"].get("properties", {})
         if clicked:
             st.session_state["selected_variant"] = clicked.get("FVSVariant", "PN")
+            st.session_state["selected_varloc_name"] = clicked.get("FVSLocName", "Olympic National Forest")
+            st.session_state["selected_varloc_code"] = _loccode_str(clicked.get("FVSLocCode")) or "609"

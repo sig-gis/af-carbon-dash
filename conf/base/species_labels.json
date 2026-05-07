@@ -1,8 +1,21 @@
 {
-  "tpa_df": "Douglas-fir",
-  "tpa_rc": "red cedar",
-  "tpa_wh": "western hemlock",
-  "tpa_ss": "Sitka spruce",
-  "tpa_pp": "ponderosa pine",
-  "tpa_wl": "western larch"
+    "BL": "black oak",
+    "BO": "blue oak",
+    "CY": "canyon live oak",
+    "DF": "Douglas-fir",
+    "IC": "incense cedar",
+    "IO": "interior live oak",
+    "JP": "Jeffrey pine",
+    "LP": "lodgepole pine",
+    "PM": "pinyon pine",
+    "PP": "ponderosa pine",
+    "RC": "red cedar",
+    "RW": "redwood",
+    "SP": "sugar pine",
+    "SS": "Sitka spruce",
+    "SW": "southwestern white pine",
+    "UJ": "Utah juniper",
+    "WF": "white fir",
+    "WH": "western hemlock",
+    "WL": "western larch"
 }

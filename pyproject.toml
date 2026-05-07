@@ -5,12 +5,15 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "aiofiles>=25.1.0",
     "altair>=5.5.0",
+    "boto3>=1.35.0",
+    "dataframe-image>=0.2.7",
     "earthengine-api>=1.6.4",
     "fastapi>=0.124.4",
-    "fiona>=1.10.1",
     "folium>=0.20.0",
     "geemap>=0.36.1",
+    "google-cloud-storage>=2.18.0",
     "geopandas>=1.1.1",
     "geopy>=2.4.1",
     "ipykernel>=6.30.1",
@@ -18,6 +21,8 @@ dependencies = [
     "matplotlib>=3.10.5",
     "numpy>=2.2.6",
     "numpy-financial>=1.0.0",
+    "pandas>=2.3.1",
+    "pillow>=11.3.0",
     "pyyaml>=6.0.2",
     "requests>=2.32.4",
     "scikit-learn>=1.7.2",
@@ -26,5 +31,19 @@ dependencies = [
     "shapely>=2.1.1",
     "streamlit>=1.48.1",
     "streamlit-folium>=0.25.1",
+    "tabulate>=0.9.0",
     "uvicorn>=0.38.0",
 ]
+
+[project.scripts]
+scenario = "aff_dash_client.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["aff_dash_client", "model_service", "utils"]
+
+[tool.uv]
+package = true

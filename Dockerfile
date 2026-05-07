@@ -16,31 +16,37 @@ ENV UV_NO_DEV=1
 # Ensure installed tools can be executed out of the box
 ENV UV_TOOL_BIN_DIR=/usr/local/bin
 
+# install system deps + Quarto
+RUN apt-get update && apt-get install -y \
+    wget \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN wget -q https://quarto.org/download/latest/quarto-linux-amd64.deb \
+    && dpkg -i quarto-linux-amd64.deb \
+    && rm quarto-linux-amd64.deb
+
+# Fail the build if Quarto is not available
+RUN quarto --version
+# -------------------------------
+
 # Copy the lockfile and settings
 COPY ./pyproject.toml ./uv.lock ./.python-version /app/
 
 # Install the project's dependencies using the lockfile and settings
-# RUN --mount=type=cache,target=/root/.cache/uv \
-#     --mount=type=bind,source=uv.lock,target=uv.lock \
-#     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-#     uv sync --locked --no-install-project
-
 RUN uv sync --locked --no-install-project
 
-# Then, add the rest of the project source code and install it
-# Installing separately from its dependencies allows optimal layer caching
 # Copy application code
 COPY model_service/ ./model_service/
 COPY conf/ ./conf/
 COPY utils/ ./utils/
+COPY data/ ./data/
 
-# RUN --mount=type=cache,target=/root/.cache/uv \
-#     uv sync --locked
-
-RUN uv sync --locked
-
-# Place executables in the environment at the front of the path
+# Place executables in the environment at the front of the path. The project
+# itself is not installed into the venv, modules are picked up via PYTHONPATH.
 ENV PATH="/app/.venv/bin:$PATH"
+ENV PYTHONPATH=/app
+# ENV QUARTO_PYTHON=/app/.venv/bin/python
 
 # Expose the port the app runs on
 EXPOSE 8080
