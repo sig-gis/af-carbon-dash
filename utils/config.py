@@ -22,7 +22,7 @@ def get_api_base_url() -> str:
     
     # Default to localhost for development
     if not api_url:
-        api_url = "http://127.0.0.1:8001"
+        api_url = "http://127.0.0.1:8000"
 
     env = os.getenv("ENV", "local")
 

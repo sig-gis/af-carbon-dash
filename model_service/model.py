@@ -1,130 +1,8 @@
-import json
-import logging
-from functools import lru_cache
-from pathlib import Path
-
-import joblib
 import pandas as pd
-import numpy as np
+import numpy as np    
 import numpy_financial as npf
 from typing import List, Dict
 from scipy.interpolate import make_interp_spline
-from sklearn.preprocessing import PolynomialFeatures
-
-from model_service.store import get_store
-
-logger = logging.getLogger(__name__)
-
-APP_ROOT = Path(__file__).resolve().parent.parent
-BASE_PATH = APP_ROOT / "conf" / "base"
-
-FVS_MODEL_CACHE_SIZE = 16
-
-
-def _load_registry() -> list[dict]:
-    store = get_store()
-    return store.get_json("registry.json").get("models", [])
-
-
-@lru_cache(maxsize=FVS_MODEL_CACHE_SIZE)
-def get_fvs_models(variant: str, loccode: str, pct_level: str = "PCT0") -> dict | None:
-    """
-    Load and cache an FVS model collection via joblib.
-    LRU cache keeps the most recent models in memory and evicts the oldest
-    when the cache is full, preventing unbounded memory growth.
-
-    Models are sklearn Pipeline objects keyed by (year, variable).
-    """
-    registry = _load_registry()
-    entry = next(
-        (m for m in registry
-         if m["variant"] == variant
-         and m["loccode"] == loccode
-         and m.get("pct_level", "PCT0") == pct_level),
-        None,
-    )
-    if entry is None:
-        logger.warning(
-            "No model registry entry for variant=%s loccode=%s pct=%s",
-            variant, loccode, pct_level,
-        )
-        return None
-
-    store = get_store()
-    filename = entry.get("filename") or Path(entry["path"]).name
-    try:
-        model_path = store.get_file(f"models/{filename}")
-    except FileNotFoundError:
-        logger.warning("Model file not found in store: models/%s", filename)
-        return None
-
-    models = joblib.load(model_path)
-
-    logger.info("Loaded FVS models from %s (%d entries)", model_path, len(models))
-    return models
-
-
-def predict_fvs_metrics(
-    models: dict,
-    survival: float,
-    si: float,
-    species_tpa: list[float],
-) -> pd.DataFrame:
-    """
-    Run prediction across all (year, variable) model entries.
-
-    Parameters
-    ----------
-    models : dict keyed by (year, variable) -> sklearn Ridge Pipeline
-    survival : survival percentage
-    si : site index
-    species_tpa : list of species TPA values in preset order (up to 4)
-
-    Returns
-    -------
-    Wide-format DataFrame: Year, ABLD_C, BA, QMD, SDI, TCuFt, MCuFt, ...
-    """
-    total_tpa = sum(species_tpa)
-    # Pad to exactly 4 species slots (SP1–SP4) as the pipelines expect
-    padded = (list(species_tpa) + [0, 0, 0, 0])[:4]
-
-    X_raw = np.array(
-        [[float(survival), float(total_tpa), *[float(s) for s in padded], float(si)]],
-        dtype=float,
-    )
-
-    # Detect model type: v3 (plain LinearRegression, expects 119 poly features)
-    # vs v4 (Pipeline with built-in transform, expects 7 raw features)
-    sample_model = next(iter(models.values()))
-    needs_poly = getattr(sample_model, "n_features_in_", 7) > len(X_raw[0])
-
-    if needs_poly:
-        poly = PolynomialFeatures(degree=3, include_bias=False)
-        X = poly.fit_transform(X_raw)
-    else:
-        # v4 pipelines expect named DataFrame
-        X = pd.DataFrame([{
-            "Survival": float(survival),
-            "total_TPA": float(total_tpa),
-            "SP1_TPA": float(padded[0]),
-            "SP2_TPA": float(padded[1]),
-            "SP3_TPA": float(padded[2]),
-            "SP4_TPA": float(padded[3]),
-            "SI": float(si),
-        }])
-
-    rows = []
-    for (year, var), model in models.items():
-        y_pred = max(model.predict(X)[0], 0)  # clamp negatives to 0 per Dave
-        rows.append({"Year": int(year), "Variable": var, "Value": y_pred})
-
-    if not rows:
-        return pd.DataFrame()
-
-    df = pd.DataFrame(rows)
-    wide = df.pivot(index="Year", columns="Variable", values="Value").reset_index()
-    wide = wide.sort_values("Year").reset_index(drop=True)
-    return wide
 
 def compute_proforma(df_ert_ac: pd.DataFrame, p: dict) -> pd.DataFrame:
     results = []
@@ -169,6 +47,7 @@ def compute_proforma(df_ert_ac: pd.DataFrame, p: dict) -> pd.DataFrame:
         df['Registry_Fees'] = p['registry_fees']
         df['Issuance_Fees'] = df['CUs_Sold'] * p['issuance_fee_per_ert']
         df['Planting_Cost'] = p['planting_cost']
+        df['Seedling_Cost'] = p['seedling_cost']
 
         df['Total_Costs'] = (
             df['Validation_and_Verification']
@@ -176,6 +55,7 @@ def compute_proforma(df_ert_ac: pd.DataFrame, p: dict) -> pd.DataFrame:
             + df['Registry_Fees']
             + df['Issuance_Fees']
             + df['Planting_Cost']
+            + df['Seedling_Cost']
         )
 
         df['Net_Revenue'] = df['Total_Revenue'] - df['Total_Costs']
@@ -215,8 +95,7 @@ def compute_summaries(
         summaries.append({
             "Protocol": protocol,
             "total_net": total_net,
-            "npv_yr": npv_yr,
-            "npv_year": int(npv_years),
+            "npv_yr20": npv_yr,
             "npv_per_acre": npv_per_acre,
         })
 
@@ -224,7 +103,9 @@ def compute_summaries(
 
 def compute_carbon_scores(
     coefficients: Dict,
-    species_tpa: list[float],
+    tpa_df: float,
+    tpa_rc: float,
+    tpa_wh: float,
     survival: float,
     si: float,
 ):
@@ -232,25 +113,17 @@ def compute_carbon_scores(
     c_scores = []
     ann_c_scores = []
 
-    tpa_total = sum(species_tpa)
-
-    # Extract species-specific coefficient keys (anything starting with TPA_ except TPA_total)
-    sample_year = next(iter(sorted(coefficients.keys(), key=int)))
-    sp_coeff_keys = [k for k in coefficients[sample_year] if k.startswith("TPA_") and k != "TPA_total"]
+    tpa_total = tpa_df + tpa_rc + tpa_wh
 
     for year in sorted(coefficients.keys(), key=int):
-        c = coefficients[year]
-        # Sum species contributions positionally
-        sp_score = sum(
-            c.get(sp_coeff_keys[i], 0) * species_tpa[i]
-            for i in range(min(len(sp_coeff_keys), len(species_tpa)))
-        )
         c_score = (
-            sp_score
-            + c["TPA_total"] * tpa_total
-            + c["Survival"] * survival
-            + c["SI"] * si
-            + c["Intercept"]
+            coefficients[year]["TPA_DF"] * tpa_df
+            + coefficients[year]["TPA_RC"] * tpa_rc
+            + coefficients[year]["TPA_WH"] * tpa_wh
+            + coefficients[year]["TPA_total"] * tpa_total
+            + coefficients[year]["Survival"] * survival
+            + coefficients[year]["SI"] * si
+            + coefficients[year]["Intercept"]
         )
 
         ann = c_score - c_scores[-1] if c_scores else c_score
@@ -262,8 +135,8 @@ def compute_carbon_scores(
     return [
         {
             "Year": y,
-            "ABLD_C": round(c, 4),
-            "Annual_ABLD_C": round(a, 4),
+            "C_Score": round(c, 4),
+            "Annual_C_Score": round(a, 4),
         }
         for y, c, a in zip(years, c_scores, ann_c_scores)
     ]
@@ -274,7 +147,7 @@ def compute_carbon_units(
     protocol_rules: dict | None = None,
 ) -> pd.DataFrame:
     """
-    df_carbon: DataFrame with ['Year', 'ABLD_C']
+    df_carbon: DataFrame with ['Year', 'C_Score']
     returns: DataFrame with ['Year', 'CU', 'Protocol']
     """
 
@@ -282,30 +155,18 @@ def compute_carbon_units(
     all_protocol_dfs = []
 
     for protocol in protocols:
-        # Backward-compatible fallback chain for legacy combined protocol key
-        rules = (
-            ruleset.get(protocol)
-            or ruleset.get("ACR")
-            or ruleset.get("CAR")
-            or ruleset.get("VERRA")
-            or ruleset.get("ACR/CAR/VERRA")
-        )
-
-        if rules is None:
-            raise KeyError(
-                "No protocol rules found for selected protocols and no fallback protocol rules are configured."
-            )
+        rules = ruleset.get(protocol, ruleset["ACR/CAR/VERRA"])
 
 
         df_base = df_carbon.copy()
-        df_base["Onsite_Total_CO2"] = df_base["ABLD_C"] * 3.667 * rules["coeff"]
+        df_base["Onsite_Total_CO2"] = df_base["C_Score"] * 3.667 * rules["coeff"]
 
         # Interpolation
         df_poly = df_base[["Year", "Onsite_Total_CO2"]].sort_values("Year")
         X = df_poly["Year"].values
         y = df_poly["Onsite_Total_CO2"].values
 
-        spline = make_interp_spline(X, y, k=1)
+        spline = make_interp_spline(X, y, k=3)
         years_interp = np.arange(X.min(), X.max() + 1)
         y_interp = spline(years_interp)
 
@@ -346,258 +207,3 @@ def compute_carbon_units(
         )
 
     return pd.concat(all_protocol_dfs, ignore_index=True)
-
-
-# ---------------------------------------------------------------------------
-# Scenario orchestration: full carbon → CU → proforma pipeline + acreage solver
-# ---------------------------------------------------------------------------
-
-PROFORMA_YEAR_START = 2024
-PROFORMA_YEARS_ADVANCE = 35
-
-
-def _load_base_json(filename: str) -> dict:
-    with open(BASE_PATH / filename, "r") as f:
-        return json.load(f)
-
-
-def default_scenario(variant: str, loccode: str) -> dict:
-    """
-    Compose authoritative default inputs for a (variant, loccode) pair.
-    Pulls from FVSVariant_presets.json, variant_species.json, proforma_presets.json.
-
-    Returned dict is shaped to feed straight into run_scenario(); callers may
-    override any subset of fields.
-    """
-    variant_presets = _load_base_json("FVSVariant_presets.json")
-    species_map = _load_base_json("variant_species.json")
-    proforma_presets = _load_base_json("proforma_presets.json")
-
-    preset = variant_presets.get(variant)
-    if preset is None:
-        # Fall back to base variant prefix (e.g., "PN" for "PN_1")
-        for key, value in variant_presets.items():
-            if variant.startswith(key) or key.startswith(variant):
-                preset = value
-                variant = key
-                break
-    if preset is None:
-        raise KeyError(f"No variant preset for {variant!r}")
-
-    species_codes = species_map.get(variant) or []
-
-    return {
-        "variant": variant,
-        "loccode": loccode,
-        "survival": float(preset["survival"]),
-        "si": float(preset["si"]),
-        "species_tpa": [float(x) for x in preset["default_tpa"]],
-        "species_codes": list(species_codes),
-        "pct_level": "PCT0",
-        "net_acres": 1000.0,
-        "protocols": ["ACR"],
-        "financial_params": {
-            "ACR": dict(proforma_presets),
-        },
-        "npv_year": 40,
-    }
-
-
-def _carbon_for_inputs(
-    variant: str,
-    loccode: str,
-    survival: float,
-    si: float,
-    species_tpa: list[float],
-    pct_level: str,
-) -> tuple[pd.DataFrame, str]:
-    """
-    Compute the carbon DataFrame for a scenario input set, returning (df, source).
-    Tries FVS models first, falls back to coefficient-based prediction.
-    """
-    models = get_fvs_models(variant, loccode, pct_level)
-    if models is not None:
-        wide = predict_fvs_metrics(models, survival, si, species_tpa)
-        if not wide.empty:
-            if "ABLD_C" in wide.columns:
-                wide["Annual_ABLD_C"] = wide["ABLD_C"].diff().fillna(wide["ABLD_C"].iloc[0])
-            zero_row = {col: 0.0 for col in wide.columns}
-            zero_row["Year"] = PROFORMA_YEAR_START
-            wide = pd.concat([pd.DataFrame([zero_row]), wide], ignore_index=True)
-            wide = wide.sort_values("Year").reset_index(drop=True)
-            return wide, "fvs"
-
-    coefficients = _load_base_json("carbon_model_coefficients.json")
-    rows = compute_carbon_scores(
-        coefficients=coefficients,
-        species_tpa=species_tpa,
-        survival=survival,
-        si=si,
-    )
-    rows.insert(0, {"Year": PROFORMA_YEAR_START, "ABLD_C": 0.0, "Annual_ABLD_C": 0.0})
-    return pd.DataFrame(rows), "coefficients"
-
-
-def _normalize_financial_params(
-    protocols: list[str],
-    overrides: dict[str, dict] | None,
-) -> dict[str, dict]:
-    """
-    Merge per-protocol financial overrides on top of proforma_presets defaults.
-    Percent-style fields (credit_price_increase, anticipated_inflation,
-    discount_rate) are converted from percent (6.0) to fraction (0.06) only if
-    the value looks percent-shaped (>1).
-    """
-    base = _load_base_json("proforma_presets.json")
-    overrides = overrides or {}
-
-    PERCENT_FIELDS = {"credit_price_increase", "anticipated_inflation", "discount_rate"}
-
-    def merge(protocol: str) -> dict:
-        merged = dict(base)
-        merged.update(overrides.get(protocol, {}))
-        for field in PERCENT_FIELDS:
-            value = float(merged.get(field, 0))
-            if value > 1.0:
-                merged[field] = value / 100.0
-            else:
-                merged[field] = value
-        return merged
-
-    return {protocol: merge(protocol) for protocol in protocols}
-
-
-def _proforma_for_protocol(
-    df_cu: pd.DataFrame,
-    protocol: str,
-    fin_params: dict,
-    net_acres: float,
-    npv_year: int,
-) -> tuple[pd.DataFrame, dict]:
-    """Run the proforma + summary for one protocol at a given net_acres value."""
-    params = {
-        **fin_params,
-        "net_acres": float(net_acres),
-        "year_start": PROFORMA_YEAR_START,
-        "years_advance": PROFORMA_YEARS_ADVANCE,
-    }
-    df_pf = compute_proforma(df_cu, params)
-    df_sum = compute_summaries(df_pf, params, npv_years=npv_year)
-    summary_row = df_sum[df_sum["Protocol"] == protocol].iloc[0].to_dict()
-    summary_row["net_acres"] = float(net_acres)
-    return df_pf, summary_row
-
-
-def _solve_acreage_for_tnr(
-    df_cu_protocol: pd.DataFrame,
-    protocol: str,
-    fin_params: dict,
-    npv_year: int,
-    target_tnr: float,
-) -> float:
-    """
-    Closed-form inverse: TNR is exactly linear in net_acres for a fixed
-    protocol and fixed financial params. Run the proforma at acres=1 and
-    acres=10 to recover slope/intercept, then solve.
-    """
-    _, s1 = _proforma_for_protocol(df_cu_protocol, protocol, fin_params, 1.0, npv_year)
-    _, s10 = _proforma_for_protocol(df_cu_protocol, protocol, fin_params, 10.0, npv_year)
-
-    tnr_1 = float(s1["total_net"])
-    tnr_10 = float(s10["total_net"])
-
-    slope = (tnr_10 - tnr_1) / 9.0
-    if slope == 0:
-        raise ValueError(
-            "TNR is invariant to net_acres (slope=0) — cannot solve. "
-            "Likely the protocol produces no credits for this scenario."
-        )
-    intercept = tnr_1 - slope * 1.0   # so TNR(acres) = slope * acres + intercept
-    target_acres = (target_tnr - intercept) / slope
-    if target_acres <= 0:
-        raise ValueError(
-            f"Solved acreage is non-positive ({target_acres:.2f}). "
-            f"Target TNR {target_tnr} is unreachable with these inputs."
-        )
-    return float(target_acres)
-
-
-def run_scenario(inputs: dict) -> dict:
-    """
-    End-to-end scenario evaluator.
-
-    inputs is a dict matching ScenarioRequest fields. None-valued fields are
-    backfilled from default_scenario(variant, loccode). Returns a dict matching
-    ScenarioResponse.
-
-    When inputs["solve"] is set, runs the closed-form acreage solver
-    (single protocol only) and returns the verified result.
-    """
-    defaults = default_scenario(inputs["variant"], inputs["loccode"])
-
-    resolved = {**defaults}
-    for key in ("survival", "si", "species_tpa", "pct_level", "net_acres",
-                "protocols", "npv_year"):
-        value = inputs.get(key)
-        if value is not None:
-            resolved[key] = value
-
-    fin_overrides = inputs.get("financial_params")
-    resolved["financial_params"] = _normalize_financial_params(
-        resolved["protocols"], fin_overrides,
-    )
-
-    solve = inputs.get("solve")
-    return_dataframes = bool(inputs.get("return_dataframes", False))
-
-    if solve is not None and len(resolved["protocols"]) != 1:
-        raise ValueError(
-            "Solver mode requires exactly one protocol; got "
-            f"{resolved['protocols']!r}. Pick a single protocol per solve."
-        )
-
-    df_carbon, model_source = _carbon_for_inputs(
-        resolved["variant"], resolved["loccode"],
-        resolved["survival"], resolved["si"],
-        resolved["species_tpa"], resolved["pct_level"],
-    )
-    protocol_rules = _load_base_json("protocol_rules.json")
-    df_cu = compute_carbon_units(df_carbon, resolved["protocols"], protocol_rules)
-
-    summaries: list[dict] = []
-    proforma_frames: list[pd.DataFrame] = []
-
-    for protocol in resolved["protocols"]:
-        fin_params = resolved["financial_params"][protocol]
-        df_cu_p = df_cu[df_cu["Protocol"] == protocol]
-
-        if solve is not None and protocol == resolved["protocols"][0]:
-            target_acres = _solve_acreage_for_tnr(
-                df_cu_p, protocol, fin_params, resolved["npv_year"], solve["value"],
-            )
-            resolved["net_acres"] = target_acres
-
-        net_acres = resolved["net_acres"]
-        df_pf, summary_row = _proforma_for_protocol(
-            df_cu_p, protocol, fin_params, net_acres, resolved["npv_year"],
-        )
-        summaries.append(summary_row)
-        proforma_frames.append(df_pf)
-
-    response: dict = {
-        "inputs": {k: resolved[k] for k in (
-            "variant", "loccode", "survival", "si", "species_tpa",
-            "species_codes", "pct_level", "net_acres", "protocols",
-            "npv_year", "financial_params",
-        )},
-        "summaries": summaries,
-        "model_source": model_source,
-    }
-
-    if return_dataframes and proforma_frames:
-        df_pf_all = pd.concat(proforma_frames, ignore_index=True)
-        response["proforma_rows"] = df_pf_all.to_dict(orient="records")
-        response["carbon_rows"] = df_carbon.to_dict(orient="records")
-        response["cu_rows"] = df_cu.to_dict(orient="records")
-
-    return response

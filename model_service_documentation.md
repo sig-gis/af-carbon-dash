@@ -163,35 +163,6 @@ Calculates carbon units (credits) for different protocols.
 **Usage:**
 Converts carbon scores to tradable carbon credits under various protocols.
 
-#### `POST /reports/generate`
-Generates a PDF report using Quarto and project-specific data.
-
-**Request Body:**
-- `ReportRequest` schema (see `schemas.py`). The request includes a `data` object with:
-  - `planting_design` (List[List[str | number]]): Two-column rows for the strategy summary.
-  - `species_mix` (List[List[str | number]]): Two-column rows for the species mix.
-  - `financial_options1` (List[List[str | number]]): Two-column rows for financial options (table 1).
-  - `financial_options2` (List[List[str | number]]): Two-column rows for financial options (table 2).
-  - `carbon` (List[Dict]): Carbon projection rows used for charts.
-  - `selected_variant` (str): Expected variants are `EC` or `PN` (normalized/validated server-side).
-
-**Response:**
-- `application/pdf` file response with a generated report (e.g., `report_YYYY-MM-DD_HHMMSS.pdf`).
-
-**Runtime Behavior:**
-- Writes request data to `/tmp/quarto/data/*.csv`.
-- Calls `quarto render` on `model_service/quarto/report.ipynb` with `--execute`.
-- Uses the following environment variables during rendering:
-  - `QUARTO_DATA_DIR`: Path to the temp CSV directory (`/tmp/quarto/data`).
-  - `QUARTO_FIG_DIR`: Path to static figure assets (`model_service/quarto/data/fig`).
-
-**Static Assets:**
-- Variant images must be present in `model_service/quarto/data/fig` (e.g., `ECvariant.png`, `PNvariant.png`).
-- Ensure these assets are included in the container image for Cloud Run builds.
-
-**Usage:**
-Produces a Quarto-generated PDF report that combines tabular summaries, charts, and variant imagery.
-
 ## model.py
 
 ### `compute_proforma(df_ert_ac: pd.DataFrame, p: dict) -> pd.DataFrame`
@@ -295,8 +266,7 @@ Summary data for each protocol.
 **Fields:**
 - `Protocol` (str): Protocol name
 - `total_net` (float): Total net revenue
-- `npv_yr` (float): NPV over the configured horizon (see `npv_year`)
-- `npv_year` (int): The horizon used to compute `npv_yr` (e.g. 20, 40)
+- `npv_yr20` (float): 20-year NPV
 - `npv_per_acre` (float): NPV per acre
 
 #### `ProformaResponse`

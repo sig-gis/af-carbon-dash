@@ -1,6 +1,8 @@
 name: Deploy to Cloud Run
 
 on:
+  # A PR merge to main/dev results in a push event on that branch,
+  # so push triggers cover both direct pushes and merged PRs.
   push:
     branches:
       - main
@@ -8,43 +10,32 @@ on:
 
 permissions:
   contents: read
-  id-token: write
+  id-token: write # Required for Workload Identity Federation
 
 jobs:
   deploy:
-    name: Build and Deploy
+    name: Build and Deploy API
     runs-on: ubuntu-latest
-
-    env:
-      REGION: us-west1
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Determine Environment
-        id: env
+        id: determine_env
         run: |
-          if [[ "${{ github.ref_name }}" == "main" ]]; then
-            echo "api_suffix=-prod" >> "$GITHUB_OUTPUT"
-            echo "dash_suffix=-prod" >> "$GITHUB_OUTPUT"
-            echo "bucket_suffix=-prod" >> "$GITHUB_OUTPUT"
-            echo "env_name=production" >> "$GITHUB_OUTPUT"
+          BRANCH_NAME="${{ github.ref_name }}"
+          if [[ "$BRANCH_NAME" == "main" ]]; then
+            echo "service_suffix=-prod" >> "$GITHUB_OUTPUT"
           else
-            echo "api_suffix=-dev" >> "$GITHUB_OUTPUT"
-            echo "dash_suffix=" >> "$GITHUB_OUTPUT"
-            echo "bucket_suffix=-dev" >> "$GITHUB_OUTPUT"
-            echo "env_name=development" >> "$GITHUB_OUTPUT"
+            echo "service_suffix=-dev" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Set environment variables
         run: |
           echo "GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}" >> $GITHUB_ENV
-          echo "API_SERVICE=model-service-api${{ steps.env.outputs.api_suffix }}" >> $GITHUB_ENV
-          echo "API_IMAGE=gcr.io/${{ secrets.GCP_PROJECT_ID }}/model-service-api${{ steps.env.outputs.api_suffix }}:${{ github.sha }}" >> $GITHUB_ENV
-          echo "DASH_SERVICE=af-dash${{ steps.env.outputs.dash_suffix }}" >> $GITHUB_ENV
-          echo "DASH_IMAGE=gcr.io/${{ secrets.GCP_PROJECT_ID }}/af-dash${{ steps.env.outputs.dash_suffix }}:${{ github.sha }}" >> $GITHUB_ENV
-          echo "MODEL_BUCKET=af-carbon-models${{ steps.env.outputs.bucket_suffix }}" >> $GITHUB_ENV
+          echo "SERVICE_NAME=model-service-api${{ steps.determine_env.outputs.service_suffix }}" >> $GITHUB_ENV
+          echo "IMAGE_URI=gcr.io/${{ secrets.GCP_PROJECT_ID }}/model-service-api${{ steps.determine_env.outputs.service_suffix }}:${{ github.sha }}" >> $GITHUB_ENV
 
       - name: Authenticate to Google Cloud (WIF)
         uses: google-github-actions/auth@v2
@@ -56,77 +47,23 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Ensure model store bucket exists
+      - name: 'Debug: Print authenticated user and project'
         run: |
-          gcloud storage buckets create "gs://${{ env.MODEL_BUCKET }}" \
-            --project="${{ env.GCP_PROJECT_ID }}" \
-            --location=${{ env.REGION }} \
-            --uniform-bucket-level-access \
-            2>/dev/null || true
+          gcloud auth list
+          gcloud config list project
 
-      - name: Seed FVS GeoJSON if not cached
-        run: |
-          GEOJSON_KEY="geo/FVS_Variants_and_Locations_4326_simplified_full.geojson"
-          if gcloud storage ls "gs://${{ env.MODEL_BUCKET }}/${GEOJSON_KEY}" 2>/dev/null; then
-            echo "GeoJSON already cached in bucket, skipping download"
-          else
-            echo "Downloading and processing FVS shapefile from USDA..."
-            pip install -q geopandas pyyaml
-            python scripts/downloadFile.py \
-              "https://www.fs.usda.gov/fmsc/ftp/fvs/docs/overviews/FVSVariantMap20210525.zip" \
-              /tmp/fvs.zip /tmp/shapefile/FVS_Variants_and_Locations.shp
-            python scripts/convertGeoJSON.py \
-              --input /tmp/shapefile/FVS_Variants_and_Locations.shp \
-              --output /tmp/full.geojson
-            gcloud storage cp /tmp/full.geojson "gs://${{ env.MODEL_BUCKET }}/${GEOJSON_KEY}"
-            echo "GeoJSON uploaded to bucket"
-          fi
-
-      # ── Build both images via Cloud Build ─────────────────────────
-      - name: Build API image
+      - name: Build and Push Docker image (Cloud Build)
         run: |
           gcloud builds submit \
             --project="${{ env.GCP_PROJECT_ID }}" \
-            --tag "${{ env.API_IMAGE }}"
+            --tag "${{ env.IMAGE_URI }}"
 
-      - name: Build Dashboard image
+      - name: Deploy to Cloud Run
         run: |
-          cat > /tmp/cloudbuild-dash.yaml <<EOF
-          steps:
-            - name: gcr.io/cloud-builders/docker
-              args: ['build', '-f', 'Dockerfile.dashboard', '-t', '${{ env.DASH_IMAGE }}', '.']
-          images: ['${{ env.DASH_IMAGE }}']
-          EOF
-          gcloud builds submit \
-            --project="${{ env.GCP_PROJECT_ID }}" \
-            --config=/tmp/cloudbuild-dash.yaml
-
-      # ── Deploy API first (dashboard needs its URL) ────────────────
-      - name: Deploy API to Cloud Run
-        run: |
-          gcloud run deploy "${{ env.API_SERVICE }}" \
-            --image "${{ env.API_IMAGE }}" \
+          gcloud run deploy "${{ env.SERVICE_NAME }}" \
+            --image "${{ env.IMAGE_URI }}" \
             --platform managed \
-            --region ${{ env.REGION }} \
+            --region us-west1 \
             --allow-unauthenticated \
             --service-account="${{ secrets.GCP_SERVICE_ACCOUNT }}" \
-            --set-env-vars "GCP_PROJECT=${{ env.GCP_PROJECT_ID }},MODEL_STORE_BACKEND=gcs,MODEL_STORE_BUCKET=${{ env.MODEL_BUCKET }}"
-
-      - name: Get API URL
-        id: api_url
-        run: |
-          URL=$(gcloud run services describe "${{ env.API_SERVICE }}" \
-            --region ${{ env.REGION }} \
-            --format="value(status.url)")
-          echo "url=${URL}" >> "$GITHUB_OUTPUT"
-
-      # ── Deploy Dashboard ──────────────────────────────────────────
-      - name: Deploy Dashboard to Cloud Run
-        run: |
-          gcloud run deploy "${{ env.DASH_SERVICE }}" \
-            --image "${{ env.DASH_IMAGE }}" \
-            --platform managed \
-            --region ${{ env.REGION }} \
-            --allow-unauthenticated \
-            --service-account="${{ secrets.GCP_SERVICE_ACCOUNT }}" \
-            --set-env-vars "CARBON_API_BASE_URL=${{ steps.api_url.outputs.url }},ENV=${{ steps.env.outputs.env_name }},GCP_PROJECT=${{ env.GCP_PROJECT_ID }},MODEL_STORE_BACKEND=gcs,MODEL_STORE_BUCKET=${{ env.MODEL_BUCKET }}"
+            --set-env-vars "GCP_PROJECT=${{ env.GCP_PROJECT_ID }}"

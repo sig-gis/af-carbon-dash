@@ -6,8 +6,7 @@ from pathlib import Path
 
 def stream_download(url: str, dest: Path, chunk_size: int = 1 << 16):
     dest.parent.mkdir(parents=True, exist_ok=True)
-    headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"}
-    with requests.get(url, stream=True, timeout=300, headers=headers) as r:
+    with requests.get(url, stream=True, timeout=300) as r:
         r.raise_for_status()
         with dest.open("wb") as f:
             for chunk in r.iter_content(chunk_size=chunk_size):

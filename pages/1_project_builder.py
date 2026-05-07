@@ -12,7 +12,7 @@ import zipfile
 from geopy.geocoders import Nominatim
 
 from utils.functions.helper import  H
-from utils.functions.site_select import load_geojson_fragment, load_geojson_or_shapefile, build_map, build_highlight_layer, show_clicked_variant, display_selected_info, auto_select_variant_from_point, _process_pending_click
+from utils.functions.site_select import load_geojson_fragment, load_geojson_or_shapefile, build_map, show_clicked_variant, display_selected_info
 from utils.functions.plant_design import run_chart
 
 # Page Configuration
@@ -83,19 +83,25 @@ if st.session_state.active_tab == "Site Selection Map":
             help=H("site.title"),
         )
 
-    # Placeholder — filled after map click processing so the button
-    # reflects the latest selection without a second rerun.
-    _button_slot = col2.empty()
+    with col2:
+        # Only show the "Continue" button if a variant is selected
+        if st.session_state.get("selected_variant"):
+            if st.button(
+                "➡️ Planting Design",
+                use_container_width=True,
+                help=H("site.button_forward_to_planting"),
+                type='primary'
+            ):
+                st.session_state.active_tab = "Planting Design"
+                st.rerun()
+        else:
+            st.empty()
 
     if "points" not in st.session_state:
         st.session_state.points = []
 
     if "upload_file" not in st.session_state:
         st.session_state.upload_file = []
-
-    # Load supported FVS variant polygons once so address lookups can auto-select
-    # variant before map rendering.
-    geojson_str, tooltip_fields = load_geojson_fragment(simplified_geojson, local_shapefile)
         
     with st.expander(label="Add Point by latitude/longitude or look up an address", expanded=False):
         st.subheader("Go to Lat/Lon") 
@@ -141,14 +147,6 @@ if st.session_state.active_tab == "Site Selection Map":
                 # Track last added
                 st.session_state["last_added_type"] = "point"
                 st.session_state["last_point"] = new_pt
-
-                # Auto-select variant from the geocoded address point
-                matched = auto_select_variant_from_point(new_pt, geojson_str)
-                if matched:
-                    st.success("Address matched a supported FVS variant. Variant auto-selected.")
-                    st.rerun()
-                else:
-                    st.warning("Address found, but it does not intersect a supported FVS variant polygon.")
             else:
                 st.error("Address not found.")
         else:
@@ -215,23 +213,18 @@ if st.session_state.active_tab == "Site Selection Map":
         help=H("site.subheader_select_variant")
     )
 
-    # Process any pending map click BEFORE building the map
-    # so the highlight renders in the same pass.
-    _process_pending_click()
-
+    # Load GeoJSON and Map
+    geojson_str, tooltip_fields = load_geojson_fragment(simplified_geojson, local_shapefile)
     st.session_state.setdefault("map_view", {"center": [45.5, -118], "zoom": 6})
 
     m = build_map(
         geojson_str,
         points=st.session_state.points,
-        upload=uploaded_geojson_str,
+        upload = uploaded_geojson_str,
         center=tuple(st.session_state["map_view"]["center"]),
         zoom=int(st.session_state["map_view"]["zoom"]),
         tooltip_fields=tooltip_fields,
-    )
-
-    highlight_fg = build_highlight_layer(
-        st.session_state.get("clicked_feature")
+        highlight_feature=st.session_state.get("clicked_feature")
     )
 
     map_data = st_folium(
@@ -239,24 +232,10 @@ if st.session_state.active_tab == "Site Selection Map":
         key="fvs_map",
         height=500,
         use_container_width=True,
-        returned_objects=["last_active_drawing"],
-        feature_group_to_add=highlight_fg,
     )
 
     show_clicked_variant(map_data)
     display_selected_info()
-
-    # Fill the button placeholder now that click state is up to date
-    if st.session_state.get("selected_variant"):
-        with _button_slot:
-            if st.button(
-                "➡️ Planting Design",
-                use_container_width=True,
-                help=H("site.button_forward_to_planting"),
-                type="primary",
-            ):
-                st.session_state.active_tab = "Planting Design"
-                st.rerun()
 
     if reset_button:
         # Remove from session state

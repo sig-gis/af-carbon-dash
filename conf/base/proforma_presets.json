@@ -9,5 +9,6 @@
     "issuance_fee_per_ert": 0.15,
     "anticipated_inflation": 0,
     "discount_rate": 6.0,
-    "planting_cost": 1000
+    "planting_cost": 0,
+    "seedling_cost": 0
 }

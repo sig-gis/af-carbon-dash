@@ -29,16 +29,6 @@
       "component": "Bold line showing the current FVS Variant above the planting sliders",
       "help": "Selected FVS Variant"
     },
-    "planting.varloc_label": {
-      "streamlit_function": "markdown",
-      "component": "Bold line showing the current FVS Variant Location above the planting sliders",
-      "help": "Selected FVS Variant Location"
-    },
-    "planting.varcode_label": {
-      "streamlit_function": "markdown",
-      "component": "Bold line showing the current FVS Variant Location Code above the planting sliders",
-      "help": "Selected FVS Variant Location Code"
-    },
     "planting.slider_survival": {
       "streamlit_function": "slider",
       "component": "Survival Percentage slider",
@@ -69,30 +59,15 @@
       "component": "Protocol selector for Carbon Units / Project Financials",
       "help": "Select one or more protocols to estimate Carbon Units (CUs) and Project Financials."
     },
-    "credits.expander_subheader": {
-      "streamlit_function": "expander",
-      "component": "Project Financials expander block",
-      "help": "The Project Financial Projection forecasts project costs and revenues. Project costs include third-party validation and verification, forest inventory, and registry fees. Planting costs may be included but are not part of the default settings. Project development costs are not included. Total Net Revenue is gross revenue (credits issued x price) less these project costs. Net Present Value is net revenue discounted at the selected annual discount rate. A proforma financial statement can be downloaded below."
-    },
     "credits.summary_subheader": {
       "streamlit_function": "subheader",
       "component": "Project Financials summary block",
-      "help": "**Protocol**: The carbon accounting protocol / registry (ACR, CAR, VERRA, GS, or ISO) the financial results are based on. Total Net Revenue: The total projected revenue from the project over its full crediting period, after deducting costs. NPV (Year 20) - Net Present Value at Year 20: shows what the project’s 20-year returns are worth in today’s dollars. NPV per Acre: Net Present Value (Year 20) on a per-acre basis."
+      "help": "**Protocol:** The carbon accounting protocol / registry (ACR, CAR, VERRA, GS, or ISO) the financial results are based on.\n**Total Net Revenue:** The total projected revenue from the project over its full crediting period, after deducting costs.\n**NPV (Year 20) - Net Present Value at Year 20:** shows what the project’s 20-year returns are worth in today’s dollars.\n**NPV per Acre:** Net Present Value (Year 20) on a per-acre basis."
     },
     "credits.download_button": {
       "streamlit_function": "download_button",
       "component": "Download button for the full proforma CSV",
-      "help": "Download table used to calculate proforma financial statement."
-    },
-    "reports.generate_report_description": {
-      "streamlit_function": "markdown",
-      "component": "Generate Report description text",
-      "help": "Generate a downloadable PDF summary of your selected project setup, carbon estimates, and financial outputs."
-    },
-    "reports.generate_report_button": {
-      "streamlit_function": "button",
-      "component": "Generate Project Report button",
-      "help": "Click to start report generation. This may take about a minute. When complete, a new Download Project Report (PDF) button will appear below."
+      "help": "Download table used to calculate Project Financials."
     },
     "credits.inputs.net_acres": {
       "streamlit_function": "number_input",
@@ -154,11 +129,6 @@
       "component": "Initial planting cost input",
       "help": "Upfront cost of planting, including site preparation and labor."
     },
-    "credits.inputs.npv_year": {
-      "streamlit_function": "selectbox",
-      "component": "NPV year horizon selector",
-      "help": "Number of years from project start over which to discount cashflows for NPV. Defaults to 40."
-    },
     "credits.inputs.seedling_cost": {
       "streamlit_function": "number_input",
       "component": "Initial seedling cost input",
@@ -175,3 +145,4 @@
       "help": "The total area of land enrolled in the project, measured in acres."
     }
   }
+  
