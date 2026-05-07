@@ -21,9 +21,8 @@ COPY conf/ /app/conf/
 # helpers from model_service.main (without running API in this container)
 COPY model_service/ /app/model_service/
 
-# Install the project itself
-RUN uv sync --locked
-
+# Project source is picked up via PYTHONPATH. We don't install the package
+# itself in the container (the `scenario` CLI is for local dev only).
 ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONPATH=/app
 

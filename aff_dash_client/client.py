@@ -8,7 +8,7 @@ from typing import Any
 from aff_dash_client.backends import HTTPBackend, LocalBackend
 from aff_dash_client.types import Defaults, ScenarioResult
 
-DEFAULT_API_URL = "https://af-dash-526758851260.us-west1.run.app/"
+DEFAULT_API_URL = "https://model-service-api-dev-526758851260.us-west1.run.app"
 
 
 class AFFDashClient:
