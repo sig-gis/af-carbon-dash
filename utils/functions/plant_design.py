@@ -717,6 +717,8 @@ def credits_inputs(prefix: str = "credits_") -> dict:
         return {}
 
     defaults = _load_proforma_defaults()
+    net_acres = float(st.session_state.get("net_acres", 0) or 0)
+    synced_num_plots = 200 if net_acres <= 10000 else 250
     table_state_key = f"{prefix}protocol_params"
     protocol_state = st.session_state.get(table_state_key, {})
 
@@ -725,7 +727,7 @@ def credits_inputs(prefix: str = "credits_") -> dict:
     for protocol in protocols:
         if protocol not in protocol_state:
             protocol_state[protocol] = {
-                "num_plots": defaults.get("num_plots", 250),
+                "num_plots": synced_num_plots,
                 "cost_per_cfi_plot": defaults.get("cost_per_cfi_plot", 150),
                 "price_per_ert_initial": defaults.get("price_per_ert_initial", 25.0),
                 "credit_price_increase": defaults.get("credit_price_increase", 2.0),
@@ -737,6 +739,8 @@ def credits_inputs(prefix: str = "credits_") -> dict:
                 "discount_rate": defaults.get("discount_rate", 6.0),
                 "planting_cost": defaults.get("planting_cost", 1000),
             }
+        # Always sync Number of Plots to the current net acres threshold.
+        protocol_state[protocol]["num_plots"] = synced_num_plots
 
     st.session_state[table_state_key] = protocol_state
     st.markdown("Financial Options by Protocol", help=H("credits.expander_subheader"))
@@ -745,6 +749,8 @@ def credits_inputs(prefix: str = "credits_") -> dict:
         [
             {
                 "Protocol": protocol,
+                "planting_cost": protocol_state[protocol]["planting_cost"],
+                "price_per_ert_initial": protocol_state[protocol]["price_per_ert_initial"],
                 "num_plots": protocol_state[protocol]["num_plots"],
                 "cost_per_cfi_plot": protocol_state[protocol]["cost_per_cfi_plot"],
                 "registry_fees": protocol_state[protocol]["registry_fees"],
@@ -753,9 +759,7 @@ def credits_inputs(prefix: str = "credits_") -> dict:
                 "verification_cost": protocol_state[protocol]["verification_cost"],
                 "anticipated_inflation": protocol_state[protocol]["anticipated_inflation"],
                 "discount_rate": protocol_state[protocol]["discount_rate"],
-                "price_per_ert_initial": protocol_state[protocol]["price_per_ert_initial"],
                 "credit_price_increase": protocol_state[protocol]["credit_price_increase"],
-                "planting_cost": protocol_state[protocol]["planting_cost"],
             }
             for protocol in protocols
         ]
