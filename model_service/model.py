@@ -488,36 +488,50 @@ def _proforma_for_protocol(
     return df_pf, summary_row
 
 
-def _solve_acreage_for_tnr(
+_METRIC_TO_SUMMARY_KEY = {"tnr": "total_net", "npv": "npv_yr"}
+
+
+def _solve_acreage_for_metric(
     df_cu_protocol: pd.DataFrame,
     protocol: str,
     fin_params: dict,
     npv_year: int,
-    target_tnr: float,
+    target_value: float,
+    metric: str = "tnr",
 ) -> float:
     """
-    Closed-form inverse: TNR is exactly linear in net_acres for a fixed
-    protocol and fixed financial params. Run the proforma at acres=1 and
-    acres=10 to recover slope/intercept, then solve.
+    Closed-form inverse: TNR and NPV are both exactly linear in net_acres for a
+    fixed protocol, fixed financial params, and fixed npv_year horizon. Run the
+    proforma at acres=1 and acres=10 to recover slope/intercept, then solve.
+
+    For metric="npv" the result is the acreage that hits target_value at the
+    given npv_year horizon under the supplied financial params.
     """
+    if metric not in _METRIC_TO_SUMMARY_KEY:
+        raise ValueError(
+            f"Unsupported solve metric {metric!r}; expected one of "
+            f"{sorted(_METRIC_TO_SUMMARY_KEY)}."
+        )
+    key = _METRIC_TO_SUMMARY_KEY[metric]
+
     _, s1 = _proforma_for_protocol(df_cu_protocol, protocol, fin_params, 1.0, npv_year)
     _, s10 = _proforma_for_protocol(df_cu_protocol, protocol, fin_params, 10.0, npv_year)
 
-    tnr_1 = float(s1["total_net"])
-    tnr_10 = float(s10["total_net"])
+    v_1 = float(s1[key])
+    v_10 = float(s10[key])
 
-    slope = (tnr_10 - tnr_1) / 9.0
+    slope = (v_10 - v_1) / 9.0
     if slope == 0:
         raise ValueError(
-            "TNR is invariant to net_acres (slope=0) — cannot solve. "
+            f"{metric.upper()} is invariant to net_acres (slope=0) — cannot solve. "
             "Likely the protocol produces no credits for this scenario."
         )
-    intercept = tnr_1 - slope * 1.0   # so TNR(acres) = slope * acres + intercept
-    target_acres = (target_tnr - intercept) / slope
+    intercept = v_1 - slope * 1.0   # so metric(acres) = slope * acres + intercept
+    target_acres = (target_value - intercept) / slope
     if target_acres <= 0:
         raise ValueError(
             f"Solved acreage is non-positive ({target_acres:.2f}). "
-            f"Target TNR {target_tnr} is unreachable with these inputs."
+            f"Target {metric.upper()} {target_value} is unreachable with these inputs."
         )
     return float(target_acres)
 
@@ -572,8 +586,9 @@ def run_scenario(inputs: dict) -> dict:
         df_cu_p = df_cu[df_cu["Protocol"] == protocol]
 
         if solve is not None and protocol == resolved["protocols"][0]:
-            target_acres = _solve_acreage_for_tnr(
-                df_cu_p, protocol, fin_params, resolved["npv_year"], solve["value"],
+            target_acres = _solve_acreage_for_metric(
+                df_cu_p, protocol, fin_params, resolved["npv_year"],
+                solve["value"], metric=solve.get("target", "tnr"),
             )
             resolved["net_acres"] = target_acres
 

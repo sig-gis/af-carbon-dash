@@ -8,6 +8,10 @@ Solve for the acreage that produces a target Total Net Revenue:
 
     uv run scenario --variant PN --loccode 609 --target-tnr 500000 --npv-year 40
 
+Solve for the acreage that produces a target NPV at a chosen year horizon:
+
+    uv run scenario --variant PN --loccode 609 --target-npv 1000000 --npv-year 40
+
 Use a local API server:
 
     CARBON_API_BASE_URL=http://localhost:8001 uv run scenario \\
@@ -37,10 +41,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--loccode", required=True, help="FVS location code (e.g. 609).")
 
     p.add_argument("--net-acres", type=float, default=None,
-                   help="Project acreage. Mutually exclusive with --target-tnr.")
+                   help="Project acreage. Mutually exclusive with --target-tnr/--target-npv.")
     p.add_argument("--target-tnr", type=float, default=None,
                    help="Target Total Net Revenue. Solver mode — finds the acreage "
                         "that produces this TNR. Single protocol only.")
+    p.add_argument("--target-npv", type=float, default=None,
+                   help="Target NPV at --npv-year. Solver mode — finds the acreage "
+                        "that produces this NPV. Single protocol only. To target "
+                        "NPV under a different discount rate or carbon price, set "
+                        "those via the financial_params dict on the API directly.")
 
     p.add_argument("--survival", type=float, default=None)
     p.add_argument("--si", type=float, default=None)
@@ -108,12 +117,13 @@ def _format_table(result_dict: dict) -> str:
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
 
-    if args.net_acres is not None and args.target_tnr is not None:
-        print("Error: --net-acres and --target-tnr are mutually exclusive.", file=sys.stderr)
+    mode_flags = [args.net_acres, args.target_tnr, args.target_npv]
+    if sum(flag is not None for flag in mode_flags) > 1:
+        print(
+            "Error: --net-acres, --target-tnr, and --target-npv are mutually exclusive.",
+            file=sys.stderr,
+        )
         return 2
-    if args.net_acres is None and args.target_tnr is None:
-        # Default: run with default net_acres (1000) at fixed acreage
-        pass
 
     client = AFFDashClient(
         api_base_url=args.api_base_url,
@@ -134,6 +144,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.target_tnr is not None:
         result = client.solve_for_tnr(target_tnr=args.target_tnr, **common_kwargs)
+    elif args.target_npv is not None:
+        result = client.solve_for_npv(target_npv=args.target_npv, **common_kwargs)
     else:
         result = client.run(net_acres=args.net_acres, **common_kwargs)
 
