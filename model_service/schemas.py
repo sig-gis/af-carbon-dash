@@ -61,7 +61,7 @@ class ReportRequest(BaseModel):
 
 class SolveDirective(BaseModel):
     variable: Literal["net_acres"]
-    target: Literal["tnr"]
+    target: Literal["tnr", "npv"] = "tnr"
     value: float
 
 

@@ -120,6 +120,43 @@ class AFFDashClient:
         }
         return ScenarioResult.from_api(self._backend.run(payload))
 
+    def solve_for_npv(
+        self,
+        *,
+        variant: str,
+        loccode: str,
+        target_npv: float,
+        survival: float | None = None,
+        si: float | None = None,
+        species_tpa: list[float] | None = None,
+        pct_level: str | None = None,
+        protocols: list[str] | None = None,
+        financial_params: dict[str, dict[str, float]] | None = None,
+        npv_year: int | None = None,
+        return_dataframes: bool = False,
+    ) -> ScenarioResult:
+        """Find the net_acres value that produces the requested NPV at npv_year.
+
+        Single-protocol only — NPV is linear in acres for a fixed protocol,
+        fixed financial params, and fixed horizon, so the server solves it in
+        closed form. ``npv_year`` is the year horizon the target applies to;
+        defaults to the server-side default (40) if omitted. To target NPV
+        under a different discount rate or carbon price, pass those via
+        ``financial_params``.
+        """
+        payload = self._build_payload(
+            variant=variant, loccode=loccode, survival=survival, si=si,
+            species_tpa=species_tpa, pct_level=pct_level, net_acres=None,
+            protocols=protocols, financial_params=financial_params,
+            npv_year=npv_year, return_dataframes=return_dataframes,
+        )
+        payload["solve"] = {
+            "variable": "net_acres",
+            "target": "npv",
+            "value": float(target_npv),
+        }
+        return ScenarioResult.from_api(self._backend.run(payload))
+
     # ----- internals --------------------------------------------------------
 
     def _build_payload(self, **kwargs: Any) -> dict:
