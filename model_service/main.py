@@ -1,25 +1,43 @@
-from contextlib import asynccontextmanager
-import logging
-
-from fastapi import FastAPI, HTTPException
-from fastapi import Depends
-from fastapi.responses import FileResponse, JSONResponse
-from pathlib import Path
-import json
-import pandas as pd
-import requests
-import numpy as np
-import subprocess
 import datetime
+import json
+import logging
 import os
+import subprocess
 import tempfile
 import time
+from contextlib import asynccontextmanager
+from pathlib import Path
 
-from model_service.model import compute_proforma, compute_summaries, compute_carbon_scores, compute_carbon_units, get_fvs_models, predict_fvs_metrics
-from model_service.schemas import ProformaRequest, ProformaResponse, CarbonInputs, CarbonResponse, CarbonUnitsRequest, CarbonUnitsResponse, ReportRequest
-from model_service.store import ModelStore, get_store
+import numpy as np
+import pandas as pd
+import requests
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.responses import FileResponse, JSONResponse
+
 from model_service.geo import get_filtered_geojson
-
+from model_service.model import (
+    compute_carbon_scores,
+    compute_carbon_units,
+    compute_proforma,
+    compute_summaries,
+    default_scenario,
+    get_fvs_models,
+    predict_fvs_metrics,
+    run_scenario,
+)
+from model_service.schemas import (
+    CarbonInputs,
+    CarbonResponse,
+    CarbonUnitsRequest,
+    CarbonUnitsResponse,
+    ProformaRequest,
+    ProformaResponse,
+    ReportRequest,
+    ScenarioDefaults,
+    ScenarioRequest,
+    ScenarioResponse,
+)
+from model_service.store import get_store
 from utils.config import get_api_base_url
 
 logger = logging.getLogger(__name__)
@@ -105,60 +123,73 @@ def normalize_variant(value: str) -> str:
 def load_json(filename: str):
     with open(BASE_PATH / filename, "r") as f:
         return json.load(f)
-    
+
+
 def fetch_carbon_coefficients():
     resp = requests.get(f"{API_BASE_URL}/carbon/coefficients", timeout=5)
     resp.raise_for_status()
     return resp.json()
+
 
 def _load_proforma_defaults() -> dict:
     resp = requests.get(f"{API_BASE_URL}/proforma/presets", timeout=5)
     resp.raise_for_status()
     return resp.json()
 
+
 def load_variant_presets() -> dict:
     resp = requests.get(f"{API_BASE_URL}/variant/presets", timeout=5)
     resp.raise_for_status()
     return resp.json()
+
 
 def load_species_labels() -> dict:
     resp = requests.get(f"{API_BASE_URL}/species/labels", timeout=5)
     resp.raise_for_status()
     return resp.json()
 
+
 def load_protocol_rules() -> dict:
     resp = requests.get(f"{API_BASE_URL}/protocol/rules", timeout=5)
     resp.raise_for_status()
     return resp.json()
+
 
 def load_variant_species() -> dict:
     resp = requests.get(f"{API_BASE_URL}/variant/species", timeout=5)
     resp.raise_for_status()
     return resp.json()
 
+
 @app.get("/carbon/coefficients")
 def get_carbon_coefficients():
     return load_json("carbon_model_coefficients.json")
+
 
 @app.get("/proforma/presets")
 def get_proforma_presets():
     return load_json("proforma_presets.json")
 
+
 @app.get("/variant/presets")
 def get_variant_presets():
     return get_store().get_json("config/FVSVariant_presets.json")
+
 
 @app.get("/species/labels")
 def get_species_labels():
     return load_json("species_labels.json")
 
+
 @app.get("/protocol/rules")
 def get_protocol_rules():
     return load_json("protocol_rules.json")
 
+
 @app.get("/variant/species")
 def get_variant_species():
     return get_store().get_json("config/variant_species.json")
+
 
 @app.get("/health")
 def health():
@@ -186,14 +217,14 @@ def get_pct_info(variant: str, loccode: str):
     store = get_store()
     registry = store.get_json("registry.json").get("models", [])
     matches = [
-        m for m in registry
+        m
+        for m in registry
         if m.get("variant") == variant and m.get("loccode") == loccode
     ]
     if not matches:
         # Fallback: return all PCT levels with no retention data
         return [
-            {"pct_level": p, "pct_retention": None}
-            for p in ["PCT0", "PCT1", "PCT2"]
+            {"pct_level": p, "pct_retention": None} for p in ["PCT0", "PCT1", "PCT2"]
         ]
     return sorted(
         [
@@ -219,12 +250,14 @@ def geo_refresh():
 def run_proforma(req: ProformaRequest):
     df_ert_ac = pd.DataFrame(req.df_ert_ac)
     df_pf = compute_proforma(df_ert_ac, req.params)
-    summaries_df = compute_summaries(df_pf, req.params)
+    npv_year = int(req.params.get("npv_year", 20))
+    summaries_df = compute_summaries(df_pf, req.params, npv_years=npv_year)
 
     return {
         "proforma_rows": df_pf.to_dict(orient="records"),
         "summaries": summaries_df.to_dict(orient="records"),
     }
+
 
 @app.post("/carbon/calculate", response_model=CarbonResponse)
 def calculate_carbon(inputs: CarbonInputs):
@@ -237,7 +270,9 @@ def calculate_carbon(inputs: CarbonInputs):
         wide = predict_fvs_metrics(models, inputs.survival, inputs.si, species_tpa)
         if not wide.empty:
             if "ABLD_C" in wide.columns:
-                wide["Annual_ABLD_C"] = wide["ABLD_C"].diff().fillna(wide["ABLD_C"].iloc[0])
+                wide["Annual_ABLD_C"] = (
+                    wide["ABLD_C"].diff().fillna(wide["ABLD_C"].iloc[0])
+                )
 
             # Prepend base year row
             zero_row = {col: 0.0 for col in wide.columns}
@@ -258,20 +293,26 @@ def calculate_carbon(inputs: CarbonInputs):
         survival=inputs.survival,
         si=inputs.si,
     )
-    results.insert(0, {
-        "Year": 2024,
-        "ABLD_C": 0.0,
-        "Annual_ABLD_C": 0.0,
-    })
+    results.insert(
+        0,
+        {
+            "Year": 2024,
+            "ABLD_C": 0.0,
+            "Annual_ABLD_C": 0.0,
+        },
+    )
 
     return {
         "carbon_df": results,
         "model_source": "coefficients",
     }
 
+
 @app.post("/carbon/units", response_model=CarbonUnitsResponse)
-def carbon_units_endpoint(req: CarbonUnitsRequest,
-                          protocol_rules: dict = Depends(get_protocol_rules),):
+def carbon_units_endpoint(
+    req: CarbonUnitsRequest,
+    protocol_rules: dict = Depends(get_protocol_rules),
+):
     df_carbon = pd.DataFrame(req.carbon_rows)
 
     ruleset = req.protocol_rules or protocol_rules
@@ -282,11 +323,36 @@ def carbon_units_endpoint(req: CarbonUnitsRequest,
         ruleset,
     )
 
-    return {
-        "rows": df_units.to_dict(orient="records")
-    }
+    return {"rows": df_units.to_dict(orient="records")}
 
-#QUARTO REPORTING
+
+@app.post("/scenario/run", response_model=ScenarioResponse)
+def scenario_run(req: ScenarioRequest):
+    """
+    One round-trip evaluator: carbon → CU → proforma → summaries.
+    Optional `solve` directive runs a closed-form acreage inverse server-side.
+    """
+    try:
+        result = run_scenario(req.model_dump(exclude_none=False))
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return result
+
+
+@app.get("/scenario/defaults", response_model=ScenarioDefaults)
+def scenario_defaults(variant: str, loccode: str):
+    """
+    Return a complete defaults dict for a (variant, loccode) pair, ready to
+    feed into /scenario/run. Composes FVSVariant_presets, variant_species,
+    and proforma_presets.
+    """
+    try:
+        return default_scenario(variant, loccode)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+# QUARTO REPORTING
 @app.post("/reports/generate")
 def generate_report(req: ReportRequest = None):
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
@@ -331,7 +397,12 @@ def generate_report(req: ReportRequest = None):
             mask = df["column1"].astype(str).str.strip().str.lower() == "variant"
             if not mask.any():
                 df = pd.concat(
-                    [df, pd.DataFrame([{"column1": "Variant", "column2": selected_variant}])],
+                    [
+                        df,
+                        pd.DataFrame(
+                            [{"column1": "Variant", "column2": selected_variant}]
+                        ),
+                    ],
                     ignore_index=True,
                 )
         df.to_csv(DATA_DIR / "planting_design.csv", index=False, header=None)
@@ -353,11 +424,17 @@ def generate_report(req: ReportRequest = None):
     try:
         result = subprocess.run(
             [
-                "quarto", "render", str(QUARTO_DIR / "report.ipynb"),
-                "--to", "typst-pdf",
-                "--output-dir", str(REPORTS_DIR),
-                "--output", f"report_{timestamp}.pdf",
-                "--execute", "--no-cache"
+                "quarto",
+                "render",
+                str(QUARTO_DIR / "report.ipynb"),
+                "--to",
+                "typst-pdf",
+                "--output-dir",
+                str(REPORTS_DIR),
+                "--output",
+                f"report_{timestamp}.pdf",
+                "--execute",
+                "--no-cache",
             ],
             cwd=str(QUARTO_DIR),
             env=env,
@@ -373,7 +450,7 @@ def generate_report(req: ReportRequest = None):
     if result.returncode != 0:
         raise HTTPException(
             status_code=500,
-            detail=f"Quarto failed:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+            detail=f"Quarto failed:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}",
         )
 
     return FileResponse(

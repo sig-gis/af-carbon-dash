@@ -42,10 +42,8 @@ COPY conf/ ./conf/
 COPY utils/ ./utils/
 COPY data/ ./data/
 
-# Install project itself
-RUN uv sync --locked
-
-# Place executables in the environment at the front of the path
+# Place executables in the environment at the front of the path. The project
+# itself is not installed into the venv, modules are picked up via PYTHONPATH.
 ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONPATH=/app
 # ENV QUARTO_PYTHON=/app/.venv/bin/python

@@ -154,6 +154,11 @@
       "component": "Initial planting cost input",
       "help": "Upfront cost of planting, including site preparation and labor."
     },
+    "credits.inputs.npv_year": {
+      "streamlit_function": "selectbox",
+      "component": "NPV year horizon selector",
+      "help": "Number of years from project start over which to discount cashflows for NPV. Defaults to 40."
+    },
     "credits.inputs.seedling_cost": {
       "streamlit_function": "number_input",
       "component": "Initial seedling cost input",

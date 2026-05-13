@@ -215,7 +215,8 @@ def compute_summaries(
         summaries.append({
             "Protocol": protocol,
             "total_net": total_net,
-            "npv_yr20": npv_yr,
+            "npv_yr": npv_yr,
+            "npv_year": int(npv_years),
             "npv_per_acre": npv_per_acre,
         })
 
@@ -345,3 +346,273 @@ def compute_carbon_units(
         )
 
     return pd.concat(all_protocol_dfs, ignore_index=True)
+
+
+# ---------------------------------------------------------------------------
+# Scenario orchestration: full carbon → CU → proforma pipeline + acreage solver
+# ---------------------------------------------------------------------------
+
+PROFORMA_YEAR_START = 2024
+PROFORMA_YEARS_ADVANCE = 35
+
+
+def _load_base_json(filename: str) -> dict:
+    with open(BASE_PATH / filename, "r") as f:
+        return json.load(f)
+
+
+def default_scenario(variant: str, loccode: str) -> dict:
+    """
+    Compose authoritative default inputs for a (variant, loccode) pair.
+    Pulls from FVSVariant_presets.json, variant_species.json, proforma_presets.json.
+
+    Returned dict is shaped to feed straight into run_scenario(); callers may
+    override any subset of fields.
+    """
+    variant_presets = _load_base_json("FVSVariant_presets.json")
+    species_map = _load_base_json("variant_species.json")
+    proforma_presets = _load_base_json("proforma_presets.json")
+
+    preset = variant_presets.get(variant)
+    if preset is None:
+        # Fall back to base variant prefix (e.g., "PN" for "PN_1")
+        for key, value in variant_presets.items():
+            if variant.startswith(key) or key.startswith(variant):
+                preset = value
+                variant = key
+                break
+    if preset is None:
+        raise KeyError(f"No variant preset for {variant!r}")
+
+    species_codes = species_map.get(variant) or []
+
+    return {
+        "variant": variant,
+        "loccode": loccode,
+        "survival": float(preset["survival"]),
+        "si": float(preset["si"]),
+        "species_tpa": [float(x) for x in preset["default_tpa"]],
+        "species_codes": list(species_codes),
+        "pct_level": "PCT0",
+        "net_acres": 1000.0,
+        "protocols": ["ACR"],
+        "financial_params": {
+            "ACR": dict(proforma_presets),
+        },
+        "npv_year": 40,
+    }
+
+
+def _carbon_for_inputs(
+    variant: str,
+    loccode: str,
+    survival: float,
+    si: float,
+    species_tpa: list[float],
+    pct_level: str,
+) -> tuple[pd.DataFrame, str]:
+    """
+    Compute the carbon DataFrame for a scenario input set, returning (df, source).
+    Tries FVS models first, falls back to coefficient-based prediction.
+    """
+    models = get_fvs_models(variant, loccode, pct_level)
+    if models is not None:
+        wide = predict_fvs_metrics(models, survival, si, species_tpa)
+        if not wide.empty:
+            if "ABLD_C" in wide.columns:
+                wide["Annual_ABLD_C"] = wide["ABLD_C"].diff().fillna(wide["ABLD_C"].iloc[0])
+            zero_row = {col: 0.0 for col in wide.columns}
+            zero_row["Year"] = PROFORMA_YEAR_START
+            wide = pd.concat([pd.DataFrame([zero_row]), wide], ignore_index=True)
+            wide = wide.sort_values("Year").reset_index(drop=True)
+            return wide, "fvs"
+
+    coefficients = _load_base_json("carbon_model_coefficients.json")
+    rows = compute_carbon_scores(
+        coefficients=coefficients,
+        species_tpa=species_tpa,
+        survival=survival,
+        si=si,
+    )
+    rows.insert(0, {"Year": PROFORMA_YEAR_START, "ABLD_C": 0.0, "Annual_ABLD_C": 0.0})
+    return pd.DataFrame(rows), "coefficients"
+
+
+def _normalize_financial_params(
+    protocols: list[str],
+    overrides: dict[str, dict] | None,
+) -> dict[str, dict]:
+    """
+    Merge per-protocol financial overrides on top of proforma_presets defaults.
+    Percent-style fields (credit_price_increase, anticipated_inflation,
+    discount_rate) are converted from percent (6.0) to fraction (0.06) only if
+    the value looks percent-shaped (>1).
+    """
+    base = _load_base_json("proforma_presets.json")
+    overrides = overrides or {}
+
+    PERCENT_FIELDS = {"credit_price_increase", "anticipated_inflation", "discount_rate"}
+
+    def merge(protocol: str) -> dict:
+        merged = dict(base)
+        merged.update(overrides.get(protocol, {}))
+        for field in PERCENT_FIELDS:
+            value = float(merged.get(field, 0))
+            if value > 1.0:
+                merged[field] = value / 100.0
+            else:
+                merged[field] = value
+        return merged
+
+    return {protocol: merge(protocol) for protocol in protocols}
+
+
+def _proforma_for_protocol(
+    df_cu: pd.DataFrame,
+    protocol: str,
+    fin_params: dict,
+    net_acres: float,
+    npv_year: int,
+) -> tuple[pd.DataFrame, dict]:
+    """Run the proforma + summary for one protocol at a given net_acres value."""
+    params = {
+        **fin_params,
+        "net_acres": float(net_acres),
+        "year_start": PROFORMA_YEAR_START,
+        "years_advance": PROFORMA_YEARS_ADVANCE,
+    }
+    df_pf = compute_proforma(df_cu, params)
+    df_sum = compute_summaries(df_pf, params, npv_years=npv_year)
+    summary_row = df_sum[df_sum["Protocol"] == protocol].iloc[0].to_dict()
+    summary_row["net_acres"] = float(net_acres)
+    return df_pf, summary_row
+
+
+_METRIC_TO_SUMMARY_KEY = {"tnr": "total_net", "npv": "npv_yr"}
+
+
+def _solve_acreage_for_metric(
+    df_cu_protocol: pd.DataFrame,
+    protocol: str,
+    fin_params: dict,
+    npv_year: int,
+    target_value: float,
+    metric: str = "tnr",
+) -> float:
+    """
+    Closed-form inverse: TNR and NPV are both exactly linear in net_acres for a
+    fixed protocol, fixed financial params, and fixed npv_year horizon. Run the
+    proforma at acres=1 and acres=10 to recover slope/intercept, then solve.
+
+    For metric="npv" the result is the acreage that hits target_value at the
+    given npv_year horizon under the supplied financial params.
+    """
+    if metric not in _METRIC_TO_SUMMARY_KEY:
+        raise ValueError(
+            f"Unsupported solve metric {metric!r}; expected one of "
+            f"{sorted(_METRIC_TO_SUMMARY_KEY)}."
+        )
+    key = _METRIC_TO_SUMMARY_KEY[metric]
+
+    _, s1 = _proforma_for_protocol(df_cu_protocol, protocol, fin_params, 1.0, npv_year)
+    _, s10 = _proforma_for_protocol(df_cu_protocol, protocol, fin_params, 10.0, npv_year)
+
+    v_1 = float(s1[key])
+    v_10 = float(s10[key])
+
+    slope = (v_10 - v_1) / 9.0
+    if slope == 0:
+        raise ValueError(
+            f"{metric.upper()} is invariant to net_acres (slope=0) — cannot solve. "
+            "Likely the protocol produces no credits for this scenario."
+        )
+    intercept = v_1 - slope * 1.0   # so metric(acres) = slope * acres + intercept
+    target_acres = (target_value - intercept) / slope
+    if target_acres <= 0:
+        raise ValueError(
+            f"Solved acreage is non-positive ({target_acres:.2f}). "
+            f"Target {metric.upper()} {target_value} is unreachable with these inputs."
+        )
+    return float(target_acres)
+
+
+def run_scenario(inputs: dict) -> dict:
+    """
+    End-to-end scenario evaluator.
+
+    inputs is a dict matching ScenarioRequest fields. None-valued fields are
+    backfilled from default_scenario(variant, loccode). Returns a dict matching
+    ScenarioResponse.
+
+    When inputs["solve"] is set, runs the closed-form acreage solver
+    (single protocol only) and returns the verified result.
+    """
+    defaults = default_scenario(inputs["variant"], inputs["loccode"])
+
+    resolved = {**defaults}
+    for key in ("survival", "si", "species_tpa", "pct_level", "net_acres",
+                "protocols", "npv_year"):
+        value = inputs.get(key)
+        if value is not None:
+            resolved[key] = value
+
+    fin_overrides = inputs.get("financial_params")
+    resolved["financial_params"] = _normalize_financial_params(
+        resolved["protocols"], fin_overrides,
+    )
+
+    solve = inputs.get("solve")
+    return_dataframes = bool(inputs.get("return_dataframes", False))
+
+    if solve is not None and len(resolved["protocols"]) != 1:
+        raise ValueError(
+            "Solver mode requires exactly one protocol; got "
+            f"{resolved['protocols']!r}. Pick a single protocol per solve."
+        )
+
+    df_carbon, model_source = _carbon_for_inputs(
+        resolved["variant"], resolved["loccode"],
+        resolved["survival"], resolved["si"],
+        resolved["species_tpa"], resolved["pct_level"],
+    )
+    protocol_rules = _load_base_json("protocol_rules.json")
+    df_cu = compute_carbon_units(df_carbon, resolved["protocols"], protocol_rules)
+
+    summaries: list[dict] = []
+    proforma_frames: list[pd.DataFrame] = []
+
+    for protocol in resolved["protocols"]:
+        fin_params = resolved["financial_params"][protocol]
+        df_cu_p = df_cu[df_cu["Protocol"] == protocol]
+
+        if solve is not None and protocol == resolved["protocols"][0]:
+            target_acres = _solve_acreage_for_metric(
+                df_cu_p, protocol, fin_params, resolved["npv_year"],
+                solve["value"], metric=solve.get("target", "tnr"),
+            )
+            resolved["net_acres"] = target_acres
+
+        net_acres = resolved["net_acres"]
+        df_pf, summary_row = _proforma_for_protocol(
+            df_cu_p, protocol, fin_params, net_acres, resolved["npv_year"],
+        )
+        summaries.append(summary_row)
+        proforma_frames.append(df_pf)
+
+    response: dict = {
+        "inputs": {k: resolved[k] for k in (
+            "variant", "loccode", "survival", "si", "species_tpa",
+            "species_codes", "pct_level", "net_acres", "protocols",
+            "npv_year", "financial_params",
+        )},
+        "summaries": summaries,
+        "model_source": model_source,
+    }
+
+    if return_dataframes and proforma_frames:
+        df_pf_all = pd.concat(proforma_frames, ignore_index=True)
+        response["proforma_rows"] = df_pf_all.to_dict(orient="records")
+        response["carbon_rows"] = df_carbon.to_dict(orient="records")
+        response["cu_rows"] = df_cu.to_dict(orient="records")
+
+    return response

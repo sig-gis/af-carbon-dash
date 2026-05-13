@@ -3,9 +3,12 @@ import json
 import pandas as pd               
 import numpy as np                 
 import numpy_financial as npf     
+from matplotlib import colors as mcolors
 from pathlib import Path           
 from scipy.interpolate import make_interp_spline  
 import altair as alt  
+import plotly.graph_objects as go
+from plotly.colors import qualitative
 import requests
 import os
 from urllib.parse import urlparse
@@ -52,6 +55,13 @@ def _resolve_sub_variants(map_variant: str, loccode: str) -> list[str]:
 API_BASE_URL = get_api_base_url()
 
 CHART_BASE_YEAR = 2024
+HATCH_START_AGE = 40
+HATCH_BG_ALPHA = 0.08
+HATCH_LINE_ALPHA = 0.18
+HATCH_STEP_YEARS = 2.0
+HATCH_SLOPE_YEARS = 4.0
+BASE_LINE_WIDTH = 3.0
+PROTOCOL_ORDER = ["ACR", "CAR", "VERRA", "GS", "ISO"]
 
 # Keep protocol line colors stable regardless of selection/removal order.
 PROTOCOL_COLOR_MAP = {
@@ -61,6 +71,198 @@ PROTOCOL_COLOR_MAP = {
     "GS": "#d62728",
     "ISO": "#9467bd",
 }
+
+
+def _rgba_with_alpha(color: str, alpha: float) -> str:
+    """Convert a matplotlib/hex color into an rgba(...) string with custom alpha."""
+    r, g, b, _ = mcolors.to_rgba(color)
+    return f"rgba({int(r * 255)}, {int(g * 255)}, {int(b * 255)}, {alpha:.3f})"
+
+
+def _add_fading_line_series(
+    fig: go.Figure,
+    series_df: pd.DataFrame,
+    x_col: str,
+    y_col: str,
+    color: str,
+    label: str | None,
+    showlegend: bool,
+    line_dash: str = "solid",
+):
+    """Add a single series to a Plotly figure with constant-opacity lines/markers."""
+    if series_df.empty:
+        return
+
+    x = series_df[x_col].astype(float).to_numpy()
+    y = series_df[y_col].astype(float).to_numpy()
+
+    if len(x) == 1:
+        marker_color = _rgba_with_alpha(color, 1.0)
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=y,
+                mode="markers",
+                marker=dict(color=[marker_color], size=7),
+                name=label,
+                legendgroup=label,
+                showlegend=showlegend,
+                hovertemplate=f"Year: %{{x:.0f}}<br>{y_col}: %{{y:,.2f}}" + (f"<br>Series: {label}" if label else "") + "<extra></extra>",
+            )
+        )
+        return
+
+    for idx in range(len(x) - 1):
+        x0, x1 = x[idx], x[idx + 1]
+        y0, y1 = y[idx], y[idx + 1]
+        fig.add_trace(
+            go.Scatter(
+                x=[x0, x1],
+                y=[y0, y1],
+                mode="lines",
+                line=dict(color=_rgba_with_alpha(color, 1.0), width=BASE_LINE_WIDTH, dash=line_dash),
+                name=label,
+                legendgroup=label,
+                showlegend=showlegend and idx == 0,
+                hoverinfo="skip",
+            )
+        )
+
+    marker_colors = [_rgba_with_alpha(color, 1.0) for _ in x]
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=y,
+            mode="markers",
+            marker=dict(color=marker_colors, size=7),
+            name=label,
+            legendgroup=label,
+            showlegend=False,
+            hovertemplate=f"Year: %{{x:.0f}}<br>{y_col}: %{{y:,.2f}}" + (f"<br>Series: {label}" if label else "") + "<extra></extra>",
+        )
+    )
+
+
+def _plot_fading_line_chart(
+    data: pd.DataFrame,
+    x_col: str,
+    y_col: str,
+    title: str,
+    y_title: str,
+    include_years: list[int],
+    series_col: str | None = None,
+    show_future_hatch: bool = False,
+):
+    """Render a Plotly line chart with optional year-40+ hatch background."""
+    fig = go.Figure()
+
+    hatch_start_year = CHART_BASE_YEAR + HATCH_START_AGE
+    x_end = max(include_years) if include_years else CHART_BASE_YEAR
+    if show_future_hatch and x_end > hatch_start_year and not data.empty and y_col in data.columns:
+        y_series = data[y_col].astype(float).replace([np.inf, -np.inf], np.nan).dropna()
+        if not y_series.empty:
+            y_min = float(y_series.min())
+            y_max = float(y_series.max())
+            if y_min == y_max:
+                pad = max(abs(y_min) * 0.05, 1.0)
+                y_min -= pad
+                y_max += pad
+
+            fig.add_shape(
+                type="rect",
+                x0=hatch_start_year,
+                x1=x_end,
+                y0=y_min,
+                y1=y_max,
+                xref="x",
+                yref="y",
+                line=dict(width=0),
+                fillcolor=f"rgba(120,120,120,{HATCH_BG_ALPHA:.3f})",
+                layer="below",
+            )
+
+            x_cursor = hatch_start_year - (y_max - y_min)
+            while x_cursor < x_end:
+                x0 = max(hatch_start_year, x_cursor)
+                x1 = min(x_end, x_cursor + HATCH_SLOPE_YEARS)
+                if x1 > x0:
+                    fig.add_shape(
+                        type="line",
+                        x0=x0,
+                        y0=y_min,
+                        x1=x1,
+                        y1=y_max,
+                        xref="x",
+                        yref="y",
+                        line=dict(color=f"rgba(90,90,90,{HATCH_LINE_ALPHA:.3f})", width=1),
+                        layer="below",
+                    )
+                x_cursor += HATCH_STEP_YEARS
+
+    if series_col:
+        series_vals = data[series_col].dropna().unique().tolist()
+        protocol_dash_map = {"ACR": "dash", "CAR": "longdash", "VERRA": "dot"}
+        if series_col == "Protocol":
+            ordered = [p for p in PROTOCOL_ORDER if p in series_vals]
+            remaining = [s for s in series_vals if s not in ordered]
+            series_vals = ordered + sorted(remaining)
+        # Keep protocol colors stable regardless of selection order.
+        palette = qualitative.Plotly
+        fallback_cycle = iter(palette)
+        color_map: dict[str, str] = {}
+        for s in series_vals:
+            key = str(s)
+            if key in PROTOCOL_COLOR_MAP:
+                color_map[s] = PROTOCOL_COLOR_MAP[key]
+            else:
+                color_map[s] = next(fallback_cycle, "#7f7f7f")
+
+        for s in series_vals:
+            s_df = data[data[series_col] == s].sort_values(x_col)
+            _add_fading_line_series(
+                fig=fig,
+                series_df=s_df,
+                x_col=x_col,
+                y_col=y_col,
+                color=color_map[s],
+                label=str(s),
+                showlegend=True,
+                line_dash=protocol_dash_map.get(str(s), "solid") if series_col == "Protocol" else "solid",
+            )
+    else:
+        _add_fading_line_series(
+            fig=fig,
+            series_df=data.sort_values(x_col),
+            x_col=x_col,
+            y_col=y_col,
+            color=qualitative.Plotly[0],
+            label=None,
+            showlegend=False,
+        )
+
+    fig.update_layout(
+        title=title,
+        template="plotly_white",
+        height=400,
+        margin=dict(l=20, r=20, t=50, b=20),
+        legend_title=series_col if series_col else None,
+    )
+    fig.update_xaxes(
+        title_text="Year",
+        tickvals=include_years,
+        tickformat="d",
+        tickangle=30,
+        range=[CHART_BASE_YEAR, max(include_years)],
+        showgrid=True,
+        gridcolor="rgba(0,0,0,0.15)",
+    )
+    fig.update_yaxes(
+        title_text=y_title,
+        showgrid=True,
+        gridcolor="rgba(0,0,0,0.15)",
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def _five_year_values(max_year: int, start_year: int = CHART_BASE_YEAR) -> list[int]:
@@ -81,6 +283,67 @@ def _protocol_color_scale(protocols: list[str]) -> alt.Scale:
     color_range.extend(["#7f7f7f"] * len(unknown))
 
     return alt.Scale(domain=domain, range=color_range)
+
+
+def _protocol_dash_scale(protocols: list[str]) -> alt.Scale:
+    """Stable protocol dash mapping while preserving existing colors."""
+    domain = [p for p in protocols if p in PROTOCOL_COLOR_MAP]
+    unknown = [p for p in protocols if p not in PROTOCOL_COLOR_MAP]
+    domain.extend(unknown)
+
+    # ACR/CAR/VERRA get dashed styles; others remain solid.
+    dash_map = {
+        "ACR": [6, 4],
+        "CAR": [10, 4],
+        "VERRA": [2, 3],
+    }
+    dash_range = [dash_map.get(p, [1, 0]) for p in domain]
+    return alt.Scale(domain=domain, range=dash_range)
+
+
+def _build_future_hatch_layers(
+    df: pd.DataFrame,
+    y_col: str,
+    include_years: list[int],
+) -> alt.LayerChart | None:
+    """Create subtle future-period hatch-like background (year 40 onward)."""
+    if df.empty or y_col not in df.columns or not include_years:
+        return None
+
+    hatch_start = CHART_BASE_YEAR + HATCH_START_AGE
+    x_end = max(include_years)
+    if x_end <= hatch_start:
+        return None
+
+    y_series = pd.to_numeric(df[y_col], errors="coerce").dropna()
+    if y_series.empty:
+        return None
+    y_min = float(y_series.min())
+    y_max = float(y_series.max())
+    if y_min == y_max:
+        pad = max(abs(y_min) * 0.05, 1.0)
+        y_min -= pad
+        y_max += pad
+
+    rect_df = pd.DataFrame(
+        [{"x0": hatch_start, "x1": x_end, "y0": y_min, "y1": y_max}]
+    )
+    rect = alt.Chart(rect_df).mark_rect(color="#777777", opacity=0.08).encode(
+        x="x0:Q",
+        x2="x1:Q",
+        y="y0:Q",
+        y2="y1:Q",
+    )
+
+    stripe_years = np.arange(hatch_start, x_end + 0.1, 2.0)
+    stripe_df = pd.DataFrame({"x": stripe_years, "y0": y_min, "y1": y_max})
+    stripes = alt.Chart(stripe_df).mark_rule(color="#666666", opacity=0.18, strokeDash=[2, 3]).encode(
+        x="x:Q",
+        y="y0:Q",
+        y2="y1:Q",
+    )
+
+    return rect + stripes
 
 
 def _prepend_zero_year_row(
@@ -414,27 +677,16 @@ def carbon_units():
         include_years = _five_year_values(plot_df['Year'].max(), start_year=CHART_BASE_YEAR)
         plot_df = plot_df[plot_df['Year'].isin(include_years)]
 
-        CU_chart = alt.Chart(plot_df).mark_line(point=True).encode(
-            x=alt.X(
-                'Year:Q',
-                title='Year',
-                axis=alt.Axis(values=include_years, format='d', labelAngle=30),
-                scale=alt.Scale(domain=[CHART_BASE_YEAR, max(include_years)])
-            ),
-            y=alt.Y('CU:Q', title='CUs ' + chart_title),
-            color=alt.Color(
-                'Protocol:N',
-                title='Protocol',
-                scale=_protocol_color_scale(protocols),
-            ),
-            tooltip=['Year', 'CU', 'Protocol']
-        ).properties(
+        _plot_fading_line_chart(
+            data=plot_df,
+            x_col="Year",
+            y_col="CU",
             title='Annual CU Estimates ' + chart_title,
-            width=600,
-            height=400
-        ).configure_axis(grid=True, gridOpacity=0.3)
-
-        st.altair_chart(CU_chart, use_container_width=True)
+            y_title='CUs ' + chart_title,
+            include_years=include_years,
+            series_col="Protocol",
+            show_future_hatch=True,
+        )
 
         # Display the same interval-filtered values from the chart in table form.
         table_df = (
@@ -465,6 +717,8 @@ def credits_inputs(prefix: str = "credits_") -> dict:
         return {}
 
     defaults = _load_proforma_defaults()
+    net_acres = float(st.session_state.get("net_acres", 0) or 0)
+    synced_num_plots = 200 if net_acres <= 10000 else 250
     table_state_key = f"{prefix}protocol_params"
     protocol_state = st.session_state.get(table_state_key, {})
 
@@ -473,7 +727,7 @@ def credits_inputs(prefix: str = "credits_") -> dict:
     for protocol in protocols:
         if protocol not in protocol_state:
             protocol_state[protocol] = {
-                "num_plots": defaults.get("num_plots", 250),
+                "num_plots": synced_num_plots,
                 "cost_per_cfi_plot": defaults.get("cost_per_cfi_plot", 150),
                 "price_per_ert_initial": defaults.get("price_per_ert_initial", 25.0),
                 "credit_price_increase": defaults.get("credit_price_increase", 2.0),
@@ -485,6 +739,8 @@ def credits_inputs(prefix: str = "credits_") -> dict:
                 "discount_rate": defaults.get("discount_rate", 6.0),
                 "planting_cost": defaults.get("planting_cost", 1000),
             }
+        # Always sync Number of Plots to the current net acres threshold.
+        protocol_state[protocol]["num_plots"] = synced_num_plots
 
     st.session_state[table_state_key] = protocol_state
     st.markdown("Financial Options by Protocol", help=H("credits.expander_subheader"))
@@ -493,6 +749,8 @@ def credits_inputs(prefix: str = "credits_") -> dict:
         [
             {
                 "Protocol": protocol,
+                "planting_cost": protocol_state[protocol]["planting_cost"],
+                "price_per_ert_initial": protocol_state[protocol]["price_per_ert_initial"],
                 "num_plots": protocol_state[protocol]["num_plots"],
                 "cost_per_cfi_plot": protocol_state[protocol]["cost_per_cfi_plot"],
                 "registry_fees": protocol_state[protocol]["registry_fees"],
@@ -501,9 +759,7 @@ def credits_inputs(prefix: str = "credits_") -> dict:
                 "verification_cost": protocol_state[protocol]["verification_cost"],
                 "anticipated_inflation": protocol_state[protocol]["anticipated_inflation"],
                 "discount_rate": protocol_state[protocol]["discount_rate"],
-                "price_per_ert_initial": protocol_state[protocol]["price_per_ert_initial"],
                 "credit_price_increase": protocol_state[protocol]["credit_price_increase"],
-                "planting_cost": protocol_state[protocol]["planting_cost"],
             }
             for protocol in protocols
         ]
@@ -566,6 +822,15 @@ def credits_inputs(prefix: str = "credits_") -> dict:
     st.session_state[f"{prefix}discount_rate"] = first_row["discount_rate"]
     st.session_state[f"{prefix}planting_cost"] = first_row["planting_cost"]
 
+    # NPV year-horizon selector — applies to every protocol in this run.
+    npv_year = st.selectbox(
+        "NPV Year Horizon",
+        options=[10, 15, 20, 25, 30, 35, 40],
+        index=6,  # default to 40
+        key=f"{prefix}npv_year",
+        help=H("credits.inputs.npv_year") or "Number of years from project start over which to discount cashflows for NPV.",
+    )
+
     # constants (constrained by modeling backend)
     year_start = 2024
     years_advance = 35
@@ -587,6 +852,7 @@ def credits_inputs(prefix: str = "credits_") -> dict:
             "planting_cost": values["planting_cost"],
             "year_start": year_start,
             "years_advance": years_advance,
+            "npv_year": int(npv_year),
         }
         for protocol, values in protocol_state.items()
     }
@@ -673,41 +939,28 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
 
     chart_title = "Total" if toggle_nr else "Per Acre"
 
-    chart = (
-        alt.Chart(plot_df)
-        .mark_line(point=True)
-        .encode(
-            x=alt.X(
-                'Year:Q',
-                title='Year',
-                axis=alt.Axis(values=include_years, format='d', labelAngle=30),
-                scale=alt.Scale(domain=[CHART_BASE_YEAR, max(include_years)])
-            ),
-            y=alt.Y('Net_Revenue:Q', title= chart_title + ' Net Revenue'),
-            color=alt.Color(
-                'Protocol:N',
-                title='Protocol',
-                scale=_protocol_color_scale(list(params.keys())),
-            ),
-            tooltip=['Year', 'Net_Revenue', 'Protocol']
-        )
-        .properties(
-            title= chart_title + f' Estimated Credits for {first_params["net_acres"]:,} acres project',
-            width=600,
-            height=400
-        )
-        .configure_axis(grid=True, gridOpacity=0.3)
+    _plot_fading_line_chart(
+        data=plot_df,
+        x_col="Year",
+        y_col="Net_Revenue",
+        title=chart_title + f' Estimated Credits for {first_params["net_acres"]:,} acres project',
+        y_title=chart_title + ' Net Revenue',
+        include_years=include_years,
+        series_col="Protocol",
+        show_future_hatch=True,
     )
 
-    st.altair_chart(chart, use_container_width=True)
-
     summaries_df_display = summaries_df.copy()
+    npv_year_label = int(summaries_df_display['npv_year'].iloc[0])
+    npv_col = f'NPV (Year {npv_year_label})'
+    npv_per_acre_col = f'NPV (Year {npv_year_label}) / Acre'
+
     summaries_df_display['Total Net Revenue, $'] = summaries_df_display['total_net'].map('${:,.2f}'.format)
-    summaries_df_display['NPV (Year 20)'] = summaries_df_display['npv_yr20'].map('${:,.2f}'.format)
-    summaries_df_display['NPV (Year 20) / Acre'] = summaries_df_display['npv_per_acre'].map('${:,.2f}'.format)
+    summaries_df_display[npv_col] = summaries_df_display['npv_yr'].map('${:,.2f}'.format)
+    summaries_df_display[npv_per_acre_col] = summaries_df_display['npv_per_acre'].map('${:,.2f}'.format)
 
     # Keep only the columns to show
-    summaries_df_display = summaries_df_display[['Protocol', 'Total Net Revenue, $', 'NPV (Year 20)', 'NPV (Year 20) / Acre']]
+    summaries_df_display = summaries_df_display[['Protocol', 'Total Net Revenue, $', npv_col, npv_per_acre_col]]
 
     st.subheader("Project Financials Summary", anchor=None, help=H("credits.summary_subheader"), divider=False, width="stretch")
     st.table(summaries_df_display.set_index('Protocol'))
