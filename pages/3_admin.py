@@ -30,8 +30,7 @@ BASE_PATH = APP_ROOT / "conf" / "base"
 
 @st.cache_data
 def _load_variant_species() -> dict:
-    with open(BASE_PATH / "variant_species.json") as f:
-        return json.load(f)
+    return get_store().get_json("config/variant_species.json")
 
 
 @st.cache_data
@@ -42,8 +41,7 @@ def _load_species_labels() -> dict:
 
 @st.cache_data
 def _load_variant_presets() -> dict:
-    with open(BASE_PATH / "FVSVariant_presets.json") as f:
-        return json.load(f)
+    return get_store().get_json("config/FVSVariant_presets.json")
 
 
 @st.cache_data
@@ -427,21 +425,16 @@ def _render_upload_tab(
         registry["models"] = models_list
         store.put_json(registry, "registry.json")
 
-        vs_path = BASE_PATH / "variant_species.json"
-        with open(vs_path) as f:
-            vs_data = json.load(f)
+        vs_data = store.get_json("config/variant_species.json")
         vs_changed = False
         for v, settings in variant_settings.items():
             if vs_data.get(v) != settings["species"]:
                 vs_data[v] = settings["species"]
                 vs_changed = True
         if vs_changed:
-            with open(vs_path, "w") as f:
-                json.dump(vs_data, f, indent=4)
+            store.put_json(vs_data, "config/variant_species.json")
 
-        presets_path = BASE_PATH / "FVSVariant_presets.json"
-        with open(presets_path) as f:
-            presets_data = json.load(f)
+        presets_data = store.get_json("config/FVSVariant_presets.json")
         presets_changed = False
         for v, settings in variant_settings.items():
             new_preset = {
@@ -454,8 +447,7 @@ def _render_upload_tab(
                 presets_data[v] = new_preset
                 presets_changed = True
         if presets_changed:
-            with open(presets_path, "w") as f:
-                json.dump(presets_data, f, indent=4)
+            store.put_json(presets_data, "config/FVSVariant_presets.json")
 
         st.success(
             f"Uploaded **{uploaded_count}** model{'s' if uploaded_count != 1 else ''} "
@@ -735,19 +727,12 @@ def main() -> None:
                     registry["models"] = models_list
                     store.put_json(registry, "registry.json")
 
-                    # Update variant_species.json
-                    vs_path = BASE_PATH / "variant_species.json"
-                    with open(vs_path) as f:
-                        vs_data = json.load(f)
+                    vs_data = store.get_json("config/variant_species.json")
                     if vs_data.get(edit_variant) != edit_species:
                         vs_data[edit_variant] = edit_species
-                        with open(vs_path, "w") as f:
-                            json.dump(vs_data, f, indent=4)
+                        store.put_json(vs_data, "config/variant_species.json")
 
-                    # Update FVSVariant_presets.json
-                    presets_path = BASE_PATH / "FVSVariant_presets.json"
-                    with open(presets_path) as f:
-                        presets_data = json.load(f)
+                    presets_data = store.get_json("config/FVSVariant_presets.json")
                     new_preset = {
                         "survival": edit_survival,
                         "si": edit_si,
@@ -756,8 +741,7 @@ def main() -> None:
                     }
                     if presets_data.get(edit_variant) != new_preset:
                         presets_data[edit_variant] = new_preset
-                        with open(presets_path, "w") as f:
-                            json.dump(presets_data, f, indent=4)
+                        store.put_json(presets_data, "config/FVSVariant_presets.json")
 
                     # Queue selection for next rerun (can't set widget key after render)
                     st.session_state["_pending_edit_select"] = (

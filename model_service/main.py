@@ -17,12 +17,16 @@ import time
 
 from model_service.model import compute_proforma, compute_summaries, compute_carbon_scores, compute_carbon_units, get_fvs_models, predict_fvs_metrics
 from model_service.schemas import ProformaRequest, ProformaResponse, CarbonInputs, CarbonResponse, CarbonUnitsRequest, CarbonUnitsResponse, ReportRequest
-from model_service.store import get_store
+from model_service.store import ModelStore, get_store
 from model_service.geo import get_filtered_geojson
 
 from utils.config import get_api_base_url
 
 logger = logging.getLogger(__name__)
+
+APP_ROOT = Path(__file__).resolve().parent.parent
+BASE_PATH = APP_ROOT / "conf" / "base"
+QUARTO_DIR = APP_ROOT / "model_service" / "quarto"
 
 # Cached filtered GeoJSON (rebuilt on startup)
 _filtered_geojson: dict | None = None
@@ -39,6 +43,32 @@ def refresh_geojson() -> None:
         _filtered_geojson = None
 
 
+_BOOTSTRAP_CONFIG_KEYS: tuple[tuple[str, str], ...] = (
+    ("config/FVSVariant_presets.json", "FVSVariant_presets.json"),
+    ("config/variant_species.json", "variant_species.json"),
+)
+
+
+def _seed_config_if_missing(store: ModelStore) -> None:
+    """Seed dynamic config keys from shipped defaults on first startup."""
+    for key, shipped_name in _BOOTSTRAP_CONFIG_KEYS:
+        try:
+            if store.exists(key):
+                continue
+            shipped_path = BASE_PATH / shipped_name
+            if not shipped_path.exists():
+                logger.warning(
+                    "Cannot seed %s: shipped file %s missing", key, shipped_path
+                )
+                continue
+            with open(shipped_path) as f:
+                data = json.load(f)
+            store.put_json(data, key)
+            logger.info("Seeded %s from shipped defaults", key)
+        except Exception as exc:
+            logger.error("Failed to seed %s: %s", key, exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Load registry and GeoJSON cache on startup. Models are fetched lazily on first use."""
@@ -47,6 +77,8 @@ async def lifespan(app: FastAPI):
 
     registry = store.get_json("registry.json").get("models", [])
     logger.info("Registry loaded: %d models (%.1fs)", len(registry), time.time() - t0)
+
+    _seed_config_if_missing(store)
 
     refresh_geojson()
 
@@ -69,12 +101,6 @@ def normalize_variant(value: str) -> str:
             return variant
     return normalized
 
-# BASE_PATH = Path("conf/base")
-# QUARTO_DIR = Path("model_service/quarto")
-
-APP_ROOT = Path(__file__).resolve().parent.parent
-BASE_PATH = APP_ROOT / "conf" / "base"
-QUARTO_DIR = APP_ROOT / "model_service" / "quarto"
 
 def load_json(filename: str):
     with open(BASE_PATH / filename, "r") as f:
@@ -120,7 +146,7 @@ def get_proforma_presets():
 
 @app.get("/variant/presets")
 def get_variant_presets():
-    return load_json("FVSVariant_presets.json")
+    return get_store().get_json("config/FVSVariant_presets.json")
 
 @app.get("/species/labels")
 def get_species_labels():
@@ -132,7 +158,7 @@ def get_protocol_rules():
 
 @app.get("/variant/species")
 def get_variant_species():
-    return load_json("variant_species.json")
+    return get_store().get_json("config/variant_species.json")
 
 @app.get("/health")
 def health():
