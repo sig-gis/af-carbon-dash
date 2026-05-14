@@ -37,7 +37,7 @@ from model_service.schemas import (
     ScenarioRequest,
     ScenarioResponse,
 )
-from model_service.store import get_store
+from model_service.store import ModelStore, get_store
 from utils.config import get_api_base_url
 
 logger = logging.getLogger(__name__)
