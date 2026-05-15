@@ -37,7 +37,8 @@ from model_service.schemas import (
     ScenarioRequest,
     ScenarioResponse,
 )
-from model_service.store import ModelStore, get_store
+from model_service.config_sync import sync_config_defaults
+from model_service.store import get_store
 from utils.config import get_api_base_url
 
 logger = logging.getLogger(__name__)
@@ -61,32 +62,6 @@ def refresh_geojson() -> None:
         _filtered_geojson = None
 
 
-_BOOTSTRAP_CONFIG_KEYS: tuple[tuple[str, str], ...] = (
-    ("config/FVSVariant_presets.json", "FVSVariant_presets.json"),
-    ("config/variant_species.json", "variant_species.json"),
-)
-
-
-def _seed_config_if_missing(store: ModelStore) -> None:
-    """Seed dynamic config keys from shipped defaults on first startup."""
-    for key, shipped_name in _BOOTSTRAP_CONFIG_KEYS:
-        try:
-            if store.exists(key):
-                continue
-            shipped_path = BASE_PATH / shipped_name
-            if not shipped_path.exists():
-                logger.warning(
-                    "Cannot seed %s: shipped file %s missing", key, shipped_path
-                )
-                continue
-            with open(shipped_path) as f:
-                data = json.load(f)
-            store.put_json(data, key)
-            logger.info("Seeded %s from shipped defaults", key)
-        except Exception as exc:
-            logger.error("Failed to seed %s: %s", key, exc)
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Load registry and GeoJSON cache on startup. Models are fetched lazily on first use."""
@@ -96,7 +71,7 @@ async def lifespan(app: FastAPI):
     registry = store.get_json("registry.json").get("models", [])
     logger.info("Registry loaded: %d models (%.1fs)", len(registry), time.time() - t0)
 
-    _seed_config_if_missing(store)
+    sync_config_defaults(store, BASE_PATH)
 
     refresh_geojson()
 
