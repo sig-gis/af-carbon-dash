@@ -1,23 +1,36 @@
-import streamlit as st           
-import json                       
-import pandas as pd               
-import numpy as np                 
-import numpy_financial as npf     
-from matplotlib import colors as mcolors
-from pathlib import Path           
-from scipy.interpolate import make_interp_spline  
-import altair as alt  
-import plotly.graph_objects as go
-from plotly.colors import qualitative
-import requests
+import json
 import os
+from pathlib import Path
 from urllib.parse import urlparse
 
-from utils.functions.helper import  H
-from utils.functions.statefulness import  _carbon_units_keys, _init_planting_state, _init_carbon_units_state, _backup_keys, _restore_backup, _species_keys, _species_label
-from utils.config import get_api_base_url, normalize_params
+import altair as alt
+import numpy as np
+import numpy_financial as npf
+import pandas as pd
+import plotly.graph_objects as go
+import requests
+import streamlit as st
+from matplotlib import colors as mcolors
+from plotly.colors import qualitative
+from scipy.interpolate import make_interp_spline
 
-from model_service.main import load_variant_presets, load_variant_species, _load_proforma_defaults
+from model_service.main import (
+    _load_proforma_defaults,
+    load_variant_presets,
+    load_variant_species,
+)
+from utils.config import get_api_base_url, normalize_params
+from utils.functions.helper import H
+from utils.functions.slider_bounds import clamp, slider_bounds
+from utils.functions.statefulness import (
+    _backup_keys,
+    _carbon_units_keys,
+    _init_carbon_units_state,
+    _init_planting_state,
+    _restore_backup,
+    _species_keys,
+    _species_label,
+)
 
 
 def _resolve_sub_variants(map_variant: str, loccode: str) -> list[str]:
@@ -39,18 +52,24 @@ def _resolve_sub_variants(map_variant: str, loccode: str) -> list[str]:
     if map_variant in vs and isinstance(vs[map_variant], list):
         candidate_keys = [map_variant]
     else:
-        candidate_keys = sorted(k for k, v in vs.items() if isinstance(v, list) and k.startswith(map_variant + "_"))
+        candidate_keys = sorted(
+            k
+            for k, v in vs.items()
+            if isinstance(v, list) and k.startswith(map_variant + "_")
+        )
 
     if not candidate_keys:
         candidate_keys = [map_variant]
 
     # Filter to sub-variants that have models for this loccode
     available = [
-        k for k in candidate_keys
+        k
+        for k in candidate_keys
         if any(m["variant"] == k and m["loccode"] == loccode for m in registry)
     ]
 
     return available if available else candidate_keys
+
 
 API_BASE_URL = get_api_base_url()
 
@@ -107,7 +126,9 @@ def _add_fading_line_series(
                 name=label,
                 legendgroup=label,
                 showlegend=showlegend,
-                hovertemplate=f"Year: %{{x:.0f}}<br>{y_col}: %{{y:,.2f}}" + (f"<br>Series: {label}" if label else "") + "<extra></extra>",
+                hovertemplate=f"Year: %{{x:.0f}}<br>{y_col}: %{{y:,.2f}}"
+                + (f"<br>Series: {label}" if label else "")
+                + "<extra></extra>",
             )
         )
         return
@@ -120,7 +141,11 @@ def _add_fading_line_series(
                 x=[x0, x1],
                 y=[y0, y1],
                 mode="lines",
-                line=dict(color=_rgba_with_alpha(color, 1.0), width=BASE_LINE_WIDTH, dash=line_dash),
+                line=dict(
+                    color=_rgba_with_alpha(color, 1.0),
+                    width=BASE_LINE_WIDTH,
+                    dash=line_dash,
+                ),
                 name=label,
                 legendgroup=label,
                 showlegend=showlegend and idx == 0,
@@ -138,7 +163,9 @@ def _add_fading_line_series(
             name=label,
             legendgroup=label,
             showlegend=False,
-            hovertemplate=f"Year: %{{x:.0f}}<br>{y_col}: %{{y:,.2f}}" + (f"<br>Series: {label}" if label else "") + "<extra></extra>",
+            hovertemplate=f"Year: %{{x:.0f}}<br>{y_col}: %{{y:,.2f}}"
+            + (f"<br>Series: {label}" if label else "")
+            + "<extra></extra>",
         )
     )
 
@@ -158,7 +185,12 @@ def _plot_fading_line_chart(
 
     hatch_start_year = CHART_BASE_YEAR + HATCH_START_AGE
     x_end = max(include_years) if include_years else CHART_BASE_YEAR
-    if show_future_hatch and x_end > hatch_start_year and not data.empty and y_col in data.columns:
+    if (
+        show_future_hatch
+        and x_end > hatch_start_year
+        and not data.empty
+        and y_col in data.columns
+    ):
         y_series = data[y_col].astype(float).replace([np.inf, -np.inf], np.nan).dropna()
         if not y_series.empty:
             y_min = float(y_series.min())
@@ -194,7 +226,9 @@ def _plot_fading_line_chart(
                         y1=y_max,
                         xref="x",
                         yref="y",
-                        line=dict(color=f"rgba(90,90,90,{HATCH_LINE_ALPHA:.3f})", width=1),
+                        line=dict(
+                            color=f"rgba(90,90,90,{HATCH_LINE_ALPHA:.3f})", width=1
+                        ),
                         layer="below",
                     )
                 x_cursor += HATCH_STEP_YEARS
@@ -227,7 +261,9 @@ def _plot_fading_line_chart(
                 color=color_map[s],
                 label=str(s),
                 showlegend=True,
-                line_dash=protocol_dash_map.get(str(s), "solid") if series_col == "Protocol" else "solid",
+                line_dash=protocol_dash_map.get(str(s), "solid")
+                if series_col == "Protocol"
+                else "solid",
             )
     else:
         _add_fading_line_series(
@@ -325,22 +361,28 @@ def _build_future_hatch_layers(
         y_min -= pad
         y_max += pad
 
-    rect_df = pd.DataFrame(
-        [{"x0": hatch_start, "x1": x_end, "y0": y_min, "y1": y_max}]
-    )
-    rect = alt.Chart(rect_df).mark_rect(color="#777777", opacity=0.08).encode(
-        x="x0:Q",
-        x2="x1:Q",
-        y="y0:Q",
-        y2="y1:Q",
+    rect_df = pd.DataFrame([{"x0": hatch_start, "x1": x_end, "y0": y_min, "y1": y_max}])
+    rect = (
+        alt.Chart(rect_df)
+        .mark_rect(color="#777777", opacity=0.08)
+        .encode(
+            x="x0:Q",
+            x2="x1:Q",
+            y="y0:Q",
+            y2="y1:Q",
+        )
     )
 
     stripe_years = np.arange(hatch_start, x_end + 0.1, 2.0)
     stripe_df = pd.DataFrame({"x": stripe_years, "y0": y_min, "y1": y_max})
-    stripes = alt.Chart(stripe_df).mark_rule(color="#666666", opacity=0.18, strokeDash=[2, 3]).encode(
-        x="x:Q",
-        y="y0:Q",
-        y2="y1:Q",
+    stripes = (
+        alt.Chart(stripe_df)
+        .mark_rule(color="#666666", opacity=0.18, strokeDash=[2, 3])
+        .encode(
+            x="x:Q",
+            y="y0:Q",
+            y2="y1:Q",
+        )
     )
 
     return rect + stripes
@@ -383,6 +425,7 @@ def _prepend_zero_year_rows_by_group(
     out = pd.concat([zero_rows, out], ignore_index=True)
     return out.sort_values([group_col, year_col]).reset_index(drop=True)
 
+
 def _credits_keys(prefix: str = "credits_") -> list[str]:
     """
     Return all proforma input keys (prefixed) that should persist for the Credits section.
@@ -390,6 +433,7 @@ def _credits_keys(prefix: str = "credits_") -> list[str]:
     """
     defaults = _load_proforma_defaults()
     return [prefix + k for k in defaults.keys()]
+
 
 def _seed_defaults(prefix: str = "credits_"):
     """
@@ -400,14 +444,17 @@ def _seed_defaults(prefix: str = "credits_"):
     for k, v in defaults.items():
         st.session_state.setdefault(prefix + k, v)
 
+
 def planting_sliders():
     """
     Render all planting-related Streamlit sliders. Restores saved state, renders species sliders, computes species mix values, and stores
-    all planting parameters in session state. 
+    all planting parameters in session state.
     """
     presets = load_variant_presets()
     map_variant = st.session_state.get("selected_variant", "PN")
-    varloc_name = st.session_state.get("selected_varloc_name", "Olympic National Forest")
+    varloc_name = st.session_state.get(
+        "selected_varloc_name", "Olympic National Forest"
+    )
     varloc_code = st.session_state.get("selected_varloc_code", "609")
 
     # Resolve sub-variants based on what models exist for this loccode
@@ -427,9 +474,24 @@ def planting_sliders():
         st.warning(f"Variant '{variant}' not found in presets. Falling back to 'PN'.")
     preset = presets.get(variant, presets.get("PN", {}))
 
-    st.markdown(f"**FVS Variant:** {map_variant}", unsafe_allow_html=False, help=H("planting.variant_label"), width="stretch")
-    st.markdown(f"**FVS Location Name:** {varloc_name}", unsafe_allow_html=False, help=H("planting.varloc_label"), width="stretch")
-    st.markdown(f"**FVS Location Code:** {varloc_code}", unsafe_allow_html=False, help=H("planting.varcode_label"), width="stretch")
+    st.markdown(
+        f"**FVS Variant:** {map_variant}",
+        unsafe_allow_html=False,
+        help=H("planting.variant_label"),
+        width="stretch",
+    )
+    st.markdown(
+        f"**FVS Location Name:** {varloc_name}",
+        unsafe_allow_html=False,
+        help=H("planting.varloc_label"),
+        width="stretch",
+    )
+    st.markdown(
+        f"**FVS Location Code:** {varloc_code}",
+        unsafe_allow_html=False,
+        help=H("planting.varcode_label"),
+        width="stretch",
+    )
 
     sp_keys = _species_keys(variant)
 
@@ -439,27 +501,64 @@ def planting_sliders():
     # Initialize presets ONLY if the variant truly changed
     _init_planting_state(variant, preset)
 
+    # Per-variant slider bounds. Clamp before rendering to avoid StreamlitValueBelowMinError.
+    bounds = slider_bounds(preset)
+    st.session_state["si"] = clamp(
+        int(st.session_state.get("si", bounds["si_min"])),
+        bounds["si_min"],
+        bounds["si_max"],
+    )
+    st.session_state["survival"] = clamp(
+        int(st.session_state.get("survival", bounds["survival_min"])),
+        bounds["survival_min"],
+        bounds["survival_max"],
+    )
+
     st.number_input(
         "Net Acres:",
         min_value=1,
         step=100,
         key="net_acres",
-        help=H("number.inputs.acres")
+        help=H("number.inputs.acres"),
     )
     st.caption(f"{int(st.session_state.get('net_acres', 0)):,} acres")
-    st.slider("Survival Percentage", 40, 90, key="survival", help=H("planting.slider_survival"))
-    st.slider("Site Index", 96, 137, key="si", help=H("planting.slider_si"))
+    st.slider(
+        "Survival Percentage",
+        bounds["survival_min"],
+        bounds["survival_max"],
+        key="survival",
+        help=H("planting.slider_survival"),
+    )
+    st.slider(
+        "Site Index",
+        bounds["si_min"],
+        bounds["si_max"],
+        key="si",
+        help=H("planting.slider_si"),
+    )
 
-    st.markdown("Species Mix (TPA)", unsafe_allow_html=False, help=H("planting.species_mix_header"), width="stretch")
+    st.markdown(
+        "Species Mix (TPA)",
+        unsafe_allow_html=False,
+        help=H("planting.species_mix_header"),
+        width="stretch",
+    )
     tpa_cap = preset.get("_tpa_cap", 435)
     for i, spk in enumerate(sp_keys):
         st.slider(_species_label(variant, i), 0, tpa_cap, key=spk)
 
     # Summary
     total_tpa = sum(int(st.session_state.get(k, 0)) for k in sp_keys)
-    st.markdown(f"**Total TPA:** {total_tpa}", unsafe_allow_html=False, help=H("planting.total_tpa_label"), width="stretch")
+    st.markdown(
+        f"**Total TPA:** {total_tpa}",
+        unsafe_allow_html=False,
+        help=H("planting.total_tpa_label"),
+        width="stretch",
+    )
     if total_tpa > tpa_cap:
-        st.warning(f"Total initial TPA exceeds {tpa_cap} and may present an unrealistic scenario. Consider adjusting sliders.")
+        st.warning(
+            f"Total initial TPA exceeds {tpa_cap} and may present an unrealistic scenario. Consider adjusting sliders."
+        )
 
     # Store as positional list for the API
     st.session_state["species_tpa"] = [int(st.session_state.get(k, 0)) for k in sp_keys]
@@ -467,8 +566,11 @@ def planting_sliders():
     # Backup latest values so they're available if user navigates away and back
     _backup_keys(["survival", "si", "net_acres", *sp_keys])
 
+
 def carbon_chart():
-    if not all(k in st.session_state for k in ["survival", "si", "net_acres", "species_tpa"]):
+    if not all(
+        k in st.session_state for k in ["survival", "si", "net_acres", "species_tpa"]
+    ):
         st.info("Adjust Planting Design sliders to see the carbon output.")
         return
 
@@ -477,7 +579,9 @@ def carbon_chart():
         st.info("Set at least one species TPA value.")
         return
 
-    variant = st.session_state.get("active_variant", st.session_state.get("selected_variant", "PN"))
+    variant = st.session_state.get(
+        "active_variant", st.session_state.get("selected_variant", "PN")
+    )
     loccode = st.session_state.get("selected_varloc_code", "609")
 
     _PCT_LABELS = {"PCT0": "None", "PCT1": "Light", "PCT2": "Moderate"}
@@ -534,18 +638,55 @@ def carbon_chart():
 
     # Metric definitions: label, column, unit (per-acre), unit (project), scales_with_acres
     METRIC_DEFS = {
-        "ABLD_C":  {"label": "Aboveground live biomass carbon", "unit": "tons",       "unit_project": "tons",     "scales": True},
-        "BA":      {"label": "Basal area",                      "unit": "sq ft/acre", "unit_project": "sq ft",    "scales": True},
-        "QMD":     {"label": "Quadratic mean diameter",         "unit": "inches",     "unit_project": "inches",   "scales": False},
-        "SDI":     {"label": "Stand density index",             "unit": "index",      "unit_project": "index",    "scales": False},
-        "TCuFt":   {"label": "Total cubic volume",             "unit": "cu ft/acre", "unit_project": "cu ft",    "scales": True},
-        "MCuFt":   {"label": "Merchantable cubic volume",      "unit": "cu ft/acre", "unit_project": "cu ft",    "scales": True},
-        "Tpa":     {"label": "Trees per acre",                  "unit": "trees/acre", "unit_project": "trees/acre", "scales": False},
+        "ABLD_C": {
+            "label": "Aboveground live biomass carbon",
+            "unit": "tons",
+            "unit_project": "tons",
+            "scales": True,
+        },
+        "BA": {
+            "label": "Basal area",
+            "unit": "sq ft/acre",
+            "unit_project": "sq ft",
+            "scales": True,
+        },
+        "QMD": {
+            "label": "Quadratic mean diameter",
+            "unit": "inches",
+            "unit_project": "inches",
+            "scales": False,
+        },
+        "SDI": {
+            "label": "Stand density index",
+            "unit": "index",
+            "unit_project": "index",
+            "scales": False,
+        },
+        "TCuFt": {
+            "label": "Total cubic volume",
+            "unit": "cu ft/acre",
+            "unit_project": "cu ft",
+            "scales": True,
+        },
+        "MCuFt": {
+            "label": "Merchantable cubic volume",
+            "unit": "cu ft/acre",
+            "unit_project": "cu ft",
+            "scales": True,
+        },
+        "Tpa": {
+            "label": "Trees per acre",
+            "unit": "trees/acre",
+            "unit_project": "trees/acre",
+            "scales": False,
+        },
     }
 
     available = {col: METRIC_DEFS[col] for col in METRIC_DEFS if col in df.columns}
 
-    toggle_oc = st.toggle('Show Total Project Acreage', True, 'toggle_oc', H("toggle.inputs.acres"))
+    toggle_oc = st.toggle(
+        "Show Total Project Acreage", True, "toggle_oc", H("toggle.inputs.acres")
+    )
     net_acres = st.session_state["net_acres"]
 
     plot_df = df.copy()
@@ -579,131 +720,168 @@ def carbon_chart():
         def _render_metric(label: str):
             col = metric_labels[label]
             meta = available[col]
-            unit = meta["unit_project"] if (toggle_oc and meta["scales"]) else meta["unit"]
-            df_m = _prepend_zero_year_row(plot_df[["Year", col]].copy(), value_col=col, base_year=CHART_BASE_YEAR)
+            unit = (
+                meta["unit_project"] if (toggle_oc and meta["scales"]) else meta["unit"]
+            )
+            df_m = _prepend_zero_year_row(
+                plot_df[["Year", col]].copy(), value_col=col, base_year=CHART_BASE_YEAR
+            )
             inc = _five_year_values(df_m["Year"].max(), start_year=CHART_BASE_YEAR)
             df_m = df_m[df_m["Year"].isin(inc)]
             chart = (
-                alt.Chart(df_m).mark_line(point=True).encode(
-                    x=alt.X("Year:Q", title="Year", axis=alt.Axis(values=inc, format="d", labelAngle=30),
-                            scale=alt.Scale(domain=[CHART_BASE_YEAR, max(inc)])),
+                alt.Chart(df_m)
+                .mark_line(point=True)
+                .encode(
+                    x=alt.X(
+                        "Year:Q",
+                        title="Year",
+                        axis=alt.Axis(values=inc, format="d", labelAngle=30),
+                        scale=alt.Scale(domain=[CHART_BASE_YEAR, max(inc)]),
+                    ),
                     y=alt.Y(f"{col}:Q", title=f"{label} ({unit})"),
                     tooltip=["Year", col],
-                ).properties(title=label, height=350)
+                )
+                .properties(title=label, height=350)
             )
             st.altair_chart(chart, use_container_width=True)
             # QMD disclaimer per Dave: 2029 values are unreliable
             if col == "QMD":
-                st.caption("Note: QMD predictions at year 2029 are unreliable and should be interpreted with caution.")
+                st.caption(
+                    "Note: QMD predictions at year 2029 are unreliable and should be interpreted with caution."
+                )
 
         _render_metric(primary_label)
         st.divider()
         _render_metric(secondary_label)
     else:
         # Coefficient fallback: single ABLD_C chart
-        chart_title = "Onsite Carbon (tons/project)" if toggle_oc else "Onsite Carbon (tons/acre)"
-        plot_df = _prepend_zero_year_row(plot_df, value_col="ABLD_C", base_year=CHART_BASE_YEAR)
-        include_years = _five_year_values(plot_df["Year"].max(), start_year=CHART_BASE_YEAR)
+        chart_title = (
+            "Onsite Carbon (tons/project)" if toggle_oc else "Onsite Carbon (tons/acre)"
+        )
+        plot_df = _prepend_zero_year_row(
+            plot_df, value_col="ABLD_C", base_year=CHART_BASE_YEAR
+        )
+        include_years = _five_year_values(
+            plot_df["Year"].max(), start_year=CHART_BASE_YEAR
+        )
         plot_df = plot_df[plot_df["Year"].isin(include_years)]
 
-        line = alt.Chart(plot_df).mark_line(point=True).encode(
-            x=alt.X('Year:Q', title='Year',
-                     axis=alt.Axis(values=include_years, format='d', labelAngle=30),
-                     scale=alt.Scale(domain=[CHART_BASE_YEAR, max(include_years)])),
-            y=alt.Y('ABLD_C:Q', title=chart_title),
-            tooltip=['Year', 'ABLD_C']
-        ).properties(title="Cumulative " + chart_title, width=600, height=400)
+        line = (
+            alt.Chart(plot_df)
+            .mark_line(point=True)
+            .encode(
+                x=alt.X(
+                    "Year:Q",
+                    title="Year",
+                    axis=alt.Axis(values=include_years, format="d", labelAngle=30),
+                    scale=alt.Scale(domain=[CHART_BASE_YEAR, max(include_years)]),
+                ),
+                y=alt.Y("ABLD_C:Q", title=chart_title),
+                tooltip=["Year", "ABLD_C"],
+            )
+            .properties(title="Cumulative " + chart_title, width=600, height=400)
+        )
         st.altair_chart(line, use_container_width=True)
 
     # Summary output
     if "ABLD_C" in plot_df.columns:
-        st.success(f"Final Carbon Output (year {int(plot_df['Year'].max())}): {plot_df['ABLD_C'].iloc[-1]:,.2f}")
+        st.success(
+            f"Final Carbon Output (year {int(plot_df['Year'].max())}): {plot_df['ABLD_C'].iloc[-1]:,.2f}"
+        )
 
     if model_source == "coefficients":
-        st.caption("Using coefficient-based estimates. Add FVS model files for richer predictions.")
+        st.caption(
+            "Using coefficient-based estimates. Add FVS model files for richer predictions."
+        )
+
 
 def carbon_units():
-        if "carbon_df" not in st.session_state:
-            st.error("No carbon data found.")
-            st.stop()
+    if "carbon_df" not in st.session_state:
+        st.error("No carbon data found.")
+        st.stop()
 
-        protocols = st.session_state.get(
-            "carbon_units_inputs", {}
-        ).get("protocols", [])
+    protocols = st.session_state.get("carbon_units_inputs", {}).get("protocols", [])
 
-        if not protocols:
-            st.info("Select at least one protocol.")
-            return
+    if not protocols:
+        st.info("Select at least one protocol.")
+        return
 
-        payload = {
-            "carbon_rows": st.session_state.carbon_df[
-                ["Year", "ABLD_C"]
-            ].to_dict(orient="records"),
-            "protocols": protocols,
-        }
+    payload = {
+        "carbon_rows": st.session_state.carbon_df[["Year", "ABLD_C"]].to_dict(
+            orient="records"
+        ),
+        "protocols": protocols,
+    }
 
-        json.dumps(payload) 
+    json.dumps(payload)
 
-        resp = requests.post(
-            f"{API_BASE_URL}/carbon/units",
-            json=payload,
-            timeout=10,
+    resp = requests.post(
+        f"{API_BASE_URL}/carbon/units",
+        json=payload,
+        timeout=10,
+    )
+    resp.raise_for_status()
+
+    final_df = pd.DataFrame(resp.json()["rows"])
+
+    if final_df.empty:
+        st.error("No protocols selected or no data available to plot.")
+        return
+
+    st.session_state.merged_df = final_df
+
+    toggle_ce = st.toggle(
+        "Show Total Project Acreage", True, "toggle_ce", H("toggle.inputs.acres")
+    )
+
+    # Adjust chart values based on toggle
+    plot_df = final_df.copy()
+    if toggle_ce:
+        plot_df["CU"] = plot_df["CU"] * st.session_state["net_acres"]
+
+    chart_title = "(tons/project)" if toggle_ce else "(tons/acre)"
+
+    plot_df = _prepend_zero_year_rows_by_group(
+        plot_df,
+        group_col="Protocol",
+        value_col="CU",
+        base_year=CHART_BASE_YEAR,
+    )
+    include_years = _five_year_values(plot_df["Year"].max(), start_year=CHART_BASE_YEAR)
+    plot_df = plot_df[plot_df["Year"].isin(include_years)]
+
+    _plot_fading_line_chart(
+        data=plot_df,
+        x_col="Year",
+        y_col="CU",
+        title="Annual CU Estimates " + chart_title,
+        y_title="CUs " + chart_title,
+        include_years=include_years,
+        series_col="Protocol",
+        show_future_hatch=True,
+    )
+
+    # Display the same interval-filtered values from the chart in table form.
+    table_df = (
+        plot_df.pivot_table(
+            index="Year", columns="Protocol", values="CU", aggfunc="first"
         )
-        resp.raise_for_status()
+        .reindex(columns=protocols)
+        .reset_index()
+        .sort_values("Year")
+    )
 
-        final_df = pd.DataFrame(resp.json()["rows"])
-
-        if final_df.empty:
-            st.error("No protocols selected or no data available to plot.")
-            return
-        
-        st.session_state.merged_df = final_df
-
-        toggle_ce = st.toggle('Show Total Project Acreage', True, 'toggle_ce', H("toggle.inputs.acres"))
-
-        # Adjust chart values based on toggle
-        plot_df = final_df.copy()
-        if toggle_ce:
-            plot_df['CU'] = plot_df['CU'] * st.session_state["net_acres"]
-
-        chart_title = "(tons/project)" if toggle_ce else "(tons/acre)"
-
-        plot_df = _prepend_zero_year_rows_by_group(
-            plot_df,
-            group_col='Protocol',
-            value_col='CU',
-            base_year=CHART_BASE_YEAR,
-        )
-        include_years = _five_year_values(plot_df['Year'].max(), start_year=CHART_BASE_YEAR)
-        plot_df = plot_df[plot_df['Year'].isin(include_years)]
-
-        _plot_fading_line_chart(
-            data=plot_df,
-            x_col="Year",
-            y_col="CU",
-            title='Annual CU Estimates ' + chart_title,
-            y_title='CUs ' + chart_title,
-            include_years=include_years,
-            series_col="Protocol",
-            show_future_hatch=True,
+    if not table_df.empty:
+        table_df["Year"] = table_df["Year"].astype(int)
+        st.markdown("**Annual CU Estimates**")
+        st.dataframe(
+            table_df.style.format(
+                {col: "{:,.2f}" for col in table_df.columns if col != "Year"}
+            ),
+            use_container_width=True,
+            hide_index=True,
         )
 
-        # Display the same interval-filtered values from the chart in table form.
-        table_df = (
-            plot_df.pivot_table(index="Year", columns="Protocol", values="CU", aggfunc="first")
-            .reindex(columns=protocols)
-            .reset_index()
-            .sort_values("Year")
-        )
-
-        if not table_df.empty:
-            table_df["Year"] = table_df["Year"].astype(int)
-            st.markdown("**Annual CU Estimates**")
-            st.dataframe(
-                table_df.style.format({col: "{:,.2f}" for col in table_df.columns if col != "Year"}),
-                use_container_width=True,
-                hide_index=True,
-            )
 
 def credits_inputs(prefix: str = "credits_") -> dict:
     """
@@ -713,7 +891,9 @@ def credits_inputs(prefix: str = "credits_") -> dict:
     protocols = st.session_state.get("carbon_units_inputs", {}).get("protocols", [])
 
     if not protocols:
-        st.info("Select at least one protocol in Carbon Estimates to edit project financial assumptions.")
+        st.info(
+            "Select at least one protocol in Carbon Estimates to edit project financial assumptions."
+        )
         return {}
 
     defaults = _load_proforma_defaults()
@@ -750,16 +930,24 @@ def credits_inputs(prefix: str = "credits_") -> dict:
             {
                 "Protocol": protocol,
                 "planting_cost": protocol_state[protocol]["planting_cost"],
-                "price_per_ert_initial": protocol_state[protocol]["price_per_ert_initial"],
+                "price_per_ert_initial": protocol_state[protocol][
+                    "price_per_ert_initial"
+                ],
                 "num_plots": protocol_state[protocol]["num_plots"],
                 "cost_per_cfi_plot": protocol_state[protocol]["cost_per_cfi_plot"],
                 "registry_fees": protocol_state[protocol]["registry_fees"],
-                "issuance_fee_per_ert": protocol_state[protocol]["issuance_fee_per_ert"],
+                "issuance_fee_per_ert": protocol_state[protocol][
+                    "issuance_fee_per_ert"
+                ],
                 "validation_cost": protocol_state[protocol]["validation_cost"],
                 "verification_cost": protocol_state[protocol]["verification_cost"],
-                "anticipated_inflation": protocol_state[protocol]["anticipated_inflation"],
+                "anticipated_inflation": protocol_state[protocol][
+                    "anticipated_inflation"
+                ],
                 "discount_rate": protocol_state[protocol]["discount_rate"],
-                "credit_price_increase": protocol_state[protocol]["credit_price_increase"],
+                "credit_price_increase": protocol_state[protocol][
+                    "credit_price_increase"
+                ],
             }
             for protocol in protocols
         ]
@@ -774,17 +962,83 @@ def credits_inputs(prefix: str = "credits_") -> dict:
         disabled=["Protocol"],
         column_config={
             "Protocol": st.column_config.TextColumn("Protocol"),
-            "num_plots": st.column_config.NumberColumn("Plots", min_value=1, step=1, format="%d", help=H("credits.inputs.num_plots")),
-            "cost_per_cfi_plot": st.column_config.NumberColumn("Cost/CFI Plot", min_value=1, step=1, format="$ %.2f", help=H("credits.inputs.cost_per_cfi_plot")),
-            "registry_fees": st.column_config.NumberColumn("Registry Fee", min_value=0.0, step=1, format="$ %.2f", help=H("credits.inputs.registry_fees")),
-            "issuance_fee_per_ert": st.column_config.NumberColumn("Issuance Fee", min_value=0.0, step=0.01, format="$ %.4f", help=H("credits.inputs.issuance_fee_per_ert")),
-            "validation_cost": st.column_config.NumberColumn("Validation Cost", min_value=0.0, step=1, format="$ %.2f", help=H("credits.inputs.validation_cost")),
-            "verification_cost": st.column_config.NumberColumn("Verification Cost", min_value=0.0, step=1, format="$ %.2f", help=H("credits.inputs.verification_cost")),
-            "anticipated_inflation": st.column_config.NumberColumn("Anticipated Inflation", min_value=0.0, step=0.1, format="%.2f", help=H("credits.inputs.anticipated_inflation")),
-            "discount_rate": st.column_config.NumberColumn("Discount Rate", min_value=0.0, step=0.1, format="%.2f", help=H("credits.inputs.discount_rate")),
-            "price_per_ert_initial": st.column_config.NumberColumn("Initial Price / CU", min_value=0.0, step=0.1, format="$ %.2f", help=H("credits.inputs.price_per_ert_initial")),
-            "credit_price_increase": st.column_config.NumberColumn("Credit Price Increase", min_value=0.0, step=0.1, format="%.2f", help=H("credits.inputs.credit_price_increase")),
-            "planting_cost": st.column_config.NumberColumn("Initial Planting Cost", min_value=0.0, step=100, format="$ %.2f", help=H("credits.inputs.planting_cost")),
+            "num_plots": st.column_config.NumberColumn(
+                "Plots",
+                min_value=1,
+                step=1,
+                format="%d",
+                help=H("credits.inputs.num_plots"),
+            ),
+            "cost_per_cfi_plot": st.column_config.NumberColumn(
+                "Cost/CFI Plot",
+                min_value=1,
+                step=1,
+                format="$ %.2f",
+                help=H("credits.inputs.cost_per_cfi_plot"),
+            ),
+            "registry_fees": st.column_config.NumberColumn(
+                "Registry Fee",
+                min_value=0.0,
+                step=1,
+                format="$ %.2f",
+                help=H("credits.inputs.registry_fees"),
+            ),
+            "issuance_fee_per_ert": st.column_config.NumberColumn(
+                "Issuance Fee",
+                min_value=0.0,
+                step=0.01,
+                format="$ %.4f",
+                help=H("credits.inputs.issuance_fee_per_ert"),
+            ),
+            "validation_cost": st.column_config.NumberColumn(
+                "Validation Cost",
+                min_value=0.0,
+                step=1,
+                format="$ %.2f",
+                help=H("credits.inputs.validation_cost"),
+            ),
+            "verification_cost": st.column_config.NumberColumn(
+                "Verification Cost",
+                min_value=0.0,
+                step=1,
+                format="$ %.2f",
+                help=H("credits.inputs.verification_cost"),
+            ),
+            "anticipated_inflation": st.column_config.NumberColumn(
+                "Anticipated Inflation",
+                min_value=0.0,
+                step=0.1,
+                format="%.2f",
+                help=H("credits.inputs.anticipated_inflation"),
+            ),
+            "discount_rate": st.column_config.NumberColumn(
+                "Discount Rate",
+                min_value=0.0,
+                step=0.1,
+                format="%.2f",
+                help=H("credits.inputs.discount_rate"),
+            ),
+            "price_per_ert_initial": st.column_config.NumberColumn(
+                "Initial Price / CU",
+                min_value=0.0,
+                step=0.1,
+                format="$ %.2f",
+                help=H("credits.inputs.price_per_ert_initial"),
+            ),
+            "credit_price_increase": st.column_config.NumberColumn(
+                "Credit Price Increase",
+                min_value=0.0,
+                step=0.1,
+                format="%.2f",
+                help=H("credits.inputs.credit_price_increase"),
+            ),
+            "planting_cost": st.column_config.NumberColumn(
+                "Initial Planting Cost",
+                min_value=0.0,
+                step=100,
+                format="$ %.2f",
+                help=H("credits.inputs.planting_cost"),
+            ),
         },
     )
 
@@ -812,13 +1066,21 @@ def credits_inputs(prefix: str = "credits_") -> dict:
     first_row = protocol_state[first_protocol]
     st.session_state[f"{prefix}num_plots"] = first_row["num_plots"]
     st.session_state[f"{prefix}cost_per_cfi_plot"] = first_row["cost_per_cfi_plot"]
-    st.session_state[f"{prefix}price_per_ert_initial"] = first_row["price_per_ert_initial"]
-    st.session_state[f"{prefix}credit_price_increase"] = first_row["credit_price_increase"]
+    st.session_state[f"{prefix}price_per_ert_initial"] = first_row[
+        "price_per_ert_initial"
+    ]
+    st.session_state[f"{prefix}credit_price_increase"] = first_row[
+        "credit_price_increase"
+    ]
     st.session_state[f"{prefix}registry_fees"] = first_row["registry_fees"]
     st.session_state[f"{prefix}validation_cost"] = first_row["validation_cost"]
     st.session_state[f"{prefix}verification_cost"] = first_row["verification_cost"]
-    st.session_state[f"{prefix}issuance_fee_per_ert"] = first_row["issuance_fee_per_ert"]
-    st.session_state[f"{prefix}anticipated_inflation"] = first_row["anticipated_inflation"]
+    st.session_state[f"{prefix}issuance_fee_per_ert"] = first_row[
+        "issuance_fee_per_ert"
+    ]
+    st.session_state[f"{prefix}anticipated_inflation"] = first_row[
+        "anticipated_inflation"
+    ]
     st.session_state[f"{prefix}discount_rate"] = first_row["discount_rate"]
     st.session_state[f"{prefix}planting_cost"] = first_row["planting_cost"]
 
@@ -828,7 +1090,8 @@ def credits_inputs(prefix: str = "credits_") -> dict:
         options=[10, 15, 20, 25, 30, 35, 40],
         index=6,  # default to 40
         key=f"{prefix}npv_year",
-        help=H("credits.inputs.npv_year") or "Number of years from project start over which to discount cashflows for NPV.",
+        help=H("credits.inputs.npv_year")
+        or "Number of years from project start over which to discount cashflows for NPV.",
     )
 
     # constants (constrained by modeling backend)
@@ -857,22 +1120,27 @@ def credits_inputs(prefix: str = "credits_") -> dict:
         for protocol, values in protocol_state.items()
     }
 
+
 def credits_results(params: dict, prefix: str = "credits_") -> dict:
     """
     Execute the proforma model, summarize financial outputs, render revenue
     charts, generate summary tables, and provide formatted CSV export.
     """
     if "merged_df" not in st.session_state:
-        st.error("No carbon data found. Return to the Carbon Units Estimate section first.")
+        st.error(
+            "No carbon data found. Return to the Carbon Units Estimate section first."
+        )
         st.stop()
 
     # Extract merged CU data per protocol
-    df_ert_ac_all = st.session_state.merged_df[['Year', 'CU', 'Protocol']].copy()
+    df_ert_ac_all = st.session_state.merged_df[["Year", "CU", "Protocol"]].copy()
     df_ert_ac_all = df_ert_ac_all.replace([np.inf, -np.inf], np.nan)
-    df_ert_ac_all = df_ert_ac_all.dropna(subset=['CU'])
+    df_ert_ac_all = df_ert_ac_all.dropna(subset=["CU"])
 
     if not params:
-        st.info("No protocol financial assumptions available. Select at least one protocol.")
+        st.info(
+            "No protocol financial assumptions available. Select at least one protocol."
+        )
         return None
 
     proforma_frames = []
@@ -906,15 +1174,15 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
     df_pf = pd.concat(proforma_frames, ignore_index=True)
 
     # Drop rows with NaN Net_Revenue to avoid chart issues
-    df_pf = df_pf.dropna(subset=['Net_Revenue'])
+    df_pf = df_pf.dropna(subset=["Net_Revenue"])
 
     # Store proforma outputs for report generation
     st.session_state["proforma_df"] = df_pf.copy()
 
     # Summary metrics per protocol
     first_params = next(iter(params.values()))
-    year_start = first_params['year_start']
-    year_stop = int(df_pf['Year'].max())
+    year_start = first_params["year_start"]
+    year_stop = int(df_pf["Year"].max())
 
     summaries_df = pd.concat(summary_frames, ignore_index=True)
 
@@ -922,20 +1190,22 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
     include_years = _five_year_values(year_stop, start_year=CHART_BASE_YEAR)
     df_chart = _prepend_zero_year_rows_by_group(
         df_pf,
-        group_col='Protocol',
-        value_col='Net_Revenue',
+        group_col="Protocol",
+        value_col="Net_Revenue",
         base_year=CHART_BASE_YEAR,
     )
-    df_chart = df_chart[df_chart['Year'].isin(include_years)]
+    df_chart = df_chart[df_chart["Year"].isin(include_years)]
 
     plot_df = df_chart.copy()
 
-    toggle_nr = st.toggle('Show Total Project Acreage', True, 'toggle_nr', H("toggle.inputs.acres"))
+    toggle_nr = st.toggle(
+        "Show Total Project Acreage", True, "toggle_nr", H("toggle.inputs.acres")
+    )
 
     if toggle_nr:
-        plot_df['Net_Revenue'] = plot_df['Net_Revenue']
-    else :
-        plot_df['Net_Revenue'] = plot_df['Net_Revenue'] / first_params["net_acres"]
+        plot_df["Net_Revenue"] = plot_df["Net_Revenue"]
+    else:
+        plot_df["Net_Revenue"] = plot_df["Net_Revenue"] / first_params["net_acres"]
 
     chart_title = "Total" if toggle_nr else "Per Acre"
 
@@ -943,27 +1213,42 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
         data=plot_df,
         x_col="Year",
         y_col="Net_Revenue",
-        title=chart_title + f' Estimated Credits for {first_params["net_acres"]:,} acres project',
-        y_title=chart_title + ' Net Revenue',
+        title=chart_title
+        + f" Estimated Credits for {first_params['net_acres']:,} acres project",
+        y_title=chart_title + " Net Revenue",
         include_years=include_years,
         series_col="Protocol",
         show_future_hatch=True,
     )
 
     summaries_df_display = summaries_df.copy()
-    npv_year_label = int(summaries_df_display['npv_year'].iloc[0])
-    npv_col = f'NPV (Year {npv_year_label})'
-    npv_per_acre_col = f'NPV (Year {npv_year_label}) / Acre'
+    npv_year_label = int(summaries_df_display["npv_year"].iloc[0])
+    npv_col = f"NPV (Year {npv_year_label})"
+    npv_per_acre_col = f"NPV (Year {npv_year_label}) / Acre"
 
-    summaries_df_display['Total Net Revenue, $'] = summaries_df_display['total_net'].map('${:,.2f}'.format)
-    summaries_df_display[npv_col] = summaries_df_display['npv_yr'].map('${:,.2f}'.format)
-    summaries_df_display[npv_per_acre_col] = summaries_df_display['npv_per_acre'].map('${:,.2f}'.format)
+    summaries_df_display["Total Net Revenue, $"] = summaries_df_display[
+        "total_net"
+    ].map("${:,.2f}".format)
+    summaries_df_display[npv_col] = summaries_df_display["npv_yr"].map(
+        "${:,.2f}".format
+    )
+    summaries_df_display[npv_per_acre_col] = summaries_df_display["npv_per_acre"].map(
+        "${:,.2f}".format
+    )
 
     # Keep only the columns to show
-    summaries_df_display = summaries_df_display[['Protocol', 'Total Net Revenue, $', npv_col, npv_per_acre_col]]
+    summaries_df_display = summaries_df_display[
+        ["Protocol", "Total Net Revenue, $", npv_col, npv_per_acre_col]
+    ]
 
-    st.subheader("Project Financials Summary", anchor=None, help=H("credits.summary_subheader"), divider=False, width="stretch")
-    st.table(summaries_df_display.set_index('Protocol'))
+    st.subheader(
+        "Project Financials Summary",
+        anchor=None,
+        help=H("credits.summary_subheader"),
+        divider=False,
+        width="stretch",
+    )
+    st.table(summaries_df_display.set_index("Protocol"))
 
     # CSV download
     st.download_button(
@@ -972,18 +1257,18 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
         file_name="credits_proforma.csv",
         mime="text/csv",
         use_container_width=True,
-        help=H("credits.download_button")
+        help=H("credits.download_button"),
     )
 
     st.markdown(
         "Generate a comprehensive PDF report of your project analysis.",
-        help=H("reports.generate_report_description")
+        help=H("reports.generate_report_description"),
     )
     if st.button(
         "Generate Project Report",
         use_container_width=True,
         type="primary",
-        help=H("reports.generate_report_button")
+        help=H("reports.generate_report_button"),
     ):
         pdf_data = generate_report()
         if pdf_data:
@@ -1000,6 +1285,7 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
             key="download_project_report_pdf",
         )
 
+
 def generate_report():
     """
     Collect project data and request PDF report from the Quarto API.
@@ -1012,29 +1298,56 @@ def generate_report():
         st.error("No carbon data found. Return to the Carbon Estimates section first.")
         return None
     if "proforma_df" not in st.session_state:
-        st.error("No financial data found. Return to the Project Financials section first.")
+        st.error(
+            "No financial data found. Return to the Project Financials section first."
+        )
         return None
-    
-    
-    
+
     # Collect data for the report
     # Planting design - using static values for now (can be made dynamic later)
     planting_design = [
         {"column1": "Reforestation Strategy", "column2": "Mixed Species Planting"},
-        {"column1": "Variant", "column2": st.session_state.get("selected_variant", "PN")},
-        {"column1": "Location Name", "column2": st.session_state.get("selected_varloc_name", "Olympic National Forest")},
-        {"column1": "Location Code", "column2": st.session_state.get("selected_varloc_code", "609")},
-        {"column1": "Area, acres", "column2": str(st.session_state.get('net_acres', 10000))},
-        {"column1": "Survival Rate, %", "column2": st.session_state.get('survival', 70)},
-        {"column1": "Site Index", "column2": str(st.session_state.get('si', 120))},
-        {"column1": "Included Protocols", "column2": ", ".join(st.session_state.get("carbon_units_inputs", {}).get("protocols", []))},
+        {
+            "column1": "Variant",
+            "column2": st.session_state.get("selected_variant", "PN"),
+        },
+        {
+            "column1": "Location Name",
+            "column2": st.session_state.get(
+                "selected_varloc_name", "Olympic National Forest"
+            ),
+        },
+        {
+            "column1": "Location Code",
+            "column2": st.session_state.get("selected_varloc_code", "609"),
+        },
+        {
+            "column1": "Area, acres",
+            "column2": str(st.session_state.get("net_acres", 10000)),
+        },
+        {
+            "column1": "Survival Rate, %",
+            "column2": st.session_state.get("survival", 70),
+        },
+        {"column1": "Site Index", "column2": str(st.session_state.get("si", 120))},
+        {
+            "column1": "Included Protocols",
+            "column2": ", ".join(
+                st.session_state.get("carbon_units_inputs", {}).get("protocols", [])
+            ),
+        },
         {"column1": "PCT Level", "column2": st.session_state.get("pct_level", "PCT0")},
-        {"column1": "PCT Retention, %", "column2": str(st.session_state.get("pct_retention", ""))},
+        {
+            "column1": "PCT Retention, %",
+            "column2": str(st.session_state.get("pct_retention", "")),
+        },
     ]
 
     # Species mix — built dynamically from variant species config
     species_mix = []
-    species_mix.append({"column1": "Species", "column2": "TPA#footnote[Trees per Acre]"})
+    species_mix.append(
+        {"column1": "Species", "column2": "TPA#footnote[Trees per Acre]"}
+    )
     selected_variant = st.session_state.get("selected_variant", "PN")
     sp_keys = _species_keys(selected_variant)
     for i, key in enumerate(sp_keys):
@@ -1045,35 +1358,72 @@ def generate_report():
 
     # Financial options 1
     financial_options1 = [
-        {"column1": "Number of Plots", "column2": str(st.session_state.get('credits_num_plots', 1))},
-        {"column1": "Cost per CFI Plot, $", "column2": str(st.session_state.get('credits_cost_per_cfi_plot', 1))},
-        {"column1": "Initial Price per CU, $", "column2": str(st.session_state.get('credits_price_per_ert_initial', 1.0))},
-        {"column1": "Credit Price Increase, %", "column2": str(st.session_state.get('credits_credit_price_increase', 0.0))},
-        {"column1": "Validation Cost, $", "column2": str(st.session_state.get('credits_validation_cost', 1))},
-        {"column1": "Verification Cost, $", "column2": str(st.session_state.get('credits_verification_cost', 1))},        
+        {
+            "column1": "Number of Plots",
+            "column2": str(st.session_state.get("credits_num_plots", 1)),
+        },
+        {
+            "column1": "Cost per CFI Plot, $",
+            "column2": str(st.session_state.get("credits_cost_per_cfi_plot", 1)),
+        },
+        {
+            "column1": "Initial Price per CU, $",
+            "column2": str(st.session_state.get("credits_price_per_ert_initial", 1.0)),
+        },
+        {
+            "column1": "Credit Price Increase, %",
+            "column2": str(st.session_state.get("credits_credit_price_increase", 0.0)),
+        },
+        {
+            "column1": "Validation Cost, $",
+            "column2": str(st.session_state.get("credits_validation_cost", 1)),
+        },
+        {
+            "column1": "Verification Cost, $",
+            "column2": str(st.session_state.get("credits_verification_cost", 1)),
+        },
     ]
 
     # Financial options 2
     financial_options2 = [
-        {"column1": "Registry Fees, $", "column2": str(st.session_state.get('credits_registry_fees', 1))},
-        {"column1": "Issuance Fee per CU, $", "column2": str(st.session_state.get('credits_issuance_fee_per_ert', 0.0))},
-        {"column1": "Anticipated Inflation, %", "column2": str(st.session_state.get('credits_anticipated_inflation', 0.0))},
-        {"column1": "Discount Rate, %", "column2": str(st.session_state.get('credits_discount_rate', 0.0))},
-        {"column1": "Initial Planting Cost, $", "column2": str(st.session_state.get('credits_planting_cost', 1000))},
+        {
+            "column1": "Registry Fees, $",
+            "column2": str(st.session_state.get("credits_registry_fees", 1)),
+        },
+        {
+            "column1": "Issuance Fee per CU, $",
+            "column2": str(st.session_state.get("credits_issuance_fee_per_ert", 0.0)),
+        },
+        {
+            "column1": "Anticipated Inflation, %",
+            "column2": str(st.session_state.get("credits_anticipated_inflation", 0.0)),
+        },
+        {
+            "column1": "Discount Rate, %",
+            "column2": str(st.session_state.get("credits_discount_rate", 0.0)),
+        },
+        {
+            "column1": "Initial Planting Cost, $",
+            "column2": str(st.session_state.get("credits_planting_cost", 1000)),
+        },
     ]
 
     # Carbon data from merged_df - map to expected column names
-    carbon_df = st.session_state.merged_df[['Year', 'CU', 'Protocol']].copy()
-    carbon_df = carbon_df.rename(columns={'CU': 'CUs'})
+    carbon_df = st.session_state.merged_df[["Year", "CU", "Protocol"]].copy()
+    carbon_df = carbon_df.rename(columns={"CU": "CUs"})
 
     # Annual CO2 per acre derived from carbon scores (no protocol split)
     carbon_scores = st.session_state.carbon_df[["Year", "Annual_ABLD_C"]].copy()
     carbon_scores["Annual CO2 per acre"] = carbon_scores["Annual_ABLD_C"] * 3.667
-    carbon_scores["Annual CO2"] = carbon_scores["Annual CO2 per acre"] * st.session_state.get("net_acres", 0)
+    carbon_scores["Annual CO2"] = carbon_scores[
+        "Annual CO2 per acre"
+    ] * st.session_state.get("net_acres", 0)
     carbon_scores = carbon_scores[["Year", "Annual CO2 per acre", "Annual CO2"]]
 
     # Financials per protocol/year from proforma outputs
-    proforma_df = st.session_state.proforma_df[["Year", "Protocol", "Total_Revenue", "Total_Costs", "Net_Revenue"]].copy()
+    proforma_df = st.session_state.proforma_df[
+        ["Year", "Protocol", "Total_Revenue", "Total_Costs", "Net_Revenue"]
+    ].copy()
     proforma_df = proforma_df.rename(
         columns={
             "Total_Revenue": "TotalRevenue",
@@ -1084,15 +1434,31 @@ def generate_report():
 
     carbon_df = carbon_df.merge(carbon_scores, on="Year", how="left")
     carbon_df = carbon_df.merge(proforma_df, on=["Year", "Protocol"], how="left")
-    carbon_df[["Annual CO2 per acre", "Annual CO2", "NetRevenue", "TotalCosts", "TotalRevenue"]] = (
-        carbon_df[["Annual CO2 per acre", "Annual CO2", "NetRevenue", "TotalCosts", "TotalRevenue"]].fillna(0)
-    )
+    carbon_df[
+        [
+            "Annual CO2 per acre",
+            "Annual CO2",
+            "NetRevenue",
+            "TotalCosts",
+            "TotalRevenue",
+        ]
+    ] = carbon_df[
+        [
+            "Annual CO2 per acre",
+            "Annual CO2",
+            "NetRevenue",
+            "TotalCosts",
+            "TotalRevenue",
+        ]
+    ].fillna(0)
 
     carbon_data = carbon_df.to_dict(orient="records")
 
     # Get selected variant
     selected_variant = st.session_state.get("selected_variant", "PN")
-    selected_varloc_name = st.session_state.get("selected_varloc_name", "Olympic National Forest")
+    selected_varloc_name = st.session_state.get(
+        "selected_varloc_name", "Olympic National Forest"
+    )
     selected_varloc_code = st.session_state.get("selected_varloc_code", "609")
 
     payload = {
@@ -1120,15 +1486,16 @@ def generate_report():
         st.error(f"Failed to generate report: {str(e)}")
         return None
 
+
 @st.fragment
 def run_chart():
     """
-    Top-level workflow controller. Runs planting sliders, carbon chart, 
+    Top-level workflow controller. Runs planting sliders, carbon chart,
     carbon unit chart, financial inputs, and financial results.
     """
     # Row 1: Planting sliders | Carbon chart
     with st.expander(label="Planting Parameters", expanded=True):
-        col1, col2 = st.columns([1,2], gap="large")
+        col1, col2 = st.columns([1, 2], gap="large")
         with col1:
             planting_sliders()
         with col2:
@@ -1147,13 +1514,9 @@ def run_chart():
         # render widget using key only to enable restoring backups
         protocols = st.multiselect(
             "Select Protocol(s)",
-            options=["ACR",
-                     "CAR",
-                     "VERRA",
-                     "GS",  
-                     "ISO"],
+            options=["ACR", "CAR", "VERRA", "GS", "ISO"],
             key="carbon_units_protocols",
-            help=H("carbon.protocols_multiselect")
+            help=H("carbon.protocols_multiselect"),
         )
 
         st.session_state["carbon_units_inputs"] = {"protocols": protocols}
@@ -1167,5 +1530,3 @@ def run_chart():
     with st.expander(label="Project Financials", expanded=True):
         proforma_params = credits_inputs(prefix="credits_")
         credits_results(proforma_params)
-
-    
