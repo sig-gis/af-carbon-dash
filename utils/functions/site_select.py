@@ -12,6 +12,7 @@ import io
 from shapely.geometry import shape, box
 
 from utils.config import get_api_base_url
+from utils.functions.map_colors import color_for_feature
 
 logger = logging.getLogger(__name__)
 
@@ -348,7 +349,12 @@ def build_map(geojson_str, points=None, upload=None, center=(37.8, -96.9), zoom=
         gj = folium.GeoJson(
             data=filtered_geojson,
             name="FVS Variants",
-            style_function=lambda x: {"fillColor": "blue", "color": "black", "weight": 1, "fillOpacity": 0.3},
+            style_function=lambda x: {
+                "fillColor": color_for_feature(x["properties"]),
+                "color": "black",
+                "weight": 1,
+                "fillOpacity": 0.3,
+            },
             highlight_function=lambda x: {"fillColor": "yellow", "color": "red", "weight": 2, "fillOpacity": 0.6},
         )
         if tooltip_fields:
