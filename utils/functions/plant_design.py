@@ -868,13 +868,13 @@ def carbon_units():
 
     chart_title = "(tons/project)" if toggle_ce else "(tons/acre)"
 
-        plot_df = _prepend_zero_year_rows_by_group(
-            plot_df,
-            group_col='Protocol',
-            value_col='CU',
-            base_year=CHART_BASE_YEAR,
-        )
-        plot_df, include_years = _filter_to_five_year_intervals(plot_df, year_col="Year", start_year=CHART_BASE_YEAR)
+    plot_df = _prepend_zero_year_rows_by_group(
+        plot_df,
+        group_col='Protocol',
+        value_col='CU',
+        base_year=CHART_BASE_YEAR,
+    )
+    plot_df, include_years = _filter_to_five_year_intervals(plot_df, year_col="Year", start_year=CHART_BASE_YEAR)
 
     _plot_fading_line_chart(
         data=plot_df,
