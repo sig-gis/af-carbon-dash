@@ -204,13 +204,16 @@ def _render_upload_tab(
             c1, c2, c3, c4, c5 = st.columns([2, 3, 1, 1, 1])
 
             with c1:
+                options = sorted(
+                    set(known_variants) | ({inferred_variant} if inferred_variant else set())
+                )
                 default_var_idx = (
-                    known_variants.index(inferred_variant)
-                    if inferred_variant in known_variants
+                    options.index(inferred_variant)
+                    if inferred_variant in options
                     else 0
                 )
                 variant = st.selectbox(
-                    "Variant", options=known_variants,
+                    "Variant", options=options,
                     index=default_var_idx, key=f"var_{idx}",
                 )
 
@@ -593,13 +596,13 @@ def main() -> None:
             ec1, ec2, ec3, ec4, ec5 = st.columns([2, 3, 1, 1, 1])
 
             with ec1:
-                edit_var_idx = (
-                    known_variants.index(selected_model["variant"])
-                    if selected_model["variant"] in known_variants
-                    else 0
+                cur_var = selected_model["variant"]
+                options = sorted(
+                    set(known_variants) | ({cur_var} if cur_var else set())
                 )
+                edit_var_idx = options.index(cur_var) if cur_var in options else 0
                 edit_variant = st.selectbox(
-                    "Variant", options=known_variants,
+                    "Variant", options=options,
                     index=edit_var_idx, key="edit_variant",
                 )
 
