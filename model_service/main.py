@@ -251,7 +251,7 @@ def calculate_carbon(inputs: CarbonInputs):
 
             # Prepend base year row
             zero_row = {col: 0.0 for col in wide.columns}
-            zero_row["Year"] = 2024
+            zero_row["Year"] = 2026
             wide = pd.concat([pd.DataFrame([zero_row]), wide], ignore_index=True)
             wide = wide.sort_values("Year").reset_index(drop=True)
 
@@ -271,7 +271,7 @@ def calculate_carbon(inputs: CarbonInputs):
     results.insert(
         0,
         {
-            "Year": 2024,
+            "Year": 2026,
             "ABLD_C": 0.0,
             "Annual_ABLD_C": 0.0,
         },

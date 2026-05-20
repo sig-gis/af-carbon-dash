@@ -306,7 +306,9 @@ def compute_carbon_units(
         y = df_poly["Onsite_Total_CO2"].values
 
         spline = make_interp_spline(X, y, k=1)
-        years_interp = np.arange(X.min(), X.max() + 1)
+        # Enforce modeling/report baseline at 2026 for CU generation.
+        start_year = max(int(X.min()), PROFORMA_YEAR_START)
+        years_interp = np.arange(start_year, int(X.max()) + 1)
         y_interp = spline(years_interp)
 
         df_project = pd.DataFrame({
@@ -352,7 +354,7 @@ def compute_carbon_units(
 # Scenario orchestration: full carbon → CU → proforma pipeline + acreage solver
 # ---------------------------------------------------------------------------
 
-PROFORMA_YEAR_START = 2024
+PROFORMA_YEAR_START = 2026
 PROFORMA_YEARS_ADVANCE = 35
 
 
