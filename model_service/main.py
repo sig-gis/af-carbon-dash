@@ -82,14 +82,18 @@ app = FastAPI(title="Carbon Model Service", lifespan=lifespan)
 
 API_BASE_URL = get_api_base_url()
 
-SUPPORTED_VARIANTS = {"CR", "CR_1", "CR_2", "EC", "EM", "PN", "WS", "WS_1"}
+
+def _registered_variants() -> set[str]:
+    """Variant codes currently in the model registry."""
+    registry = get_store().get_json("registry.json").get("models", [])
+    return {m["variant"] for m in registry if m.get("variant")}
 
 
-def normalize_variant(value: str) -> str:
-    if value is None:
+def normalize_variant(value: str, supported: set[str]) -> str:
+    if not value:
         return ""
     normalized = str(value).strip().upper()
-    for variant in SUPPORTED_VARIANTS:
+    for variant in sorted(supported, key=len, reverse=True):
         if variant in normalized:
             return variant
     return normalized
@@ -356,13 +360,14 @@ def generate_report(req: ReportRequest = None):
     env["QUARTO_FIG_DIR"] = str(QUARTO_DIR / "data" / "fig")
 
     if req:
-        selected_variant = normalize_variant(req.data.selected_variant)
-        if selected_variant not in SUPPORTED_VARIANTS:
+        supported = _registered_variants()
+        selected_variant = normalize_variant(req.data.selected_variant, supported)
+        if selected_variant not in supported:
             raise HTTPException(
                 status_code=400,
                 detail=(
                     "Unsupported variant value. "
-                    f"Expected one of {sorted(SUPPORTED_VARIANTS)}, got: {selected_variant!r}"
+                    f"Expected one of {sorted(supported)}, got: {selected_variant!r}"
                 ),
             )
 
