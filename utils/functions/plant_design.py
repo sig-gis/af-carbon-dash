@@ -54,7 +54,7 @@ def _resolve_sub_variants(map_variant: str, loccode: str) -> list[str]:
 
 API_BASE_URL = get_api_base_url()
 
-CHART_BASE_YEAR = 2024
+CHART_BASE_YEAR = 2026
 HATCH_START_AGE = 40
 HATCH_BG_ALPHA = 0.08
 HATCH_LINE_ALPHA = 0.18
@@ -270,6 +270,45 @@ def _five_year_values(max_year: int, start_year: int = CHART_BASE_YEAR) -> list[
     if max_year < start_year:
         return [start_year]
     return list(range(start_year, int(max_year) + 1, 5))
+
+
+def _filter_to_five_year_intervals(
+    df: pd.DataFrame,
+    year_col: str = "Year",
+    start_year: int = CHART_BASE_YEAR,
+) -> tuple[pd.DataFrame, list[int]]:
+    """Keep rows at/after start_year and restricted to 5-year intervals from start_year."""
+    out = df.copy()
+    out = out[out[year_col] >= start_year]
+    if out.empty:
+        return out, [start_year]
+
+    include_years = _five_year_values(int(out[year_col].max()), start_year=start_year)
+    out = out[out[year_col].isin(include_years)]
+    return out, include_years
+
+
+def _regrid_series_to_five_year_intervals(
+    df: pd.DataFrame,
+    value_col: str,
+    year_col: str = "Year",
+    start_year: int = CHART_BASE_YEAR,
+) -> tuple[pd.DataFrame, list[int]]:
+    """Interpolate a single series onto 5-year grid from start_year."""
+    out = df.copy()
+    out = out[out[year_col] >= start_year]
+    out = out[[year_col, value_col]].dropna().sort_values(year_col)
+    if out.empty:
+        return out, [start_year]
+
+    x = out[year_col].astype(float).to_numpy()
+    y = out[value_col].astype(float).to_numpy()
+    include_years = _five_year_values(int(x.max()), start_year=start_year)
+    xi = np.array(include_years, dtype=float)
+    yi = np.interp(xi, x, y)
+
+    reg = pd.DataFrame({year_col: xi.astype(int), value_col: yi})
+    return reg, include_years
 
 
 def _protocol_color_scale(protocols: list[str]) -> alt.Scale:
@@ -581,8 +620,7 @@ def carbon_chart():
             meta = available[col]
             unit = meta["unit_project"] if (toggle_oc and meta["scales"]) else meta["unit"]
             df_m = _prepend_zero_year_row(plot_df[["Year", col]].copy(), value_col=col, base_year=CHART_BASE_YEAR)
-            inc = _five_year_values(df_m["Year"].max(), start_year=CHART_BASE_YEAR)
-            df_m = df_m[df_m["Year"].isin(inc)]
+            df_m, inc = _regrid_series_to_five_year_intervals(df_m, value_col=col, year_col="Year", start_year=CHART_BASE_YEAR)
             chart = (
                 alt.Chart(df_m).mark_line(point=True).encode(
                     x=alt.X("Year:Q", title="Year", axis=alt.Axis(values=inc, format="d", labelAngle=30),
@@ -603,8 +641,7 @@ def carbon_chart():
         # Coefficient fallback: single ABLD_C chart
         chart_title = "Onsite Carbon (tons/project)" if toggle_oc else "Onsite Carbon (tons/acre)"
         plot_df = _prepend_zero_year_row(plot_df, value_col="ABLD_C", base_year=CHART_BASE_YEAR)
-        include_years = _five_year_values(plot_df["Year"].max(), start_year=CHART_BASE_YEAR)
-        plot_df = plot_df[plot_df["Year"].isin(include_years)]
+        plot_df, include_years = _regrid_series_to_five_year_intervals(plot_df, value_col="ABLD_C", year_col="Year", start_year=CHART_BASE_YEAR)
 
         line = alt.Chart(plot_df).mark_line(point=True).encode(
             x=alt.X('Year:Q', title='Year',
@@ -674,8 +711,7 @@ def carbon_units():
             value_col='CU',
             base_year=CHART_BASE_YEAR,
         )
-        include_years = _five_year_values(plot_df['Year'].max(), start_year=CHART_BASE_YEAR)
-        plot_df = plot_df[plot_df['Year'].isin(include_years)]
+        plot_df, include_years = _filter_to_five_year_intervals(plot_df, year_col="Year", start_year=CHART_BASE_YEAR)
 
         _plot_fading_line_chart(
             data=plot_df,
@@ -832,7 +868,7 @@ def credits_inputs(prefix: str = "credits_") -> dict:
     )
 
     # constants (constrained by modeling backend)
-    year_start = 2024
+    year_start = 2026
     years_advance = 35
     net_acres = st.session_state["net_acres"]
 
@@ -918,7 +954,7 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
 
     summaries_df = pd.concat(summary_frames, ignore_index=True)
 
-    # Chart alignment: start at 2024 (0), then show every 5 years
+    # Chart alignment: start at base year (2026), then show every 5 years
     include_years = _five_year_values(year_stop, start_year=CHART_BASE_YEAR)
     df_chart = _prepend_zero_year_rows_by_group(
         df_pf,
@@ -926,7 +962,7 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
         value_col='Net_Revenue',
         base_year=CHART_BASE_YEAR,
     )
-    df_chart = df_chart[df_chart['Year'].isin(include_years)]
+    df_chart, include_years = _filter_to_five_year_intervals(df_chart, year_col="Year", start_year=CHART_BASE_YEAR)
 
     plot_df = df_chart.copy()
 
@@ -1066,11 +1102,33 @@ def generate_report():
     carbon_df = st.session_state.merged_df[['Year', 'CU', 'Protocol']].copy()
     carbon_df = carbon_df.rename(columns={'CU': 'CUs'})
 
-    # Annual CO2 per acre derived from carbon scores (no protocol split)
-    carbon_scores = st.session_state.carbon_df[["Year", "Annual_ABLD_C"]].copy()
-    carbon_scores["Annual CO2 per acre"] = carbon_scores["Annual_ABLD_C"] * 3.667
-    carbon_scores["Annual CO2"] = carbon_scores["Annual CO2 per acre"] * st.session_state.get("net_acres", 0)
-    carbon_scores = carbon_scores[["Year", "Annual CO2 per acre", "Annual CO2"]]
+    # Report chart alignment: derive cumulative onsite CO2 from carbon curve and
+    # interpolate onto report years to avoid zero-fills from year-grid mismatch.
+    report_years = sorted(carbon_df["Year"].dropna().astype(int).unique().tolist())
+    carbon_curve = st.session_state.carbon_df[["Year", "ABLD_C"]].copy()
+    carbon_curve = carbon_curve.dropna(subset=["Year", "ABLD_C"]).sort_values("Year")
+
+    if not carbon_curve.empty and report_years:
+        x = carbon_curve["Year"].astype(float).to_numpy()
+        y = carbon_curve["ABLD_C"].astype(float).to_numpy() * 3.667
+        xi = np.array(report_years, dtype=float)
+        yi = np.interp(xi, x, y)
+        carbon_scores = pd.DataFrame(
+            {
+                "Year": xi.astype(int),
+                # Keep existing report column names for compatibility with report.ipynb
+                "Annual CO2 per acre": yi,
+                "Annual CO2": yi * st.session_state.get("net_acres", 0),
+            }
+        )
+    else:
+        carbon_scores = pd.DataFrame(
+            {
+                "Year": report_years,
+                "Annual CO2 per acre": [0.0] * len(report_years),
+                "Annual CO2": [0.0] * len(report_years),
+            }
+        )
 
     # Financials per protocol/year from proforma outputs
     proforma_df = st.session_state.proforma_df[["Year", "Protocol", "Total_Revenue", "Total_Costs", "Net_Revenue"]].copy()
