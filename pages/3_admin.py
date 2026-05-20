@@ -17,6 +17,7 @@ import streamlit as st
 
 from model_service.store import get_store
 from utils.config import get_api_base_url
+from utils.functions.slider_bounds import slider_bounds
 
 logger = logging.getLogger(__name__)
 
@@ -327,42 +328,78 @@ def _render_upload_tab(
 
         preset = variant_presets.get(v, {})
         existing_tpa = preset.get("default_tpa", [])
+        bounds = slider_bounds(preset)
         n_sp = len(selected_species) if selected_species else 0
-        preset_cols = st.columns([1, 1, 1] + [1] * n_sp)
 
-        with preset_cols[0]:
+        # Row 1: default values
+        default_cols = st.columns(3)
+        with default_cols[0]:
             survival = st.number_input(
                 "Survival %", min_value=0, max_value=100,
                 value=preset.get("survival", 70),
                 key=f"preset_survival_{v_idx}",
             )
-        with preset_cols[1]:
+        with default_cols[1]:
             si = st.number_input(
                 "Site index", min_value=0, max_value=300,
                 value=preset.get("si", 120),
                 key=f"preset_si_{v_idx}",
             )
-        with preset_cols[2]:
+        with default_cols[2]:
             tpa_cap = st.number_input(
                 "TPA cap", min_value=0,
                 value=preset.get("_tpa_cap", 435),
                 key=f"preset_tpa_cap_{v_idx}",
             )
 
+        # Row 2: per-variant slider bounds
+        bound_cols = st.columns(4)
+        with bound_cols[0]:
+            survival_min = st.number_input(
+                "Survival min", min_value=0, max_value=100,
+                value=bounds["survival_min"],
+                key=f"preset_survival_min_{v_idx}",
+            )
+        with bound_cols[1]:
+            survival_max = st.number_input(
+                "Survival max", min_value=0, max_value=100,
+                value=bounds["survival_max"],
+                key=f"preset_survival_max_{v_idx}",
+            )
+        with bound_cols[2]:
+            si_min = st.number_input(
+                "SI min", min_value=0, max_value=300,
+                value=bounds["si_min"],
+                key=f"preset_si_min_{v_idx}",
+            )
+        with bound_cols[3]:
+            si_max = st.number_input(
+                "SI max", min_value=0, max_value=300,
+                value=bounds["si_max"],
+                key=f"preset_si_max_{v_idx}",
+            )
+
+        # Row 3: per-species default TPA
         default_tpa: list[int] = []
-        for i, sp_code in enumerate(selected_species):
-            with preset_cols[3 + i]:
-                val = st.number_input(
-                    f"{sp_code} TPA", min_value=0,
-                    value=int(existing_tpa[i]) if i < len(existing_tpa) else 20,
-                    key=f"preset_tpa_{v_idx}_{i}",
-                )
-                default_tpa.append(val)
+        if n_sp:
+            tpa_cols = st.columns(n_sp)
+            for i, sp_code in enumerate(selected_species):
+                with tpa_cols[i]:
+                    val = st.number_input(
+                        f"{sp_code} TPA", min_value=0,
+                        value=int(existing_tpa[i]) if i < len(existing_tpa) else 20,
+                        key=f"preset_tpa_{v_idx}_{i}",
+                    )
+                    default_tpa.append(val)
 
         variant_settings[v] = {
             "species": selected_species,
             "survival": survival,
             "si": si,
+            "si_min": si_min,
+            "si_max": si_max,
+            "survival_min": survival_min,
+            "survival_max": survival_max,
             "default_tpa": default_tpa,
             "_tpa_cap": tpa_cap,
         }
@@ -440,6 +477,10 @@ def _render_upload_tab(
             new_preset = {
                 "survival": settings["survival"],
                 "si": settings["si"],
+                "si_min": settings["si_min"],
+                "si_max": settings["si_max"],
+                "survival_min": settings["survival_min"],
+                "survival_max": settings["survival_max"],
                 "default_tpa": settings["default_tpa"],
                 "_tpa_cap": settings["_tpa_cap"],
             }
@@ -652,34 +693,62 @@ def main() -> None:
 
             preset = variant_presets.get(edit_variant, {})
             existing_tpa = preset.get("default_tpa", [])
+            bounds = slider_bounds(preset)
             n_sp = len(edit_species) if edit_species else 0
-            preset_cols = st.columns([1, 1, 1] + [1] * max(n_sp, 1))
 
-            with preset_cols[0]:
+            # Row 1: default values
+            default_cols = st.columns(3)
+            with default_cols[0]:
                 edit_survival = st.number_input(
                     "Survival %", min_value=0, max_value=100,
                     value=preset.get("survival", 70), key="edit_survival",
                 )
-            with preset_cols[1]:
+            with default_cols[1]:
                 edit_si = st.number_input(
                     "Site index", min_value=0, max_value=300,
                     value=preset.get("si", 120), key="edit_si",
                 )
-            with preset_cols[2]:
+            with default_cols[2]:
                 edit_tpa_cap = st.number_input(
                     "TPA cap", min_value=0,
                     value=preset.get("_tpa_cap", 435), key="edit_tpa_cap",
                 )
 
+            # Row 2: per-variant slider bounds
+            bound_cols = st.columns(4)
+            with bound_cols[0]:
+                edit_survival_min = st.number_input(
+                    "Survival min", min_value=0, max_value=100,
+                    value=bounds["survival_min"], key="edit_survival_min",
+                )
+            with bound_cols[1]:
+                edit_survival_max = st.number_input(
+                    "Survival max", min_value=0, max_value=100,
+                    value=bounds["survival_max"], key="edit_survival_max",
+                )
+            with bound_cols[2]:
+                edit_si_min = st.number_input(
+                    "SI min", min_value=0, max_value=300,
+                    value=bounds["si_min"], key="edit_si_min",
+                )
+            with bound_cols[3]:
+                edit_si_max = st.number_input(
+                    "SI max", min_value=0, max_value=300,
+                    value=bounds["si_max"], key="edit_si_max",
+                )
+
+            # Row 3: per-species default TPA
             edit_tpa: list[int] = []
-            for i, sp_code in enumerate(edit_species):
-                with preset_cols[3 + i]:
-                    val = st.number_input(
-                        f"{sp_code} TPA", min_value=0,
-                        value=int(existing_tpa[i]) if i < len(existing_tpa) else 20,
-                        key=f"edit_tpa_{i}",
-                    )
-                    edit_tpa.append(val)
+            if n_sp:
+                tpa_cols = st.columns(n_sp)
+                for i, sp_code in enumerate(edit_species):
+                    with tpa_cols[i]:
+                        val = st.number_input(
+                            f"{sp_code} TPA", min_value=0,
+                            value=int(existing_tpa[i]) if i < len(existing_tpa) else 20,
+                            key=f"edit_tpa_{i}",
+                        )
+                        edit_tpa.append(val)
 
             # ── Save / Delete ─────────────────────────────────────────
             st.divider()
@@ -736,6 +805,10 @@ def main() -> None:
                     new_preset = {
                         "survival": edit_survival,
                         "si": edit_si,
+                        "si_min": edit_si_min,
+                        "si_max": edit_si_max,
+                        "survival_min": edit_survival_min,
+                        "survival_max": edit_survival_max,
                         "default_tpa": edit_tpa,
                         "_tpa_cap": edit_tpa_cap,
                     }
