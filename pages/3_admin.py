@@ -215,7 +215,9 @@ def _render_upload_tab(
                 variant = st.selectbox(
                     "Variant", options=options,
                     index=default_var_idx, key=f"var_{idx}",
+                    accept_new_options=True,
                 )
+                variant = variant.strip().upper() if variant else variant
 
             with c2:
                 base_v = _base_variant(variant)
@@ -604,7 +606,9 @@ def main() -> None:
                 edit_variant = st.selectbox(
                     "Variant", options=options,
                     index=edit_var_idx, key="edit_variant",
+                    accept_new_options=True,
                 )
+                edit_variant = edit_variant.strip().upper() if edit_variant else edit_variant
 
             with ec2:
                 base_v = _base_variant(edit_variant)
