@@ -352,7 +352,7 @@ def build_map(geojson_str, points=None, upload=None, center=(37.8, -96.9), zoom=
             style_function=lambda x: {
                 "fillColor": color_for_feature(x["properties"]),
                 "color": "black",
-                "weight": 1,
+                "weight": 0.5,
                 "fillOpacity": 0.3,
             },
             highlight_function=lambda x: {"fillColor": "yellow", "color": "red", "weight": 2, "fillOpacity": 0.6},
