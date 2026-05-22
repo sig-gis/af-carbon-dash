@@ -371,8 +371,9 @@ def default_scenario(variant: str, loccode: str) -> dict:
     Returned dict is shaped to feed straight into run_scenario(); callers may
     override any subset of fields.
     """
-    variant_presets = _load_base_json("FVSVariant_presets.json")
-    species_map = _load_base_json("variant_species.json")
+    store = get_store()
+    variant_presets = store.get_json("config/FVSVariant_presets.json")
+    species_map = store.get_json("config/variant_species.json")
     proforma_presets = _load_base_json("proforma_presets.json")
 
     preset = variant_presets.get(variant)
