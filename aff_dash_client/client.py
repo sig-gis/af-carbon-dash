@@ -9,6 +9,7 @@ from aff_dash_client.backends import HTTPBackend, LocalBackend
 from aff_dash_client.types import Defaults, ScenarioResult
 
 DEFAULT_API_URL = "https://model-service-api-dev-526758851260.us-west1.run.app"
+DEFAULT_BULK_BATCH_SIZE = 1000
 
 
 class AFFDashClient:
@@ -156,6 +157,38 @@ class AFFDashClient:
             "value": float(target_npv),
         }
         return ScenarioResult.from_api(self._backend.run(payload))
+
+    def run_bulk(self, scenarios: list[dict]) -> dict:
+        """Evaluate up to 1000 scenarios in one request."""
+        return self._backend.run_bulk({"scenarios": scenarios})
+
+    def run_many(
+        self,
+        scenarios: list[dict],
+        *,
+        batch_size: int = DEFAULT_BULK_BATCH_SIZE,
+    ) -> tuple[list[dict | None], list[dict]]:
+        """Evaluate any number of scenarios by chunking into bulk calls.
+
+        Returns (results, errors). `results` is the same length as `scenarios`
+        with None at failed indices. `errors[i]["index"]` is the global index
+        into the input list, not the per-batch index.
+        """
+        if batch_size < 1 or batch_size > DEFAULT_BULK_BATCH_SIZE:
+            raise ValueError(f"batch_size must be between 1 and {DEFAULT_BULK_BATCH_SIZE}")
+
+        all_results: list[dict | None] = []
+        all_errors: list[dict] = []
+        for batch_start in range(0, len(scenarios), batch_size):
+            batch = scenarios[batch_start:batch_start + batch_size]
+            resp = self.run_bulk(batch)
+            all_results.extend(resp["results"])
+            for err in resp["errors"]:
+                all_errors.append({
+                    "index": batch_start + err["index"],
+                    "error": err["error"],
+                })
+        return all_results, all_errors
 
     # ----- internals --------------------------------------------------------
 
