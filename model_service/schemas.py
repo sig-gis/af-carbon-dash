@@ -110,3 +110,18 @@ class ScenarioDefaults(BaseModel):
     protocols: List[str]
     financial_params: Dict[str, Dict[str, float]]
     npv_year: int
+
+
+class BulkScenarioRequest(BaseModel):
+    scenarios: List[ScenarioRequest]
+
+
+class BulkScenarioError(BaseModel):
+    index: int
+    error: str
+
+
+# results[i] is None iff an error with index == i is present.
+class BulkScenarioResponse(BaseModel):
+    results: List[Optional[ScenarioResponse]]
+    errors: List[BulkScenarioError]

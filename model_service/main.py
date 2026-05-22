@@ -36,6 +36,9 @@ from model_service.schemas import (
     ScenarioDefaults,
     ScenarioRequest,
     ScenarioResponse,
+    BulkScenarioRequest,
+    BulkScenarioResponse,
+    BulkScenarioError,
 )
 from model_service.config_sync import sync_config_defaults
 from model_service.store import get_store
@@ -316,6 +319,31 @@ def scenario_run(req: ScenarioRequest):
     except (KeyError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return result
+
+
+MAX_BULK_BATCH_SIZE = 1000
+
+
+@app.post("/scenario/bulk", response_model=BulkScenarioResponse)
+def scenario_bulk(req: BulkScenarioRequest):
+    """Evaluate up to MAX_BULK_BATCH_SIZE scenarios in one request."""
+    if not req.scenarios:
+        raise HTTPException(status_code=400, detail="scenarios must be non-empty")
+    if len(req.scenarios) > MAX_BULK_BATCH_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"batch size {len(req.scenarios)} exceeds max {MAX_BULK_BATCH_SIZE}",
+        )
+
+    results: list[dict | None] = []
+    errors: list[BulkScenarioError] = []
+    for idx, scenario in enumerate(req.scenarios):
+        try:
+            results.append(run_scenario(scenario.model_dump(exclude_none=False)))
+        except (KeyError, ValueError) as exc:
+            results.append(None)
+            errors.append(BulkScenarioError(index=idx, error=str(exc)))
+    return {"results": results, "errors": errors}
 
 
 @app.get("/scenario/defaults", response_model=ScenarioDefaults)
