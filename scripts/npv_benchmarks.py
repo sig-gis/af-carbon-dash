@@ -1,3 +1,4 @@
+# [[file:../../../../data/Nextcloud-SIG/dschmidt_working_projects/PC585_AF_Reforestation/PC585_breakeven_analysis.org::*Batched][Batched:1]]
 import time, copy
 from aff_dash_client.client import AFFDashClient
 
@@ -192,3 +193,4 @@ print(f"Approx. run time: {round(run_time, 2)} sec")
 print(f"Approx. {round((run_time / len(scenarios)), 2)} sec per scenario")
 
 #print(results)
+# Batched:1 ends here
