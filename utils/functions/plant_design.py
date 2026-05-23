@@ -45,30 +45,35 @@ def _resolve_sub_variants(map_variant: str, loccode: str) -> list[str]:
         registry = resp.json().get("models", [])
     except Exception:
         registry = []
+
+    # Prefer registry varloc matches
+    registered = sorted(
+        {
+            m["variant"]
+            for m in registry
+            if m.get("loccode") == loccode
+            and m.get("variant")
+            and (
+                m["variant"] == map_variant
+                or m["variant"].startswith(map_variant + "_")
+            )
+        }
+    )
+    if registered:
+        return registered
+
+    # Fallback with species-config keys matching map_variant
     vs = load_variant_species()
-
-    # Find all sub-variant keys that could match this map variant
-    candidate_keys = []
-    if map_variant in vs and isinstance(vs[map_variant], list):
-        candidate_keys = [map_variant]
-    else:
-        candidate_keys = sorted(
-            k
-            for k, v in vs.items()
-            if isinstance(v, list) and k.startswith(map_variant + "_")
-        )
-
-    if not candidate_keys:
-        candidate_keys = [map_variant]
-
-    # Filter to sub-variants that have models for this loccode
-    available = [
+    sub_keys = sorted(
         k
-        for k in candidate_keys
-        if any(m["variant"] == k and m["loccode"] == loccode for m in registry)
-    ]
-
-    return available if available else candidate_keys
+        for k, v in vs.items()
+        if isinstance(v, list) and k.startswith(map_variant + "_")
+    )
+    if sub_keys:
+        return sub_keys
+    if map_variant in vs and isinstance(vs[map_variant], list):
+        return [map_variant]
+    return [map_variant]
 
 
 API_BASE_URL = get_api_base_url()
@@ -759,9 +764,15 @@ def carbon_chart():
         def _render_metric(label: str):
             col = metric_labels[label]
             meta = available[col]
-            unit = meta["unit_project"] if (toggle_oc and meta["scales"]) else meta["unit"]
-            df_m = _prepend_zero_year_row(plot_df[["Year", col]].copy(), value_col=col, base_year=CHART_BASE_YEAR)
-            df_m, inc = _regrid_series_to_five_year_intervals(df_m, value_col=col, year_col="Year", start_year=CHART_BASE_YEAR)
+            unit = (
+                meta["unit_project"] if (toggle_oc and meta["scales"]) else meta["unit"]
+            )
+            df_m = _prepend_zero_year_row(
+                plot_df[["Year", col]].copy(), value_col=col, base_year=CHART_BASE_YEAR
+            )
+            df_m, inc = _regrid_series_to_five_year_intervals(
+                df_m, value_col=col, year_col="Year", start_year=CHART_BASE_YEAR
+            )
             chart = (
                 alt.Chart(df_m)
                 .mark_line(point=True)
@@ -789,9 +800,15 @@ def carbon_chart():
         _render_metric(secondary_label)
     else:
         # Coefficient fallback: single ABLD_C chart
-        chart_title = "Onsite Carbon (tons/project)" if toggle_oc else "Onsite Carbon (tons/acre)"
-        plot_df = _prepend_zero_year_row(plot_df, value_col="ABLD_C", base_year=CHART_BASE_YEAR)
-        plot_df, include_years = _regrid_series_to_five_year_intervals(plot_df, value_col="ABLD_C", year_col="Year", start_year=CHART_BASE_YEAR)
+        chart_title = (
+            "Onsite Carbon (tons/project)" if toggle_oc else "Onsite Carbon (tons/acre)"
+        )
+        plot_df = _prepend_zero_year_row(
+            plot_df, value_col="ABLD_C", base_year=CHART_BASE_YEAR
+        )
+        plot_df, include_years = _regrid_series_to_five_year_intervals(
+            plot_df, value_col="ABLD_C", year_col="Year", start_year=CHART_BASE_YEAR
+        )
 
         line = (
             alt.Chart(plot_df)
@@ -870,11 +887,13 @@ def carbon_units():
 
     plot_df = _prepend_zero_year_rows_by_group(
         plot_df,
-        group_col='Protocol',
-        value_col='CU',
+        group_col="Protocol",
+        value_col="CU",
         base_year=CHART_BASE_YEAR,
     )
-    plot_df, include_years = _filter_to_five_year_intervals(plot_df, year_col="Year", start_year=CHART_BASE_YEAR)
+    plot_df, include_years = _filter_to_five_year_intervals(
+        plot_df, year_col="Year", start_year=CHART_BASE_YEAR
+    )
 
     _plot_fading_line_chart(
         data=plot_df,
@@ -1220,7 +1239,9 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
         value_col="Net_Revenue",
         base_year=CHART_BASE_YEAR,
     )
-    df_chart, include_years = _filter_to_five_year_intervals(df_chart, year_col="Year", start_year=CHART_BASE_YEAR)
+    df_chart, include_years = _filter_to_five_year_intervals(
+        df_chart, year_col="Year", start_year=CHART_BASE_YEAR
+    )
 
     plot_df = df_chart.copy()
 
