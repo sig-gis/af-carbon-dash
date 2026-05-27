@@ -358,6 +358,7 @@ PROFORMA_YEAR_START = 2026
 PROFORMA_YEARS_ADVANCE = 35
 
 
+@lru_cache(maxsize=16)
 def _load_base_json(filename: str) -> dict:
     with open(BASE_PATH / filename, "r") as f:
         return json.load(f)
@@ -406,21 +407,19 @@ def default_scenario(variant: str, loccode: str) -> dict:
     }
 
 
-def _carbon_for_inputs(
+@lru_cache(maxsize=512)
+def _carbon_for_inputs_cached(
     variant: str,
     loccode: str,
     survival: float,
     si: float,
-    species_tpa: list[float],
+    species_tpa: tuple[float, ...],
     pct_level: str,
 ) -> tuple[pd.DataFrame, str]:
-    """
-    Compute the carbon DataFrame for a scenario input set, returning (df, source).
-    Tries FVS models first, falls back to coefficient-based prediction.
-    """
+    """Hashable-keyed core of ``_carbon_for_inputs`` for memoization."""
     models = get_fvs_models(variant, loccode, pct_level)
     if models is not None:
-        wide = predict_fvs_metrics(models, survival, si, species_tpa)
+        wide = predict_fvs_metrics(models, survival, si, list(species_tpa))
         if not wide.empty:
             if "ABLD_C" in wide.columns:
                 wide["Annual_ABLD_C"] = wide["ABLD_C"].diff().fillna(wide["ABLD_C"].iloc[0])
@@ -433,12 +432,34 @@ def _carbon_for_inputs(
     coefficients = _load_base_json("carbon_model_coefficients.json")
     rows = compute_carbon_scores(
         coefficients=coefficients,
-        species_tpa=species_tpa,
+        species_tpa=list(species_tpa),
         survival=survival,
         si=si,
     )
     rows.insert(0, {"Year": PROFORMA_YEAR_START, "ABLD_C": 0.0, "Annual_ABLD_C": 0.0})
     return pd.DataFrame(rows), "coefficients"
+
+
+def _carbon_for_inputs(
+    variant: str,
+    loccode: str,
+    survival: float,
+    si: float,
+    species_tpa: list[float],
+    pct_level: str,
+) -> tuple[pd.DataFrame, str]:
+    """
+    Compute the carbon DataFrame for a scenario input set, returning (df, source).
+    Tries FVS models first, falls back to coefficient-based prediction.
+
+    Memoized: callers receive a fresh copy of the DataFrame so downstream
+    mutation is safe even though the cache reuses the underlying result.
+    """
+    df, source = _carbon_for_inputs_cached(
+        variant, loccode, float(survival), float(si),
+        tuple(float(x) for x in species_tpa), pct_level,
+    )
+    return df.copy(), source
 
 
 def _normalize_financial_params(

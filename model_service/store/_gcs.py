@@ -1,17 +1,24 @@
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import os
 import shutil
+import threading
+import time
 from pathlib import Path
 
-from google.cloud import storage
 from google.api_core.exceptions import NotFound
+from google.cloud import storage
 
 logger = logging.getLogger(__name__)
 
 _CACHE_DIR = Path("/tmp/model_store")
+# Time-to-live for in-process JSON cache. Short enough that operator edits via
+# admin propagate within a deploy lifecycle and long enough to eliminate per-call
+# GCS round trips during bulk evaluation.
+_JSON_CACHE_TTL_SECONDS = 30.0
 
 
 class GCSStore:
@@ -25,6 +32,8 @@ class GCSStore:
         self._client = storage.Client(project=project)
         self._bucket = self._client.bucket(bucket_name)
         _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        self._json_cache: dict[str, tuple[float, dict]] = {}
+        self._json_cache_lock = threading.Lock()
 
     @classmethod
     def from_env(cls) -> GCSStore:
@@ -58,23 +67,37 @@ class GCSStore:
             shutil.copy2(local_path, cache)
 
     def get_json(self, key: str) -> dict:
+        now = time.monotonic()
+        with self._json_cache_lock:
+            entry = self._json_cache.get(key)
+            if entry is not None and now - entry[0] < _JSON_CACHE_TTL_SECONDS:
+                return copy.deepcopy(entry[1])
+
         blob = self._bucket.blob(key)
         try:
             data = blob.download_as_text()
-            return json.loads(data)
+            parsed = json.loads(data)
         except NotFound:
             if key == "registry.json":
                 return {"models": []}
             raise FileNotFoundError(f"GCSStore: {key} not found")
+
+        with self._json_cache_lock:
+            self._json_cache[key] = (now, parsed)
+        return copy.deepcopy(parsed)
 
     def put_json(self, data: dict, key: str) -> None:
         body = json.dumps(data, indent=2)
         logger.info("GCSStore: writing JSON %s (%d bytes)", key, len(body))
         blob = self._bucket.blob(key)
         blob.upload_from_string(body, content_type="application/json")
+        with self._json_cache_lock:
+            self._json_cache.pop(key, None)
 
     def list_keys(self, prefix: str) -> list[str]:
-        return [blob.name for blob in self._client.list_blobs(self._bucket, prefix=prefix)]
+        return [
+            blob.name for blob in self._client.list_blobs(self._bucket, prefix=prefix)
+        ]
 
     def exists(self, key: str) -> bool:
         return self._bucket.blob(key).exists()
@@ -83,3 +106,5 @@ class GCSStore:
         cached = self._cache_path(key)
         if cached.exists():
             cached.unlink()
+        with self._json_cache_lock:
+            self._json_cache.pop(key, None)

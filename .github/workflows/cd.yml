@@ -111,7 +111,9 @@ jobs:
             --allow-unauthenticated \
             --service-account="${{ secrets.GCP_SERVICE_ACCOUNT }}" \
             --timeout=3600 \
-            --set-env-vars "GCP_PROJECT=${{ env.GCP_PROJECT_ID }},MODEL_STORE_BACKEND=gcs,MODEL_STORE_BUCKET=${{ env.MODEL_BUCKET }}"
+            --cpu=4 \
+            --memory=4Gi \
+            --set-env-vars "GCP_PROJECT=${{ env.GCP_PROJECT_ID }},MODEL_STORE_BACKEND=gcs,MODEL_STORE_BUCKET=${{ env.MODEL_BUCKET }},BULK_WORKERS=4,BULK_WORKER_MODE=process"
 
       - name: Get API URL
         id: api_url

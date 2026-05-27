@@ -5,6 +5,7 @@ import os
 import subprocess
 import tempfile
 import time
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -14,6 +15,7 @@ import requests
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 
+from model_service.config_sync import sync_config_defaults
 from model_service.geo import get_filtered_geojson
 from model_service.model import (
     compute_carbon_scores,
@@ -26,6 +28,9 @@ from model_service.model import (
     run_scenario,
 )
 from model_service.schemas import (
+    BulkScenarioError,
+    BulkScenarioRequest,
+    BulkScenarioResponse,
     CarbonInputs,
     CarbonResponse,
     CarbonUnitsRequest,
@@ -36,11 +41,7 @@ from model_service.schemas import (
     ScenarioDefaults,
     ScenarioRequest,
     ScenarioResponse,
-    BulkScenarioRequest,
-    BulkScenarioResponse,
-    BulkScenarioError,
 )
-from model_service.config_sync import sync_config_defaults
 from model_service.store import get_store
 from utils.config import get_api_base_url
 
@@ -322,6 +323,19 @@ def scenario_run(req: ScenarioRequest):
 
 
 MAX_BULK_BATCH_SIZE = 1000
+# Worker count for scenario_bulk parallelism. 1 is sequential processing
+_BULK_WORKERS = max(1, int(os.environ.get("BULK_WORKERS", "1")))
+# "thread" or "process". "thread" is limited by GIL. "process" requires a bigger
+# Cloud Run container.
+_BULK_WORKER_MODE = os.environ.get("BULK_WORKER_MODE", "thread").lower()
+
+
+def _run_one_scenario(idx_payload: tuple[int, dict]):
+    idx, payload = idx_payload
+    try:
+        return idx, run_scenario(payload), None
+    except (KeyError, ValueError) as exc:
+        return idx, None, str(exc)
 
 
 @app.post("/scenario/bulk", response_model=BulkScenarioResponse)
@@ -335,14 +349,32 @@ def scenario_bulk(req: BulkScenarioRequest):
             detail=f"batch size {len(req.scenarios)} exceeds max {MAX_BULK_BATCH_SIZE}",
         )
 
-    results: list[dict | None] = []
+    payloads = [
+        (idx, scenario.model_dump(exclude_none=False))
+        for idx, scenario in enumerate(req.scenarios)
+    ]
+    results: list[dict | None] = [None] * len(payloads)
     errors: list[BulkScenarioError] = []
-    for idx, scenario in enumerate(req.scenarios):
-        try:
-            results.append(run_scenario(scenario.model_dump(exclude_none=False)))
-        except (KeyError, ValueError) as exc:
-            results.append(None)
-            errors.append(BulkScenarioError(index=idx, error=str(exc)))
+
+    if _BULK_WORKERS <= 1 or len(payloads) <= 1:
+        for item in payloads:
+            idx, result, err = _run_one_scenario(item)
+            results[idx] = result
+            if err is not None:
+                errors.append(BulkScenarioError(index=idx, error=err))
+    else:
+        Pool = (
+            ProcessPoolExecutor
+            if _BULK_WORKER_MODE == "process"
+            else ThreadPoolExecutor
+        )
+        with Pool(max_workers=_BULK_WORKERS) as pool:
+            for idx, result, err in pool.map(_run_one_scenario, payloads):
+                results[idx] = result
+                if err is not None:
+                    errors.append(BulkScenarioError(index=idx, error=err))
+        errors.sort(key=lambda e: e.index)
+
     return {"results": results, "errors": errors}
 
 
