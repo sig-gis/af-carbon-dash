@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import os
 import shutil
+import threading
+import time
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 # Resolved once at import time — works both locally and inside Docker (/app).
 APP_ROOT = Path(__file__).resolve().parent.parent.parent
+
+_JSON_CACHE_TTL_SECONDS = 30.0
 
 
 def _models_dir() -> Path:
@@ -44,6 +49,10 @@ def _resolve(key: str) -> Path:
 class LocalStore:
     """Store backed by the local project filesystem (dev default)."""
 
+    def __init__(self) -> None:
+        self._json_cache: dict[str, tuple[float, dict]] = {}
+        self._json_cache_lock = threading.Lock()
+
     def get_file(self, key: str) -> Path:
         path = _resolve(key)
         if not path.exists():
@@ -57,13 +66,23 @@ class LocalStore:
         logger.info("LocalStore: wrote %s -> %s", key, dest)
 
     def get_json(self, key: str) -> dict:
+        now = time.monotonic()
+        with self._json_cache_lock:
+            entry = self._json_cache.get(key)
+            if entry is not None and now - entry[0] < _JSON_CACHE_TTL_SECONDS:
+                return copy.deepcopy(entry[1])
+
         path = _resolve(key)
         if not path.exists():
             if key == "registry.json":
                 return {"models": []}
             raise FileNotFoundError(f"LocalStore: {key} -> {path} not found")
         with open(path) as f:
-            return json.load(f)
+            parsed = json.load(f)
+
+        with self._json_cache_lock:
+            self._json_cache[key] = (now, parsed)
+        return copy.deepcopy(parsed)
 
     def put_json(self, data: dict, key: str) -> None:
         path = _resolve(key)
@@ -71,6 +90,8 @@ class LocalStore:
         with open(path, "w") as f:
             json.dump(data, f, indent=4)
         logger.info("LocalStore: wrote JSON %s -> %s", key, path)
+        with self._json_cache_lock:
+            self._json_cache.pop(key, None)
 
     def list_keys(self, prefix: str) -> list[str]:
         base = None

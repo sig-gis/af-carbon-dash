@@ -364,10 +364,113 @@ def _load_base_json(filename: str) -> dict:
         return json.load(f)
 
 
+def _resolve_variant_for_loccode(
+    variant: str, loccode: str, registry: list[dict]
+) -> str:
+    """Resolve a caller-supplied variant against the live model registry.
+
+    Mirrors the dashboard's ``_resolve_sub_variants`` precedence so that the
+    AFFDashClient / FastAPI run path picks the same sub-variant the UI would
+    for a given (variant, loccode):
+
+    1. Exact ``(variant, loccode)`` registry match → keep as-is.
+    2. Any sub-variant ``variant + "_*"`` registered for this loccode → pick
+       the lexicographically first.
+    3. No registry match → return the original variant so the preset / species
+       lookup error surfaces meaningfully.
+    """
+    if any(
+        m.get("variant") == variant and m.get("loccode") == loccode
+        for m in registry
+    ):
+        return variant
+
+    sub_matches = sorted(
+        {
+            m["variant"]
+            for m in registry
+            if m.get("loccode") == loccode
+            and m.get("variant", "").startswith(variant + "_")
+        }
+    )
+    if sub_matches:
+        return sub_matches[0]
+
+    return variant
+
+
+_SYNTHESIZED_PRESET_DEFAULTS = {
+    "survival": 70,
+    "si": 100,
+    "si_min": 40,
+    "si_max": 160,
+    "survival_min": 50,
+    "survival_max": 90,
+    "_tpa_cap": 435,
+}
+
+
+def _synthesize_preset(species_count: int) -> dict:
+    """Build a usable preset when the operator hasn't configured one yet.
+
+    Used as a last-resort fallback so any variant with a model registered
+    via admin works out of the box. The operator can later configure proper
+    bounds via Model Management; logged so the gap is visible.
+    """
+    n = max(1, species_count)
+    share = 240 // n
+    return {
+        **_SYNTHESIZED_PRESET_DEFAULTS,
+        "default_tpa": [share] * n,
+    }
+
+
+def _resolve_preset(variant: str, presets: dict) -> tuple[dict | None, str | None]:
+    """Find the best preset for ``variant`` and report which key supplied it.
+
+    Order: exact match → sibling sub-variant (same base) → base-variant entry.
+    Returns ``(None, None)`` if nothing matches. The source key is returned for
+    diagnostics only; callers should keep using ``variant`` itself for registry
+    / species lookups.
+    """
+    if variant in presets:
+        return presets[variant], variant
+
+    base = variant.split("_", 1)[0]
+    for k in sorted(presets):
+        if k.startswith(base + "_") and k != variant:
+            return presets[k], k
+    if base in presets and base != variant:
+        return presets[base], base
+    return None, None
+
+
+def _resolve_species(variant: str, species_map: dict) -> list[str]:
+    """Look up species codes for ``variant`` with sub-variant / base fallbacks."""
+    codes = species_map.get(variant)
+    if codes:
+        return list(codes)
+    base = variant.split("_", 1)[0]
+    for k in sorted(species_map):
+        if k.startswith(base + "_") and isinstance(species_map[k], list):
+            return list(species_map[k])
+    base_codes = species_map.get(base)
+    if isinstance(base_codes, list):
+        return list(base_codes)
+    return []
+
+
 def default_scenario(variant: str, loccode: str) -> dict:
     """
     Compose authoritative default inputs for a (variant, loccode) pair.
     Pulls from FVSVariant_presets.json, variant_species.json, proforma_presets.json.
+
+    The variant is resolved against the live model registry first (same
+    precedence as the dashboard), so callers can pass either a base variant
+    ("PN", "WC") or a specific sub-variant ("WC_2") and the server picks the
+    right one for the loccode. Preset and species lookups fall back to sibling
+    sub-variants when an exact entry is missing so newly-registered variants
+    work without requiring operators to hand-populate every config key.
 
     Returned dict is shaped to feed straight into run_scenario(); callers may
     override any subset of fields.
@@ -376,22 +479,28 @@ def default_scenario(variant: str, loccode: str) -> dict:
     variant_presets = store.get_json("config/FVSVariant_presets.json")
     species_map = store.get_json("config/variant_species.json")
     proforma_presets = _load_base_json("proforma_presets.json")
+    registry = store.get_json("registry.json").get("models", [])
 
-    preset = variant_presets.get(variant)
-    if preset is None:
-        # Fall back to base variant prefix (e.g., "PN" for "PN_1")
-        for key, value in variant_presets.items():
-            if variant.startswith(key) or key.startswith(variant):
-                preset = value
-                variant = key
-                break
-    if preset is None:
-        raise KeyError(f"No variant preset for {variant!r}")
+    resolved_variant = _resolve_variant_for_loccode(variant, loccode, registry)
+    species_codes = _resolve_species(resolved_variant, species_map)
 
-    species_codes = species_map.get(variant) or []
+    preset, preset_source = _resolve_preset(resolved_variant, variant_presets)
+    if preset is None:
+        preset = _synthesize_preset(len(species_codes))
+        preset_source = "<synthesized>"
+        logger.warning(
+            "default_scenario: variant=%s has no preset (exact, sibling, or base); "
+            "using synthesized defaults. Configure presets via Model Management.",
+            resolved_variant,
+        )
+    elif preset_source != resolved_variant:
+        logger.info(
+            "default_scenario: variant=%s using preset from %s (no exact match)",
+            resolved_variant, preset_source,
+        )
 
     return {
-        "variant": variant,
+        "variant": resolved_variant,
         "loccode": loccode,
         "survival": float(preset["survival"]),
         "si": float(preset["si"]),
