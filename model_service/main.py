@@ -336,6 +336,13 @@ def _run_one_scenario(idx_payload: tuple[int, dict]):
         return idx, run_scenario(payload), None
     except (KeyError, ValueError) as exc:
         return idx, None, str(exc)
+    except Exception as exc:
+        logger.exception(
+            "run_scenario raised unexpected %s for index %d",
+            type(exc).__name__,
+            idx,
+        )
+        return idx, None, f"{type(exc).__name__}: {exc}"
 
 
 @app.post("/scenario/bulk", response_model=BulkScenarioResponse)

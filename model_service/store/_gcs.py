@@ -48,13 +48,25 @@ class GCSStore:
 
     def get_file(self, key: str) -> Path:
         local = self._cache_path(key)
-        if local.exists():
+
+        if local.exists() and local.stat().st_size > 0:
             return local
         blob = self._bucket.blob(key)
         if not blob.exists():
             raise FileNotFoundError(f"GCSStore: {key} not found")
         logger.info("GCSStore: downloading %s", key)
-        blob.download_to_filename(str(local))
+        # Atomic download so it works across workers
+        tmp = local.with_name(f".{local.name}.{os.getpid()}.tmp")
+        try:
+            blob.download_to_filename(str(tmp))
+            os.replace(str(tmp), str(local))
+        except Exception:
+            if tmp.exists():
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+            raise
         return local
 
     def put_file(self, local_path: Path, key: str) -> None:
