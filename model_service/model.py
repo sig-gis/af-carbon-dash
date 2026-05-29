@@ -2,12 +2,12 @@ import json
 import logging
 from functools import lru_cache
 from pathlib import Path
+from typing import Dict, List
 
 import joblib
-import pandas as pd
 import numpy as np
 import numpy_financial as npf
-from typing import List, Dict
+import pandas as pd
 from scipy.interpolate import make_interp_spline
 from sklearn.preprocessing import PolynomialFeatures
 
@@ -37,16 +37,21 @@ def get_fvs_models(variant: str, loccode: str, pct_level: str = "PCT0") -> dict 
     """
     registry = _load_registry()
     entry = next(
-        (m for m in registry
-         if m["variant"] == variant
-         and m["loccode"] == loccode
-         and m.get("pct_level", "PCT0") == pct_level),
+        (
+            m
+            for m in registry
+            if m["variant"] == variant
+            and m["loccode"] == loccode
+            and m.get("pct_level", "PCT0") == pct_level
+        ),
         None,
     )
     if entry is None:
         logger.warning(
             "No model registry entry for variant=%s loccode=%s pct=%s",
-            variant, loccode, pct_level,
+            variant,
+            loccode,
+            pct_level,
         )
         return None
 
@@ -62,6 +67,52 @@ def get_fvs_models(variant: str, loccode: str, pct_level: str = "PCT0") -> dict 
 
     logger.info("Loaded FVS models from %s (%d entries)", model_path, len(models))
     return models
+
+
+_UNKNOWN_FEATURE_WARNED: set[tuple[str, ...]] = set()
+
+
+def _build_feature_row(
+    feature_names: list[str],
+    survival: float,
+    si: float,
+    species_tpa: list[float],
+) -> dict[str, float]:
+    """Map a model's expected feature names to scenario inputs.
+
+    Known names are filled deterministically; unknown names default to 0 with a
+    one-time warning per unique set so the gap is visible without log spam.
+    Add new mappings here when Dave introduces new feature names.
+    """
+    total_tpa = float(sum(species_tpa))
+    padded = (list(species_tpa) + [0, 0, 0, 0])[:4]
+    known = {
+        "Survival": float(survival),
+        "SI": float(si),
+        "total_TPA": total_tpa,
+        "SP1_TPA": float(padded[0]),
+        "SP2_TPA": float(padded[1]),
+        "SP3_TPA": float(padded[2]),
+        "SP4_TPA": float(padded[3]),
+    }
+    row: dict[str, float] = {}
+    unknown: list[str] = []
+    for name in feature_names:
+        if name in known:
+            row[name] = known[name]
+        else:
+            row[name] = 0.0
+            unknown.append(name)
+    if unknown:
+        key = tuple(sorted(unknown))
+        if key not in _UNKNOWN_FEATURE_WARNED:
+            _UNKNOWN_FEATURE_WARNED.add(key)
+            logger.warning(
+                "predict_fvs_metrics: unknown feature(s) %s in model schema; "
+                "defaulting to 0. Update _build_feature_row to map them.",
+                key,
+            )
+    return row
 
 
 def predict_fvs_metrics(
@@ -84,34 +135,30 @@ def predict_fvs_metrics(
     -------
     Wide-format DataFrame: Year, ABLD_C, BA, QMD, SDI, TCuFt, MCuFt, ...
     """
-    total_tpa = sum(species_tpa)
-    # Pad to exactly 4 species slots (SP1–SP4) as the pipelines expect
-    padded = (list(species_tpa) + [0, 0, 0, 0])[:4]
-
-    X_raw = np.array(
-        [[float(survival), float(total_tpa), *[float(s) for s in padded], float(si)]],
-        dtype=float,
-    )
-
-    # Detect model type: v3 (plain LinearRegression, expects 119 poly features)
-    # vs v4 (Pipeline with built-in transform, expects 7 raw features)
     sample_model = next(iter(models.values()))
-    needs_poly = getattr(sample_model, "n_features_in_", 7) > len(X_raw[0])
 
-    if needs_poly:
-        poly = PolynomialFeatures(degree=3, include_bias=False)
-        X = poly.fit_transform(X_raw)
+    # Schema detection: v4 Pipelines carry their own PolynomialFeatures and
+    # expose ``feature_names_in_`` on the first step. v3 bare estimators don't —
+    # they expect the polynomial-expanded feature matrix directly.
+    first_step = None
+    if hasattr(sample_model, "steps") and sample_model.steps:
+        first_step = sample_model.steps[0][1]
+    feature_names = getattr(first_step, "feature_names_in_", None)
+
+    if feature_names is not None:
+        # guard for 8-feature scenarios
+        row = _build_feature_row(list(feature_names), survival, si, species_tpa)
+        X = pd.DataFrame([row])[list(feature_names)]
     else:
-        # v4 pipelines expect named DataFrame
-        X = pd.DataFrame([{
-            "Survival": float(survival),
-            "total_TPA": float(total_tpa),
-            "SP1_TPA": float(padded[0]),
-            "SP2_TPA": float(padded[1]),
-            "SP3_TPA": float(padded[2]),
-            "SP4_TPA": float(padded[3]),
-            "SI": float(si),
-        }])
+        # bare estimator trained on the polynomial-expanded canonical
+        # 7-feature scenario
+        total_tpa = float(sum(species_tpa))
+        padded = (list(species_tpa) + [0, 0, 0, 0])[:4]
+        X_raw = np.array(
+            [[float(survival), total_tpa, *[float(s) for s in padded], float(si)]],
+            dtype=float,
+        )
+        X = PolynomialFeatures(degree=3, include_bias=False).fit_transform(X_raw)
 
     rows = []
     for (year, var), model in models.items():
@@ -126,60 +173,60 @@ def predict_fvs_metrics(
     wide = wide.sort_values("Year").reset_index(drop=True)
     return wide
 
+
 def compute_proforma(df_ert_ac: pd.DataFrame, p: dict) -> pd.DataFrame:
     results = []
 
     for protocol, subdf in df_ert_ac.groupby("Protocol"):
-        df = subdf[['Year', 'CU']].copy()
-        df = df.rename(columns={'CU': 'CU_ac'})
-        df['Project_acres'] = p['net_acres']
-        df['CU'] = df['CU_ac'] * p['net_acres']
+        df = subdf[["Year", "CU"]].copy()
+        df = df.rename(columns={"CU": "CU_ac"})
+        df["Project_acres"] = p["net_acres"]
+        df["CU"] = df["CU_ac"] * p["net_acres"]
 
         # credit volume: sell every 5th year including start year
-        df['CUs_Sold'] = 0.0
+        df["CUs_Sold"] = 0.0
         for i, row in df.iterrows():
-            if (
-                row['Year'] == p['year_start']
-                or ((row['Year'] - p['year_start']) % 5 == 0 and row['Year'] > p['year_start'])
+            if row["Year"] == p["year_start"] or (
+                (row["Year"] - p["year_start"]) % 5 == 0
+                and row["Year"] > p["year_start"]
             ):
-                df.loc[i, 'CUs_Sold'] = df.loc[max(0, i - 4):i, 'CU'].sum()
+                df.loc[i, "CUs_Sold"] = df.loc[max(0, i - 4) : i, "CU"].sum()
 
         # revenue
-        df['CU_Credit_Price'] = (
-            p['price_per_ert_initial']
-            * ((1 + p['credit_price_increase']) ** (df['Year'] - p['year_start']))
+        df["CU_Credit_Price"] = p["price_per_ert_initial"] * (
+            (1 + p["credit_price_increase"]) ** (df["Year"] - p["year_start"])
         )
-        df['Total_Revenue'] = df['CUs_Sold'] * df['CU_Credit_Price']
+        df["Total_Revenue"] = df["CUs_Sold"] * df["CU_Credit_Price"]
 
         # costs
-        df['Validation_and_Verification'] = 0
-        df.loc[df['Year'] == p['year_start'], 'Validation_and_Verification'] = p['validation_cost']
+        df["Validation_and_Verification"] = 0
+        df.loc[df["Year"] == p["year_start"], "Validation_and_Verification"] = p[
+            "validation_cost"
+        ]
         df.loc[
-            (df['Year'] > p['year_start']) &
-            ((df['Year'] - p['year_start']) % 5 == 0),
-            'Validation_and_Verification'
-        ] = p['verification_cost']
+            (df["Year"] > p["year_start"]) & ((df["Year"] - p["year_start"]) % 5 == 0),
+            "Validation_and_Verification",
+        ] = p["verification_cost"]
 
-        df['Survey_Cost'] = 0
-        df.loc[
-            (df['Year'] - p['year_start']) % 5 == 4,
-            'Survey_Cost'
-        ] = p['num_plots'] * p['cost_per_cfi_plot'] * (1 + p['anticipated_inflation'])
-
-        df['Registry_Fees'] = p['registry_fees']
-        df['Issuance_Fees'] = df['CUs_Sold'] * p['issuance_fee_per_ert']
-        df['Planting_Cost'] = p['planting_cost']
-
-        df['Total_Costs'] = (
-            df['Validation_and_Verification']
-            + df['Survey_Cost']
-            + df['Registry_Fees']
-            + df['Issuance_Fees']
-            + df['Planting_Cost']
+        df["Survey_Cost"] = 0
+        df.loc[(df["Year"] - p["year_start"]) % 5 == 4, "Survey_Cost"] = (
+            p["num_plots"] * p["cost_per_cfi_plot"] * (1 + p["anticipated_inflation"])
         )
 
-        df['Net_Revenue'] = df['Total_Revenue'] - df['Total_Costs']
-        df['Protocol'] = protocol
+        df["Registry_Fees"] = p["registry_fees"]
+        df["Issuance_Fees"] = df["CUs_Sold"] * p["issuance_fee_per_ert"]
+        df["Planting_Cost"] = p["planting_cost"]
+
+        df["Total_Costs"] = (
+            df["Validation_and_Verification"]
+            + df["Survey_Cost"]
+            + df["Registry_Fees"]
+            + df["Issuance_Fees"]
+            + df["Planting_Cost"]
+        )
+
+        df["Net_Revenue"] = df["Total_Revenue"] - df["Total_Costs"]
+        df["Protocol"] = protocol
         results.append(df)
 
     return pd.concat(results, ignore_index=True)
@@ -205,22 +252,23 @@ def compute_summaries(
 
         total_net = subdf["Net_Revenue"].sum()
 
-        cashflows = subdf[
-            subdf["Year"] <= (year_start + npv_years)
-        ]["Net_Revenue"]
+        cashflows = subdf[subdf["Year"] <= (year_start + npv_years)]["Net_Revenue"]
 
         npv_yr = float(npf.npv(discount_rate, cashflows))
         npv_per_acre = npv_yr / net_acres if net_acres else None
 
-        summaries.append({
-            "Protocol": protocol,
-            "total_net": total_net,
-            "npv_yr": npv_yr,
-            "npv_year": int(npv_years),
-            "npv_per_acre": npv_per_acre,
-        })
+        summaries.append(
+            {
+                "Protocol": protocol,
+                "total_net": total_net,
+                "npv_yr": npv_yr,
+                "npv_year": int(npv_years),
+                "npv_per_acre": npv_per_acre,
+            }
+        )
 
     return pd.DataFrame(summaries)
+
 
 def compute_carbon_scores(
     coefficients: Dict,
@@ -236,7 +284,11 @@ def compute_carbon_scores(
 
     # Extract species-specific coefficient keys (anything starting with TPA_ except TPA_total)
     sample_year = next(iter(sorted(coefficients.keys(), key=int)))
-    sp_coeff_keys = [k for k in coefficients[sample_year] if k.startswith("TPA_") and k != "TPA_total"]
+    sp_coeff_keys = [
+        k
+        for k in coefficients[sample_year]
+        if k.startswith("TPA_") and k != "TPA_total"
+    ]
 
     for year in sorted(coefficients.keys(), key=int):
         c = coefficients[year]
@@ -268,6 +320,7 @@ def compute_carbon_scores(
         for y, c, a in zip(years, c_scores, ann_c_scores)
     ]
 
+
 def compute_carbon_units(
     df_carbon: pd.DataFrame,
     protocols: list[str],
@@ -296,7 +349,6 @@ def compute_carbon_units(
                 "No protocol rules found for selected protocols and no fallback protocol rules are configured."
             )
 
-
         df_base = df_carbon.copy()
         df_base["Onsite_Total_CO2"] = df_base["ABLD_C"] * 3.667 * rules["coeff"]
 
@@ -311,15 +363,19 @@ def compute_carbon_units(
         years_interp = np.arange(start_year, int(X.max()) + 1)
         y_interp = spline(years_interp)
 
-        df_project = pd.DataFrame({
-            "Year": years_interp,
-            "project": y_interp,
-        })
+        df_project = pd.DataFrame(
+            {
+                "Year": years_interp,
+                "project": y_interp,
+            }
+        )
 
-        df_baseline = pd.DataFrame({
-            "Year": years_interp,
-            "baseline": np.zeros_like(years_interp, dtype=float),
-        })
+        df_baseline = pd.DataFrame(
+            {
+                "Year": years_interp,
+                "baseline": np.zeros_like(years_interp, dtype=float),
+            }
+        )
 
         df_project["delta_project"] = df_project["project"].diff()
         df_baseline["delta_baseline"] = df_baseline["baseline"].diff()
@@ -343,9 +399,7 @@ def compute_carbon_units(
         merged = merged.replace([np.inf, -np.inf], np.nan)
         merged = merged.dropna(subset=["CU"])
 
-        all_protocol_dfs.append(
-            merged[["Year", "CU", "Protocol"]]
-        )
+        all_protocol_dfs.append(merged[["Year", "CU", "Protocol"]])
 
     return pd.concat(all_protocol_dfs, ignore_index=True)
 
@@ -380,8 +434,7 @@ def _resolve_variant_for_loccode(
        lookup error surfaces meaningfully.
     """
     if any(
-        m.get("variant") == variant and m.get("loccode") == loccode
-        for m in registry
+        m.get("variant") == variant and m.get("loccode") == loccode for m in registry
     ):
         return variant
 
@@ -496,7 +549,8 @@ def default_scenario(variant: str, loccode: str) -> dict:
     elif preset_source != resolved_variant:
         logger.info(
             "default_scenario: variant=%s using preset from %s (no exact match)",
-            resolved_variant, preset_source,
+            resolved_variant,
+            preset_source,
         )
 
     return {
@@ -531,7 +585,9 @@ def _carbon_for_inputs_cached(
         wide = predict_fvs_metrics(models, survival, si, list(species_tpa))
         if not wide.empty:
             if "ABLD_C" in wide.columns:
-                wide["Annual_ABLD_C"] = wide["ABLD_C"].diff().fillna(wide["ABLD_C"].iloc[0])
+                wide["Annual_ABLD_C"] = (
+                    wide["ABLD_C"].diff().fillna(wide["ABLD_C"].iloc[0])
+                )
             zero_row = {col: 0.0 for col in wide.columns}
             zero_row["Year"] = PROFORMA_YEAR_START
             wide = pd.concat([pd.DataFrame([zero_row]), wide], ignore_index=True)
@@ -565,8 +621,12 @@ def _carbon_for_inputs(
     mutation is safe even though the cache reuses the underlying result.
     """
     df, source = _carbon_for_inputs_cached(
-        variant, loccode, float(survival), float(si),
-        tuple(float(x) for x in species_tpa), pct_level,
+        variant,
+        loccode,
+        float(survival),
+        float(si),
+        tuple(float(x) for x in species_tpa),
+        pct_level,
     )
     return df.copy(), source
 
@@ -648,7 +708,9 @@ def _solve_acreage_for_metric(
     key = _METRIC_TO_SUMMARY_KEY[metric]
 
     _, s1 = _proforma_for_protocol(df_cu_protocol, protocol, fin_params, 1.0, npv_year)
-    _, s10 = _proforma_for_protocol(df_cu_protocol, protocol, fin_params, 10.0, npv_year)
+    _, s10 = _proforma_for_protocol(
+        df_cu_protocol, protocol, fin_params, 10.0, npv_year
+    )
 
     v_1 = float(s1[key])
     v_10 = float(s10[key])
@@ -659,7 +721,7 @@ def _solve_acreage_for_metric(
             f"{metric.upper()} is invariant to net_acres (slope=0) — cannot solve. "
             "Likely the protocol produces no credits for this scenario."
         )
-    intercept = v_1 - slope * 1.0   # so metric(acres) = slope * acres + intercept
+    intercept = v_1 - slope * 1.0  # so metric(acres) = slope * acres + intercept
     target_acres = (target_value - intercept) / slope
     if target_acres <= 0:
         raise ValueError(
@@ -683,15 +745,23 @@ def run_scenario(inputs: dict) -> dict:
     defaults = default_scenario(inputs["variant"], inputs["loccode"])
 
     resolved = {**defaults}
-    for key in ("survival", "si", "species_tpa", "pct_level", "net_acres",
-                "protocols", "npv_year"):
+    for key in (
+        "survival",
+        "si",
+        "species_tpa",
+        "pct_level",
+        "net_acres",
+        "protocols",
+        "npv_year",
+    ):
         value = inputs.get(key)
         if value is not None:
             resolved[key] = value
 
     fin_overrides = inputs.get("financial_params")
     resolved["financial_params"] = _normalize_financial_params(
-        resolved["protocols"], fin_overrides,
+        resolved["protocols"],
+        fin_overrides,
     )
 
     solve = inputs.get("solve")
@@ -704,9 +774,12 @@ def run_scenario(inputs: dict) -> dict:
         )
 
     df_carbon, model_source = _carbon_for_inputs(
-        resolved["variant"], resolved["loccode"],
-        resolved["survival"], resolved["si"],
-        resolved["species_tpa"], resolved["pct_level"],
+        resolved["variant"],
+        resolved["loccode"],
+        resolved["survival"],
+        resolved["si"],
+        resolved["species_tpa"],
+        resolved["pct_level"],
     )
     protocol_rules = _load_base_json("protocol_rules.json")
     df_cu = compute_carbon_units(df_carbon, resolved["protocols"], protocol_rules)
@@ -720,24 +793,43 @@ def run_scenario(inputs: dict) -> dict:
 
         if solve is not None and protocol == resolved["protocols"][0]:
             target_acres = _solve_acreage_for_metric(
-                df_cu_p, protocol, fin_params, resolved["npv_year"],
-                solve["value"], metric=solve.get("target", "tnr"),
+                df_cu_p,
+                protocol,
+                fin_params,
+                resolved["npv_year"],
+                solve["value"],
+                metric=solve.get("target", "tnr"),
             )
             resolved["net_acres"] = target_acres
 
         net_acres = resolved["net_acres"]
         df_pf, summary_row = _proforma_for_protocol(
-            df_cu_p, protocol, fin_params, net_acres, resolved["npv_year"],
+            df_cu_p,
+            protocol,
+            fin_params,
+            net_acres,
+            resolved["npv_year"],
         )
         summaries.append(summary_row)
         proforma_frames.append(df_pf)
 
     response: dict = {
-        "inputs": {k: resolved[k] for k in (
-            "variant", "loccode", "survival", "si", "species_tpa",
-            "species_codes", "pct_level", "net_acres", "protocols",
-            "npv_year", "financial_params",
-        )},
+        "inputs": {
+            k: resolved[k]
+            for k in (
+                "variant",
+                "loccode",
+                "survival",
+                "si",
+                "species_tpa",
+                "species_codes",
+                "pct_level",
+                "net_acres",
+                "protocols",
+                "npv_year",
+                "financial_params",
+            )
+        },
         "summaries": summaries,
         "model_source": model_source,
     }
