@@ -489,6 +489,16 @@ def _seed_defaults(prefix: str = "credits_"):
         st.session_state.setdefault(prefix + k, v)
 
 
+def _sync_active_variant():
+    """Push a Planting Design sub-variant pick into ``active_variant``.
+
+    Runs as the selectbox ``on_change`` callback (before the rerun) so the
+    single source of truth reflects the user's choice *before* the widget is
+    re-seeded from it on the next run.
+    """
+    st.session_state["active_variant"] = st.session_state.get("planting_sub_variant")
+
+
 def planting_sliders():
     """
     Render all planting-related Streamlit sliders. Restores saved state, renders species sliders, computes species mix values, and stores
@@ -501,29 +511,46 @@ def planting_sliders():
     )
     varloc_code = st.session_state.get("selected_varloc_code", "609")
 
-    # Resolve sub-variants based on what models exist for this loccode
+    # Sub-variant refinement at the committed location. The Site Selection
+    # chooser may have already set ``active_variant`` (incl. cross-variant
+    # overlaps); here the user can still switch between sub-variants registered
+    # at this loccode (e.g. NC_1 vs NC_2). Selection stays in sync via
+    # ``active_variant``.
     sub_variants = _resolve_sub_variants(map_variant, varloc_code)
+    current = st.session_state.get("active_variant")
+    if current not in sub_variants:
+        current = sub_variants[0]
+    # ``active_variant`` is the single source of truth for the sub-variant.
+    # Seed the keyed selectbox from it every run so an upstream change (the
+    # Site Selection chooser) propagates here. A keyed widget's stored value
+    # otherwise overrides the ``index=`` default whenever it is still a valid
+    # option (e.g. switching NC_1 <-> NC_2), silently pinning the variant — and
+    # with it the species list and the variant actually run. ``on_change``
+    # pushes user picks back into ``active_variant`` so this never clobbers a
+    # fresh selection.
+    st.session_state["planting_sub_variant"] = current
+
     if len(sub_variants) > 1:
         variant = st.selectbox(
-            "Sub-variant",
+            "FVS Variant",
             options=sub_variants,
-            index=0,
-            key="selected_sub_variant",
+            key="planting_sub_variant",
+            on_change=_sync_active_variant,
+            help=H("planting.variant_label"),
         )
     else:
         variant = sub_variants[0]
+        st.markdown(
+            f"**FVS Variant:** {variant}",
+            unsafe_allow_html=False,
+            help=H("planting.variant_label"),
+            width="stretch",
+        )
     st.session_state["active_variant"] = variant
 
     if variant not in presets:
         st.warning(f"Variant '{variant}' not found in presets. Falling back to 'PN'.")
     preset = presets.get(variant, presets.get("PN", {}))
-
-    st.markdown(
-        f"**FVS Variant:** {map_variant}",
-        unsafe_allow_html=False,
-        help=H("planting.variant_label"),
-        width="stretch",
-    )
     st.markdown(
         f"**FVS Location Name:** {varloc_name}",
         unsafe_allow_html=False,
@@ -1356,7 +1383,9 @@ def generate_report():
         {"column1": "Reforestation Strategy", "column2": "Mixed Species Planting"},
         {
             "column1": "Variant",
-            "column2": st.session_state.get("selected_variant", "PN"),
+            "column2": st.session_state.get(
+                "active_variant", st.session_state.get("selected_variant", "PN")
+            ),
         },
         {
             "column1": "Location Name",
@@ -1395,12 +1424,14 @@ def generate_report():
     species_mix.append(
         {"column1": "Species", "column2": "TPA#footnote[Trees per Acre]"}
     )
-    selected_variant = st.session_state.get("selected_variant", "PN")
-    sp_keys = _species_keys(selected_variant)
+    report_variant = st.session_state.get(
+        "active_variant", st.session_state.get("selected_variant", "PN")
+    )
+    sp_keys = _species_keys(report_variant)
     for i, key in enumerate(sp_keys):
         value = st.session_state.get(key, 0)
         if value > 0:
-            label = _species_label(selected_variant, i)
+            label = _species_label(report_variant, i)
             species_mix.append({"column1": label, "column2": str(value)})
 
     # Financial options 1
@@ -1521,8 +1552,11 @@ def generate_report():
 
     carbon_data = carbon_df.to_dict(orient="records")
 
-    # Get selected variant
-    selected_variant = st.session_state.get("selected_variant", "PN")
+    # Use the concrete chosen variant (set by the Site Selection chooser), not the
+    # base map variant, so the report's species/model match the run.
+    selected_variant = st.session_state.get(
+        "active_variant", st.session_state.get("selected_variant", "PN")
+    )
     selected_varloc_name = st.session_state.get(
         "selected_varloc_name", "Olympic National Forest"
     )

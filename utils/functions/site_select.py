@@ -9,10 +9,11 @@ import logging
 import requests
 from pathlib import Path
 import io
-from shapely.geometry import shape, box
+from shapely.geometry import shape, box, Point
 
 from utils.config import get_api_base_url
 from utils.functions.map_colors import color_for_feature
+from utils.functions.helper import H
 
 logger = logging.getLogger(__name__)
 
@@ -267,10 +268,18 @@ def build_map(geojson_str, points=None, upload=None, center=(37.8, -96.9), zoom=
                     geom = shape(feat["geometry"])
                     all_bounds.append(geom.bounds)  # (minx, miny, maxx, maxy)
                 if all_bounds:
-                    minx = min(b[0] for b in all_bounds)
                     miny = min(b[1] for b in all_bounds)
-                    maxx = max(b[2] for b in all_bounds)
                     maxy = max(b[3] for b in all_bounds)
+                    minx = min(b[0] for b in all_bounds)
+                    maxx = max(b[2] for b in all_bounds)
+                    # Alaska's islands wrap past +180deg...
+                    if maxx - minx > 180:
+                        lons = [
+                            (lon - 360 if lon > 0 else lon)
+                            for b in all_bounds
+                            for lon in (b[0], b[2])
+                        ]
+                        minx, maxx = min(lons), max(lons)
                     last_center = ((miny + maxy) / 2, (minx + maxx) / 2)
                     fit_bounds = [[miny, minx], [maxy, maxx]]
                 else:
@@ -390,52 +399,122 @@ def _loccode_str(v):
         return None
 
 
-def auto_select_variant_from_point(point, geojson_str):
+def _fetch_registry() -> list[dict]:
+    """Fetch the model registry once for candidate expansion."""
+    try:
+        resp = requests.get(f"{get_api_base_url()}/models/registry", timeout=5)
+        resp.raise_for_status()
+        return resp.json().get("models", [])
+    except Exception:
+        return []
+
+
+def _registry_variants(base: str, loccode: str, registry: list[dict]) -> list[str]:
+    """Concrete registered variants for a (base, loccode) pair.
+
+    Mirrors the registry half of ``plant_design._resolve_sub_variants`` but takes
+    a pre-fetched registry so candidate collection makes a single HTTP call.
     """
-    Resolve and set the selected variant/session state from a lat/lon point.
-    Returns the matched feature properties if found, else None.
+    registered = sorted(
+        {
+            m["variant"]
+            for m in registry
+            if m.get("loccode") == loccode
+            and m.get("variant")
+            and (m["variant"] == base or m["variant"].startswith(base + "_"))
+        }
+    )
+    return registered or [base]
+
+
+def variants_at_point(point, geojson_str) -> list[dict]:
+    """Collect every FVS variant whose polygon contains ``point``.
+
+    Returns a sorted, de-duplicated list of option dicts, one per concrete
+    registered variant at every overlapping (base, loccode):
+
+        {"variant", "loccode", "locname", "base", "feature"}
+
+    Because detection is geometric, this surfaces the full overlap set — both
+    same-base sub-variants (WC_1, WC_2) and unrelated bases sharing the spot
+    (PN, SO) — that a single map click would otherwise hide.
     """
     if point is None or not geojson_str:
-        return None
-
+        return []
     try:
-        gjson = json.loads(geojson_str)
-        features = gjson.get("features", [])
+        features = json.loads(geojson_str).get("features", [])
     except Exception:
-        return None
+        return []
+
+    registry = _fetch_registry()
+    options: dict[tuple[str, str], dict] = {}
 
     for feat in features:
         geom_json = feat.get("geometry")
         if not geom_json:
             continue
-
         try:
             geom = shape(geom_json)
         except Exception:
             continue
-
         if not geom.intersects(point):
             continue
 
         props = feat.get("properties", {}) or {}
-        map_variant = props.get("FVSVariant", "PN")
-        loccode = _loccode_str(props.get("FVSLocCode")) or "609"
+        base = props.get("FVSVariant", "PN")
+        loccode = _loccode_str(props.get("FVSLocCode"))
+        if loccode is None:
+            continue
+        locname = props.get("FVSLocName", "")
 
-        st.session_state["clicked_feature"] = feat
-        st.session_state["clicked_props"] = props
-        st.session_state["selected_variant"] = map_variant
-        st.session_state["selected_varloc_name"] = props.get("FVSLocName", "Olympic National Forest")
-        st.session_state["selected_varloc_code"] = loccode
-        st.session_state["FVSLocCode"] = loccode
+        for variant in _registry_variants(base, loccode, registry):
+            key = (variant, loccode)
+            options.setdefault(
+                key,
+                {
+                    "variant": variant,
+                    "loccode": loccode,
+                    "locname": locname,
+                    "base": base,
+                    "feature": feat,
+                },
+            )
 
-        # Resolve sub-variant at selection time
-        from utils.functions.plant_design import _resolve_sub_variants
-        sub_variants = _resolve_sub_variants(map_variant, loccode)
-        st.session_state["active_variant"] = sub_variants[0] if sub_variants else map_variant
+    return [options[k] for k in sorted(options.keys())]
 
-        return props
 
-    return None
+def _apply_candidate(c: dict):
+    """Write a chosen variant candidate into session state (variant + location)."""
+    st.session_state["active_variant"] = c["variant"]
+    st.session_state["selected_variant"] = c["base"]
+    st.session_state["selected_varloc_code"] = c["loccode"]
+    st.session_state["FVSLocCode"] = c["loccode"]
+    st.session_state["selected_varloc_name"] = c.get("locname") or ""
+    st.session_state["clicked_feature"] = c["feature"]
+    st.session_state["clicked_props"] = c["feature"].get("properties", {}) or {}
+
+
+def _select_candidates(candidates: list[dict]) -> bool:
+    """Store candidates and auto-pick the first. Returns True if any were found."""
+    st.session_state["variant_candidates"] = candidates
+    # New selection: reset the chooser widget so it re-defaults to the first option.
+    st.session_state.pop("site_variant_choice", None)
+    if not candidates:
+        return False
+    _apply_candidate(candidates[0])
+    return True
+
+
+def auto_select_variant_from_point(point, geojson_str):
+    """
+    Resolve and set the selected variant/session state from a lat/lon point.
+    Collects every overlapping variant as a candidate, auto-selecting the first.
+    Returns the selected feature's properties if found, else None.
+    """
+    candidates = variants_at_point(point, geojson_str)
+    if not _select_candidates(candidates):
+        return None
+    return st.session_state["clicked_props"]
 
 def build_highlight_layer(feature: dict | None) -> folium.FeatureGroup | None:
     """Build a FeatureGroup for the selected feature highlight.
@@ -461,31 +540,57 @@ def build_highlight_layer(feature: dict | None) -> folium.FeatureGroup | None:
     return fg
 
 
-def _process_pending_click():
+def _candidates_from_feature(feat: dict, registry: list[dict] | None = None) -> list[dict]:
+    """Build candidate options from a single clicked feature (fallback path)."""
+    props = feat.get("properties", {}) or {}
+    base = props.get("FVSVariant", "PN")
+    loccode = _loccode_str(props.get("FVSLocCode"))
+    if loccode is None:
+        return []
+    registry = _fetch_registry() if registry is None else registry
+    locname = props.get("FVSLocName", "")
+    return [
+        {"variant": v, "loccode": loccode, "locname": locname, "base": base, "feature": feat}
+        for v in _registry_variants(base, loccode, registry)
+    ]
+
+
+def _process_pending_click(geojson_str: str | None = None):
     """Process a map click that was saved on the previous render.
 
     Call this BEFORE building the map so the highlight is included
-    in the same render pass.
+    in the same render pass. Uses the clicked lat/lng to collect every
+    overlapping variant; falls back to the clicked feature alone if the
+    point misses (e.g. simplified geometry).
     """
     pending = st.session_state.pop("_pending_map_click", None)
     if pending is None:
         return False
 
-    feat = pending
-    props = feat.get("properties", {}) or {}
-    map_variant = props.get("FVSVariant", "PN")
-    loccode = _loccode_str(props.get("FVSLocCode")) or "609"
+    feat = pending.get("feature") if isinstance(pending, dict) else pending
+    latlng = pending.get("latlng") if isinstance(pending, dict) else None
+    if not feat:
+        return False
 
-    st.session_state["clicked_feature"] = feat
-    st.session_state["clicked_props"] = props
-    st.session_state["selected_variant"] = map_variant
-    st.session_state["selected_varloc_name"] = props.get("FVSLocName", "Olympic National Forest")
-    st.session_state["selected_varloc_code"] = loccode
-    st.session_state["FVSLocCode"] = loccode
+    # Remember what was clicked so re-renders don't re-trigger processing,
+    # even though the auto-picked candidate may be a different overlapping polygon.
+    st.session_state["_last_click_feature"] = feat
 
-    from utils.functions.plant_design import _resolve_sub_variants
-    sub_variants = _resolve_sub_variants(map_variant, loccode)
-    st.session_state["active_variant"] = sub_variants[0] if sub_variants else map_variant
+    point = None
+    if latlng and latlng.get("lat") is not None and latlng.get("lng") is not None:
+        point = Point(latlng["lng"], latlng["lat"])
+    else:
+        try:
+            point = shape(feat["geometry"]).representative_point()
+        except Exception:
+            point = None
+
+    candidates = (
+        variants_at_point(point, geojson_str) if (point and geojson_str) else []
+    )
+    if not candidates:
+        candidates = _candidates_from_feature(feat)
+    _select_candidates(candidates)
     return True
 
 
@@ -495,8 +600,11 @@ def show_clicked_variant(map_data):
         feat = map_data["last_active_drawing"]
         props = feat.get("properties", {})
 
-        if props and st.session_state.get("clicked_feature") != feat:
-            st.session_state["_pending_map_click"] = feat
+        if props and st.session_state.get("_last_click_feature") != feat:
+            st.session_state["_pending_map_click"] = {
+                "feature": feat,
+                "latlng": map_data.get("last_clicked"),
+            }
             st.rerun()
 
 def display_selected_info():
@@ -528,6 +636,51 @@ def display_selected_info():
                         display_value = active
                 st.success(f"Successfully selected **{display_key}:** {display_value}")
                 # st.success(f"Please continue to Planting Design, or select a different variant.")
+
+
+def _candidate_label(c: dict) -> str:
+    """Human-readable label for a variant candidate in the chooser."""
+    name = c.get("locname") or ""
+    if name:
+        return f"{c['variant']} — {name} ({c['loccode']})"
+    return f"{c['variant']} ({c['loccode']})"
+
+
+def variant_chooser():
+    """Render the FVS variant chooser for the current selection.
+
+    Lists every variant valid at the clicked location. The first is auto-picked;
+    the user can override. A single-candidate selection renders nothing extra
+    (``display_selected_info`` already shows the resolved variant).
+    """
+    candidates = st.session_state.get("variant_candidates") or []
+    if len(candidates) <= 1:
+        return
+
+    labels = [_candidate_label(c) for c in candidates]
+    active = st.session_state.get("active_variant")
+    default_idx = next(
+        (i for i, c in enumerate(candidates) if c["variant"] == active), 0
+    )
+    idx = st.selectbox(
+        "Multiple FVS variants cover this location — choose one:",
+        options=list(range(len(candidates))),
+        index=default_idx,
+        format_func=lambda i: labels[i],
+        key="site_variant_choice",
+        help=H("site.variant_chooser"),
+    )
+    chosen = candidates[idx]
+    # The selected-info panel and map highlight are rendered earlier in the page
+    # pass; rerun once on a real change so they reflect the new choice.
+    changed = (
+        st.session_state.get("active_variant") != chosen["variant"]
+        or st.session_state.get("selected_varloc_code") != chosen["loccode"]
+    )
+    _apply_candidate(chosen)
+    if changed:
+        st.rerun()
+
 
 @st.fragment
 def submit_map(map_data):

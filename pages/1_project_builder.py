@@ -12,7 +12,7 @@ import zipfile
 from geopy.geocoders import Nominatim
 
 from utils.functions.helper import  H
-from utils.functions.site_select import load_geojson_fragment, load_geojson_or_shapefile, build_map, build_highlight_layer, show_clicked_variant, display_selected_info, auto_select_variant_from_point, _process_pending_click
+from utils.functions.site_select import load_geojson_fragment, load_geojson_or_shapefile, build_map, build_highlight_layer, show_clicked_variant, display_selected_info, auto_select_variant_from_point, _process_pending_click, variant_chooser
 from utils.functions.plant_design import run_chart
 
 # Page Configuration
@@ -217,7 +217,7 @@ if st.session_state.active_tab == "Site Selection Map":
 
     # Process any pending map click BEFORE building the map
     # so the highlight renders in the same pass.
-    _process_pending_click()
+    _process_pending_click(geojson_str)
 
     st.session_state.setdefault("map_view", {"center": [45.5, -118], "zoom": 6})
 
@@ -239,12 +239,13 @@ if st.session_state.active_tab == "Site Selection Map":
         key="fvs_map",
         height=500,
         use_container_width=True,
-        returned_objects=["last_active_drawing"],
+        returned_objects=["last_active_drawing", "last_clicked"],
         feature_group_to_add=highlight_fg,
     )
 
     show_clicked_variant(map_data)
     display_selected_info()
+    variant_chooser()
 
     # Fill the button placeholder now that click state is up to date
     if st.session_state.get("selected_variant"):
