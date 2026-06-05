@@ -15,6 +15,12 @@ import joblib
 import requests
 import streamlit as st
 
+from model_service.model import (
+    species_count_from_model,
+    reconcile_species_names,
+    load_effective_species_map,
+    load_effective_preset_map,
+)
 from model_service.store import get_store
 from utils.config import get_api_base_url
 from utils.functions.slider_bounds import slider_bounds
@@ -30,19 +36,9 @@ BASE_PATH = APP_ROOT / "conf" / "base"
 
 
 @st.cache_data
-def _load_variant_species() -> dict:
-    return get_store().get_json("config/variant_species.json")
-
-
-@st.cache_data
 def _load_species_labels() -> dict:
     with open(BASE_PATH / "species_labels.json") as f:
         return json.load(f)
-
-
-@st.cache_data
-def _load_variant_presets() -> dict:
-    return get_store().get_json("config/FVSVariant_presets.json")
 
 
 @st.cache_data
@@ -116,11 +112,16 @@ def _validate_model(path: Path) -> dict:
     years = sorted({int(k[0]) for k in models})
     variables = sorted({k[1] for k in models})
 
+    species_count = species_count_from_model(models)
+    if species_count is None:
+        species_count = 4  # v3 bare estimator: legacy 4-slot assumption
+
     return {
         "n_entries": len(models),
         "years": years,
         "variables": variables,
         "n_features": n_features,
+        "species_count": species_count,
         "model_format": "v4 pipeline" if n_features == 7 else "v3 polynomial",
     }
 
@@ -282,6 +283,7 @@ def _render_upload_tab(
                 "pct_level": pct_level,
                 "pct_retention": retention_pct,
                 "version": version,
+                "species_count": info["species_count"],
             })
 
     if not file_configs:
@@ -297,44 +299,49 @@ def _render_upload_tab(
         label = f"Species & Defaults — {v}" if len(variants_in_batch) > 1 else "Species & Defaults"
         st.subheader(label)
 
-        max_species = variant_species.get("_max_species", 4)
         all_species_codes = sorted(species_labels.keys())
         species_options = [""] + [
             f"{code} — {species_labels[code]}"
             for code in all_species_codes
         ]
+        # Model count is authoritative for the number of slots.
+        model_count = max((fc.get("species_count") or 0) for fc in _fcs) or 1
         current_species = variant_species.get(v, [])
 
-        selected_species: list[str] = []
-        sp_cols = st.columns(max_species)
-        for i in range(max_species):
-            with sp_cols[i]:
+        st.caption(
+            f"{model_count} species slot(s) from the model. "
+            "Names are optional — blanks render as SP1…SPn."
+        )
+        typed_names: list[str] = []
+        sp_cols = st.columns(model_count)
+        for i in range(model_count):
+            with sp_cols[i % len(sp_cols)]:
                 default_code = current_species[i] if i < len(current_species) else ""
                 default_display = (
                     f"{default_code} — {species_labels.get(default_code, default_code)}"
                     if default_code else ""
                 )
-                default_sp_idx = (
+                default_idx = (
                     species_options.index(default_display)
                     if default_display in species_options else 0
                 )
-                if i == 0 or selected_species:
-                    choice = st.selectbox(
-                        f"SP{i + 1}", options=species_options,
-                        index=default_sp_idx,
-                        format_func=lambda x: x if x else "—",
-                        key=f"sp_select_{v_idx}_{i}",
-                    )
-                    if choice:
-                        selected_species.append(choice.split(" — ")[0])
+                choice = st.selectbox(
+                    f"SP{i + 1}", options=species_options,
+                    index=default_idx,
+                    format_func=lambda x: x if x else "—",
+                    key=f"sp_select_{v_idx}_{i}",
+                )
+                typed_names.append(choice.split(" — ")[0] if choice else "")
 
-        if not selected_species:
-            st.warning(f"At least one species is required for {v}.")
+        selected_species, sp_warning = reconcile_species_names(typed_names, model_count)
+        if sp_warning:
+            st.warning(f"{v}: {sp_warning}")
 
-        preset = variant_presets.get(v, {})
+        from model_service.model import _synthesize_preset
+        preset = variant_presets.get(v) or _synthesize_preset(model_count)
         existing_tpa = preset.get("default_tpa", [])
         bounds = slider_bounds(preset)
-        n_sp = len(selected_species) if selected_species else 0
+        n_sp = model_count
 
         # Row 1: default values
         default_cols = st.columns(3)
@@ -388,10 +395,12 @@ def _render_upload_tab(
         default_tpa: list[int] = []
         if n_sp:
             tpa_cols = st.columns(n_sp)
-            for i, sp_code in enumerate(selected_species):
+            for i in range(n_sp):
+                code = selected_species[i] if i < len(selected_species) else ""
+                label = f"{code} TPA" if code else f"SP{i + 1} TPA"
                 with tpa_cols[i]:
                     val = st.number_input(
-                        f"{sp_code} TPA", min_value=0,
+                        label, min_value=0,
                         value=int(existing_tpa[i]) if i < len(existing_tpa) else 20,
                         key=f"preset_tpa_{v_idx}_{i}",
                     )
@@ -432,10 +441,6 @@ def _render_upload_tab(
         st.warning("Variant and location code are required for all models.")
         return
 
-    missing_species = [v for v, s in variant_settings.items() if not s["species"]]
-    if missing_species:
-        return
-
     if st.button(
         f"Confirm upload ({len(file_configs)} model{'s' if len(file_configs) != 1 else ''})",
         type="primary",
@@ -465,35 +470,22 @@ def _render_upload_tab(
             uploaded_count += 1
 
         registry["models"] = models_list
-        store.put_json(registry, "registry.json")
-
-        vs_data = store.get_json("config/variant_species.json")
-        vs_changed = False
+        registry.setdefault("variants", {})
         for v, settings in variant_settings.items():
-            if vs_data.get(v) != settings["species"]:
-                vs_data[v] = settings["species"]
-                vs_changed = True
-        if vs_changed:
-            store.put_json(vs_data, "config/variant_species.json")
-
-        presets_data = store.get_json("config/FVSVariant_presets.json")
-        presets_changed = False
-        for v, settings in variant_settings.items():
-            new_preset = {
-                "survival": settings["survival"],
-                "si": settings["si"],
-                "si_min": settings["si_min"],
-                "si_max": settings["si_max"],
-                "survival_min": settings["survival_min"],
-                "survival_max": settings["survival_max"],
-                "default_tpa": settings["default_tpa"],
-                "_tpa_cap": settings["_tpa_cap"],
+            registry["variants"][v] = {
+                "species": settings["species"],
+                "preset": {
+                    "survival": settings["survival"],
+                    "si": settings["si"],
+                    "si_min": settings["si_min"],
+                    "si_max": settings["si_max"],
+                    "survival_min": settings["survival_min"],
+                    "survival_max": settings["survival_max"],
+                    "default_tpa": settings["default_tpa"],
+                    "_tpa_cap": settings["_tpa_cap"],
+                },
             }
-            if presets_data.get(v) != new_preset:
-                presets_data[v] = new_preset
-                presets_changed = True
-        if presets_changed:
-            store.put_json(presets_data, "config/FVSVariant_presets.json")
+        store.put_json(registry, "registry.json")
 
         st.success(
             f"Uploaded **{uploaded_count}** model{'s' if uploaded_count != 1 else ''} "
@@ -521,9 +513,9 @@ def _render_upload_tab(
 def main() -> None:
     st.title("Model Management")
 
-    variant_species = _load_variant_species()
+    variant_species = load_effective_species_map()
     species_labels = _load_species_labels()
-    variant_presets = _load_variant_presets()
+    variant_presets = load_effective_preset_map()
     geo_locations = _load_geojson_locations()
 
     # Build option lists

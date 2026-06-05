@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List
@@ -478,6 +479,45 @@ def _synthesize_preset(species_count: int) -> dict:
     }
 
 
+_SP_TPA_RE = re.compile(r"^SP\d+_TPA$")
+
+
+def species_count_from_features(feature_names) -> int:
+    """Number of ``SP<n>_TPA`` columns in a model's feature list."""
+    return sum(1 for n in feature_names if _SP_TPA_RE.match(str(n)))
+
+
+def species_count_from_model(models: dict) -> int | None:
+    """Species slot count from a loaded model dict.
+
+    Returns ``None`` for v3 bare estimators that expose no ``feature_names_in_``
+    (callers fall back to the legacy 4-slot assumption).
+    """
+    sample = next(iter(models.values()))
+    first_step = sample.steps[0][1] if getattr(sample, "steps", None) else None
+    names = getattr(first_step, "feature_names_in_", None)
+    if names is None:
+        return None
+    return species_count_from_features(names)
+
+
+def reconcile_species_names(typed: list[str], model_count: int) -> tuple[list[str], str | None]:
+    """Force a species-name list to the model's authoritative slot count.
+
+    Pads with ``""`` or truncates; returns ``(codes, warning_or_None)``.
+    """
+    codes = [(c or "").strip() for c in typed][:model_count]
+    named = len([c for c in codes if c])
+    warning = None
+    if len(typed) != model_count:
+        warning = (
+            f"Model expects {model_count} species slot(s); got {named} name(s). "
+            f"Reconciled to {model_count} (model count is authoritative)."
+        )
+    codes += [""] * (model_count - len(codes))
+    return codes, warning
+
+
 def _resolve_preset(variant: str, presets: dict) -> tuple[dict | None, str | None]:
     """Find the best preset for ``variant`` and report which key supplied it.
 
@@ -513,6 +553,58 @@ def _resolve_species(variant: str, species_map: dict) -> list[str]:
     return []
 
 
+def _overlay_registry_variants(base_map: dict, registry_variants: dict, field: str) -> dict:
+    """Overlay ``registry_variants[v][field]`` onto ``base_map`` (registry wins).
+
+    Only applies truthy values, so a registry entry that lacks ``field`` (or has
+    an empty list/dict) leaves the legacy entry intact. Non-variant keys in
+    ``base_map`` (e.g. ``_max_species``) are preserved.
+    """
+    merged = dict(base_map)
+    for variant, data in registry_variants.items():
+        value = data.get(field)
+        if value:
+            merged[variant] = list(value) if field == "species" else dict(value)
+    return merged
+
+
+def load_effective_species_map() -> dict:
+    """Legacy variant_species.json with registry.variants species overlaid."""
+    store = get_store()
+    return _overlay_registry_variants(
+        store.get_json("config/variant_species.json"),
+        store.get_json("registry.json").get("variants", {}),
+        "species",
+    )
+
+
+def load_effective_preset_map() -> dict:
+    """Legacy FVSVariant_presets.json with registry.variants presets overlaid."""
+    store = get_store()
+    return _overlay_registry_variants(
+        store.get_json("config/FVSVariant_presets.json"),
+        store.get_json("registry.json").get("variants", {}),
+        "preset",
+    )
+
+
+def _species_count_for_variant(variant: str, registry_models: list[dict]) -> int:
+    """Derive species slot count from any registered model for ``variant``.
+
+    Returns 0 if no model can be loaded/inspected (caller then synthesizes).
+    """
+    entry = next((m for m in registry_models if m.get("variant") == variant), None)
+    if entry is None:
+        return 0
+    try:
+        models = get_fvs_models(variant, entry["loccode"], entry.get("pct_level", "PCT0"))
+        if not models:
+            return 0
+        return species_count_from_model(models) or 0
+    except Exception:
+        return 0
+
+
 def default_scenario(variant: str, loccode: str) -> dict:
     """
     Compose authoritative default inputs for a (variant, loccode) pair.
@@ -529,13 +621,18 @@ def default_scenario(variant: str, loccode: str) -> dict:
     override any subset of fields.
     """
     store = get_store()
-    variant_presets = store.get_json("config/FVSVariant_presets.json")
-    species_map = store.get_json("config/variant_species.json")
+    variant_presets = load_effective_preset_map()
+    species_map = load_effective_species_map()
     proforma_presets = _load_base_json("proforma_presets.json")
     registry = store.get_json("registry.json").get("models", [])
 
     resolved_variant = _resolve_variant_for_loccode(variant, loccode, registry)
     species_codes = _resolve_species(resolved_variant, species_map)
+    if not species_codes:
+        # Model registered but never configured and not in legacy JSON: fall back
+        # to the model's own slot count (blank names; UI renders SP1..SPn).
+        count = _species_count_for_variant(resolved_variant, registry)
+        species_codes = [""] * count
 
     preset, preset_source = _resolve_preset(resolved_variant, variant_presets)
     if preset is None:

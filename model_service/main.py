@@ -24,6 +24,8 @@ from model_service.model import (
     compute_summaries,
     default_scenario,
     get_fvs_models,
+    load_effective_preset_map,
+    load_effective_species_map,
     predict_fvs_metrics,
     run_scenario,
 )
@@ -156,7 +158,7 @@ def get_proforma_presets():
 
 @app.get("/variant/presets")
 def get_variant_presets():
-    return get_store().get_json("config/FVSVariant_presets.json")
+    return load_effective_preset_map()
 
 
 @app.get("/species/labels")
@@ -171,7 +173,7 @@ def get_protocol_rules():
 
 @app.get("/variant/species")
 def get_variant_species():
-    return get_store().get_json("config/variant_species.json")
+    return load_effective_species_map()
 
 
 @app.get("/health")
