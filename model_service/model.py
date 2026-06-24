@@ -216,7 +216,11 @@ def compute_proforma(df_ert_ac: pd.DataFrame, p: dict) -> pd.DataFrame:
 
         df["Registry_Fees"] = p["registry_fees"]
         df["Issuance_Fees"] = df["CUs_Sold"] * p["issuance_fee_per_ert"]
-        df["Planting_Cost"] = p["planting_cost"]
+        # df["Planting_Cost"] = p["planting_cost"]
+        df["Planting_Cost"] = 0.0
+        df.loc[df["Year"] == p["year_start"], "Planting_Cost"] = (
+            p["planting_cost"] * p["net_acres"]
+        )
 
         df["Total_Costs"] = (
             df["Validation_and_Verification"]

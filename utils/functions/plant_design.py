@@ -1105,7 +1105,7 @@ def credits_inputs(prefix: str = "credits_") -> dict:
                 help=H("credits.inputs.credit_price_increase"),
             ),
             "planting_cost": st.column_config.NumberColumn(
-                "Initial Planting Cost",
+                "Initial Planting Cost / Acre",
                 min_value=0.0,
                 step=100,
                 format="$ %.2f",
@@ -1481,7 +1481,7 @@ def generate_report():
             "column2": str(st.session_state.get("credits_discount_rate", 0.0)),
         },
         {
-            "column1": "Initial Planting Cost, $",
+            "column1": "Initial Planting Cost per Acre, $",
             "column2": str(st.session_state.get("credits_planting_cost", 1000)),
         },
     ]
