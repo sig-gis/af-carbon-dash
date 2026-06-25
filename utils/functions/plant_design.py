@@ -957,8 +957,8 @@ def carbon_units():
 
 def credits_inputs(prefix: str = "credits_") -> dict:
     """
-    Render per-protocol Proforma inputs as an editable table and return
-    a mapping of protocol -> typed parameter dictionary.
+    Render per-protocol Proforma inputs with editable assumptions separated
+    from fixed assumptions, and return protocol -> typed parameter dictionary.
     """
     protocols = st.session_state.get("carbon_units_inputs", {}).get("protocols", [])
 
@@ -974,7 +974,7 @@ def credits_inputs(prefix: str = "credits_") -> dict:
     table_state_key = f"{prefix}protocol_params"
     protocol_state = st.session_state.get(table_state_key, {})
 
-    # Keep values only for selected protocols, and seed defaults for any newly selected ones.
+    # Keep values only for selected protocols, and seed defaults for newly selected ones.
     protocol_state = {p: protocol_state[p] for p in protocols if p in protocol_state}
     for protocol in protocols:
         if protocol not in protocol_state:
@@ -991,13 +991,19 @@ def credits_inputs(prefix: str = "credits_") -> dict:
                 "discount_rate": defaults.get("discount_rate", 6.0),
                 "planting_cost": defaults.get("planting_cost", 1000),
             }
+
         # Always sync Number of Plots to the current net acres threshold.
         protocol_state[protocol]["num_plots"] = synced_num_plots
 
     st.session_state[table_state_key] = protocol_state
-    st.markdown("Financial Options by Protocol", help=H("credits.expander_subheader"))
 
-    table_df = pd.DataFrame(
+    st.markdown("Financial Options by Protocol", help=H("credits.expander_subheader"))
+    st.info(
+        "Edit **Initial Planting Cost / Acre** and **Initial Price / CU** on the left. "
+        "The values on the right are fixed assumptions used by the financial model."
+    )
+
+    editable_df = pd.DataFrame(
         [
             {
                 "Protocol": protocol,
@@ -1005,6 +1011,15 @@ def credits_inputs(prefix: str = "credits_") -> dict:
                 "price_per_ert_initial": protocol_state[protocol][
                     "price_per_ert_initial"
                 ],
+            }
+            for protocol in protocols
+        ]
+    )
+
+    fixed_df = pd.DataFrame(
+        [
+            {
+                "Protocol": protocol,
                 "num_plots": protocol_state[protocol]["num_plots"],
                 "cost_per_cfi_plot": protocol_state[protocol]["cost_per_cfi_plot"],
                 "registry_fees": protocol_state[protocol]["registry_fees"],
@@ -1025,112 +1040,108 @@ def credits_inputs(prefix: str = "credits_") -> dict:
         ]
     )
 
-    edited_df = st.data_editor(
-        table_df,
-        key=f"{prefix}financials_table",
-        use_container_width=True,
-        hide_index=True,
-        num_rows="fixed",
-        disabled=["Protocol"],
-        column_config={
-            "Protocol": st.column_config.TextColumn("Protocol"),
-            "num_plots": st.column_config.NumberColumn(
-                "Plots",
-                min_value=1,
-                step=1,
-                format="%d",
-                help=H("credits.inputs.num_plots"),
-            ),
-            "cost_per_cfi_plot": st.column_config.NumberColumn(
-                "Cost/CFI Plot",
-                min_value=1,
-                step=1,
-                format="$ %.2f",
-                help=H("credits.inputs.cost_per_cfi_plot"),
-            ),
-            "registry_fees": st.column_config.NumberColumn(
-                "Registry Fee",
-                min_value=0.0,
-                step=1,
-                format="$ %.2f",
-                help=H("credits.inputs.registry_fees"),
-            ),
-            "issuance_fee_per_ert": st.column_config.NumberColumn(
-                "Issuance Fee",
-                min_value=0.0,
-                step=0.01,
-                format="$ %.4f",
-                help=H("credits.inputs.issuance_fee_per_ert"),
-            ),
-            "validation_cost": st.column_config.NumberColumn(
-                "Validation Cost",
-                min_value=0.0,
-                step=1,
-                format="$ %.2f",
-                help=H("credits.inputs.validation_cost"),
-            ),
-            "verification_cost": st.column_config.NumberColumn(
-                "Verification Cost",
-                min_value=0.0,
-                step=1,
-                format="$ %.2f",
-                help=H("credits.inputs.verification_cost"),
-            ),
-            "anticipated_inflation": st.column_config.NumberColumn(
-                "Anticipated Inflation",
-                min_value=0.0,
-                step=0.1,
-                format="%.2f",
-                help=H("credits.inputs.anticipated_inflation"),
-            ),
-            "discount_rate": st.column_config.NumberColumn(
-                "Discount Rate",
-                min_value=0.0,
-                step=0.1,
-                format="%.2f",
-                help=H("credits.inputs.discount_rate"),
-            ),
-            "price_per_ert_initial": st.column_config.NumberColumn(
-                "Initial Price / CU",
-                min_value=0.0,
-                step=0.1,
-                format="$ %.2f",
-                help=H("credits.inputs.price_per_ert_initial"),
-            ),
-            "credit_price_increase": st.column_config.NumberColumn(
-                "Credit Price Increase",
-                min_value=0.0,
-                step=0.1,
-                format="%.2f",
-                help=H("credits.inputs.credit_price_increase"),
-            ),
-            "planting_cost": st.column_config.NumberColumn(
-                "Initial Planting Cost / Acre",
-                min_value=0.0,
-                step=100,
-                format="$ %.2f",
-                help=H("credits.inputs.planting_cost"),
-            ),
-        },
-    )
+    left, right = st.columns([1, 2], gap="large")
 
-    # Persist edited values by protocol.
-    protocol_state = {
-        row["Protocol"]: {
-            "num_plots": int(row["num_plots"]),
-            "cost_per_cfi_plot": float(row["cost_per_cfi_plot"]),
-            "price_per_ert_initial": float(row["price_per_ert_initial"]),
-            "credit_price_increase": float(row["credit_price_increase"]),
-            "registry_fees": float(row["registry_fees"]),
-            "validation_cost": float(row["validation_cost"]),
-            "verification_cost": float(row["verification_cost"]),
-            "issuance_fee_per_ert": float(row["issuance_fee_per_ert"]),
-            "anticipated_inflation": float(row["anticipated_inflation"]),
-            "discount_rate": float(row["discount_rate"]),
-            "planting_cost": float(row["planting_cost"]),
-        }
-        for _, row in edited_df.iterrows()
+    with left:
+        st.subheader("Editable Inputs")
+        st.caption("Adjust these assumptions for each selected protocol.")
+
+        edited_df = st.data_editor(
+            editable_df,
+            key=f"{prefix}editable_financials_table",
+            use_container_width=True,
+            hide_index=True,
+            num_rows="fixed",
+            disabled=["Protocol"],
+            column_config={
+                "Protocol": st.column_config.TextColumn("Protocol"),
+                "planting_cost": st.column_config.NumberColumn(
+                    "Initial Planting Cost / Acre",
+                    min_value=0.0,
+                    step=100,
+                    format="$ %.2f",
+                    help=H("credits.inputs.planting_cost"),
+                ),
+                "price_per_ert_initial": st.column_config.NumberColumn(
+                    "Initial Price / CU",
+                    min_value=0.0,
+                    step=0.1,
+                    format="$ %.2f",
+                    help=H("credits.inputs.price_per_ert_initial"),
+                ),
+            },
+        )
+
+    with right:
+        st.subheader("Fixed Financial Assumptions")
+        st.caption("These values are shown for reference and are not editable.")
+
+        st.dataframe(
+            fixed_df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Protocol": st.column_config.TextColumn("Protocol"),
+                "num_plots": st.column_config.NumberColumn(
+                    "Plots",
+                    format="%d",
+                    help=H("credits.inputs.num_plots"),
+                ),
+                "cost_per_cfi_plot": st.column_config.NumberColumn(
+                    "Cost / CFI Plot",
+                    format="$ %.2f",
+                    help=H("credits.inputs.cost_per_cfi_plot"),
+                ),
+                "registry_fees": st.column_config.NumberColumn(
+                    "Registry Fee",
+                    format="$ %.2f",
+                    help=H("credits.inputs.registry_fees"),
+                ),
+                "issuance_fee_per_ert": st.column_config.NumberColumn(
+                    "Issuance Fee / CU",
+                    format="$ %.4f",
+                    help=H("credits.inputs.issuance_fee_per_ert"),
+                ),
+                "validation_cost": st.column_config.NumberColumn(
+                    "Validation Cost",
+                    format="$ %.2f",
+                    help=H("credits.inputs.validation_cost"),
+                ),
+                "verification_cost": st.column_config.NumberColumn(
+                    "Verification Cost",
+                    format="$ %.2f",
+                    help=H("credits.inputs.verification_cost"),
+                ),
+                "anticipated_inflation": st.column_config.NumberColumn(
+                    "Anticipated Inflation",
+                    format="%.2f",
+                    help=H("credits.inputs.anticipated_inflation"),
+                ),
+                "discount_rate": st.column_config.NumberColumn(
+                    "Discount Rate",
+                    format="%.2f",
+                    help=H("credits.inputs.discount_rate"),
+                ),
+                "credit_price_increase": st.column_config.NumberColumn(
+                    "Credit Price Increase",
+                    format="%.2f",
+                    help=H("credits.inputs.credit_price_increase"),
+                ),
+            },
+        )
+
+    # Persist edited values by protocol while keeping fixed values unchanged.
+    edited_by_protocol = {
+        row["Protocol"]: row for _, row in edited_df.iterrows()
     }
+
+    for protocol in protocols:
+        row = edited_by_protocol[protocol]
+        protocol_state[protocol]["planting_cost"] = float(row["planting_cost"])
+        protocol_state[protocol]["price_per_ert_initial"] = float(
+            row["price_per_ert_initial"]
+        )
+
     st.session_state[table_state_key] = protocol_state
 
     # Keep legacy single-value keys populated for report/export compatibility.
@@ -1160,13 +1171,13 @@ def credits_inputs(prefix: str = "credits_") -> dict:
     npv_year = st.selectbox(
         "NPV Year Horizon",
         options=[10, 15, 20, 25, 30, 35, 40],
-        index=6,  # default to 40
+        index=6,
         key=f"{prefix}npv_year",
         help=H("credits.inputs.npv_year")
         or "Number of years from project start over which to discount cashflows for NPV.",
     )
 
-    # constants (constrained by modeling backend)
+    # constants constrained by modeling backend
     year_start = 2026
     years_advance = 35
     net_acres = st.session_state["net_acres"]
