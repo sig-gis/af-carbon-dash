@@ -969,6 +969,9 @@ def credits_inputs(prefix: str = "credits_") -> dict:
         return {}
 
     defaults = _load_proforma_defaults()
+    PRICE_OPTIONS = [15.0, 25.0, 35.0, 45.0, 55.0]
+    def _nearest_price_option(value):
+        return min(PRICE_OPTIONS, key=lambda x: abs(x - float(value)))
     net_acres = float(st.session_state.get("net_acres", 0) or 0)
     synced_num_plots = 200 if net_acres <= 10000 else 250
     table_state_key = f"{prefix}protocol_params"
@@ -1008,9 +1011,9 @@ def credits_inputs(prefix: str = "credits_") -> dict:
             {
                 "Protocol": protocol,
                 "planting_cost": protocol_state[protocol]["planting_cost"],
-                "price_per_ert_initial": protocol_state[protocol][
-                    "price_per_ert_initial"
-                ],
+                "price_per_ert_initial": _nearest_price_option(
+                    protocol_state[protocol]["price_per_ert_initial"]
+                ),
             }
             for protocol in protocols
         ]
@@ -1062,11 +1065,10 @@ def credits_inputs(prefix: str = "credits_") -> dict:
                     format="$ %.2f",
                     help=H("credits.inputs.planting_cost"),
                 ),
-                "price_per_ert_initial": st.column_config.NumberColumn(
+                "price_per_ert_initial": st.column_config.SelectboxColumn(
                     "Initial Price / CU",
-                    min_value=0.0,
-                    step=0.1,
-                    format="$ %.2f",
+                    options=PRICE_OPTIONS,
+                    required=True,
                     help=H("credits.inputs.price_per_ert_initial"),
                 ),
             },
