@@ -709,16 +709,22 @@ def carbon_chart():
 
     # Metric definitions: label, column, unit (per-acre), unit (project), scales_with_acres
     METRIC_DEFS = {
-        "ABLD_C": {
-            "label": "Aboveground live biomass carbon",
-            "unit": "tons",
-            "unit_project": "tons",
+        "CO2e": {
+            "label": "CO2e",
+            "unit": "tons CO2e/acre",
+            "unit_project": "tons CO2e",
             "scales": True,
         },
         "BA": {
             "label": "Basal area",
             "unit": "sq ft/acre",
             "unit_project": "sq ft",
+            "scales": True,
+        },
+        "ABLD_C": {
+            "label": "Aboveground live biomass carbon",
+            "unit": "tons",
+            "unit_project": "tons",
             "scales": True,
         },
         "QMD": {
@@ -761,6 +767,11 @@ def carbon_chart():
     net_acres = st.session_state["net_acres"]
 
     plot_df = df.copy()
+    
+    # Convert aboveground live biomass carbon to CO2e
+    if "ABLD_C" in plot_df.columns:
+        plot_df["CO2e"] = plot_df["ABLD_C"] * 3.667
+
     if toggle_oc:
         for col, meta in available.items():
             if meta["scales"]:
@@ -1350,9 +1361,9 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
     )
 
     if toggle_nr:
-        plot_df["Net_Revenue"] = plot_df["Net_Revenue"]
+        plot_df["Net_Revenue"] = plot_df["Net_Revenue"].round(-1)
     else:
-        plot_df["Net_Revenue"] = plot_df["Net_Revenue"] / first_params["net_acres"]
+        plot_df["Net_Revenue"] = (plot_df["Net_Revenue"] / first_params["net_acres"]).round(-1)
 
     chart_title = "Total" if toggle_nr else "Per Acre"
 
@@ -1375,13 +1386,11 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
 
     summaries_df_display["Total Net Revenue, $"] = summaries_df_display[
         "total_net"
-    ].map("${:,.2f}".format)
-    summaries_df_display[npv_col] = summaries_df_display["npv_yr"].map(
-        "${:,.2f}".format
-    )
-    summaries_df_display[npv_per_acre_col] = summaries_df_display["npv_per_acre"].map(
-        "${:,.2f}".format
-    )
+    ].map(lambda x: "${:,.0f}".format(round(x, -1)))
+    summaries_df_display[npv_col] = summaries_df_display["npv_yr"
+    ].map(lambda x: "${:,.0f}".format(round(x, -1)))
+    summaries_df_display[npv_per_acre_col] = summaries_df_display["npv_per_acre"
+    ].map(lambda x: "${:,.0f}".format(round(x, -1)))
 
     # Keep only the columns to show
     summaries_df_display = summaries_df_display[
