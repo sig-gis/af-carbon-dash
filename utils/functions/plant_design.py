@@ -758,6 +758,10 @@ def carbon_chart():
             "scales": False,
         },
     }
+    
+    # Convert aboveground live biomass carbon to CO2e
+    if "ABLD_C" in plot_df.columns:
+        plot_df["CO2e"] = plot_df["ABLD_C"] * 3.667
 
     available = {col: METRIC_DEFS[col] for col in METRIC_DEFS if col in df.columns}
 
@@ -767,10 +771,6 @@ def carbon_chart():
     net_acres = st.session_state["net_acres"]
 
     plot_df = df.copy()
-    
-    # Convert aboveground live biomass carbon to CO2e
-    if "ABLD_C" in plot_df.columns:
-        plot_df["CO2e"] = plot_df["ABLD_C"] * 3.667
 
     if toggle_oc:
         for col, meta in available.items():
