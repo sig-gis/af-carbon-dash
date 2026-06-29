@@ -761,7 +761,7 @@ def carbon_chart():
     
     # Convert aboveground live biomass carbon to CO2e
     if "ABLD_C" in df.columns:
-        plot_df["CO2e"] = plot_df["ABLD_C"] * 3.667
+        df["CO2e"] = df["ABLD_C"] * 3.667
 
     available = {col: METRIC_DEFS[col] for col in METRIC_DEFS if col in df.columns}
 
