@@ -905,23 +905,37 @@ def carbon_units():
         "Show Total Project Acreage", True, "toggle_ce", H("toggle.inputs.acres")
     )
 
-    # Adjust chart values based on toggle
+    # Adjust values based on toggle
     plot_df = final_df.copy()
     if toggle_ce:
         plot_df["CU"] = plot_df["CU"] * st.session_state["net_acres"]
 
     chart_title = "(tons/project)" if toggle_ce else "(tons/acre)"
 
+    # Add synthetic base-year zero rows
     plot_df = _prepend_zero_year_rows_by_group(
         plot_df,
         group_col="Protocol",
         value_col="CU",
         base_year=CHART_BASE_YEAR,
     )
+
+    # Sort before cumulative calculations
+    plot_df = plot_df.sort_values(["Protocol", "Year"])
+
+    # Calculate cumulative CUs for each protocol
+    plot_df["Cumulative_CU"] = (
+        plot_df.groupby("Protocol")["CU"].cumsum()
+    )
+
+    # Filter to 5-year intervals for chart/table display
     plot_df, include_years = _filter_to_five_year_intervals(
         plot_df, year_col="Year", start_year=CHART_BASE_YEAR
     )
 
+    # ----------------------------
+    # Annual CU chart
+    # ----------------------------
     _plot_fading_line_chart(
         data=plot_df,
         x_col="Year",
@@ -933,27 +947,73 @@ def carbon_units():
         show_future_hatch=True,
     )
 
-    # Display the same interval-filtered values from the chart in table form.
-    table_df = (
+    # Annual CU table
+    annual_table_df = (
         plot_df.pivot_table(
-            index="Year", columns="Protocol", values="CU", aggfunc="first"
+            index="Year",
+            columns="Protocol",
+            values="CU",
+            aggfunc="first",
         )
         .reindex(columns=protocols)
         .reset_index()
         .sort_values("Year")
     )
 
-    if not table_df.empty:
-        table_df["Year"] = table_df["Year"].astype(int)
+    if not annual_table_df.empty:
+        annual_table_df["Year"] = annual_table_df["Year"].astype(int)
         st.markdown("**Annual CU Estimates**")
         st.dataframe(
-            table_df.style.format(
-                {col: "{:,.2f}" for col in table_df.columns if col != "Year"}
+            annual_table_df.style.format(
+                {col: "{:,.2f}" for col in annual_table_df.columns if col != "Year"}
             ),
             use_container_width=True,
             hide_index=True,
         )
 
+    st.divider()
+
+    # ----------------------------
+    # Cumulative CU chart
+    # ----------------------------
+    _plot_fading_line_chart(
+        data=plot_df,
+        x_col="Year",
+        y_col="Cumulative_CU",
+        title="Cumulative CU Estimates " + chart_title,
+        y_title="Cumulative CUs " + chart_title,
+        include_years=include_years,
+        series_col="Protocol",
+        show_future_hatch=True,
+    )
+
+    # Cumulative CU table
+    cumulative_table_df = (
+        plot_df.pivot_table(
+            index="Year",
+            columns="Protocol",
+            values="Cumulative_CU",
+            aggfunc="first",
+        )
+        .reindex(columns=protocols)
+        .reset_index()
+        .sort_values("Year")
+    )
+
+    if not cumulative_table_df.empty:
+        cumulative_table_df["Year"] = cumulative_table_df["Year"].astype(int)
+        st.markdown("**Cumulative CU Estimates**")
+        st.dataframe(
+            cumulative_table_df.style.format(
+                {
+                    col: "{:,.2f}"
+                    for col in cumulative_table_df.columns
+                    if col != "Year"
+                }
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
 
 def credits_inputs(prefix: str = "credits_") -> dict:
     """
