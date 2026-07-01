@@ -173,5 +173,46 @@
       "streamlit_function": "number_input",
       "component": "Number input for per project calculation.",
       "help": "The total area of land enrolled in the project, measured in acres."
+    },
+    "site.button_forward_to_solver": {
+        "streamlit_function": "button",
+        "component": "Continue button from Site Selection to the Solver",
+        "help": "Continue to the Solver to find the breakeven acreage for this site."
+    },
+    "solver.title": {
+        "streamlit_function": "title",
+        "component": "Solver page title",
+        "help": "Find the breakeven point where NPV reaches your target (default $0). Toggle between breakeven acreage and breakeven trees per acre."
+    },
+    "solver.protocol": {
+        "streamlit_function": "selectbox",
+        "component": "Solver protocol selector",
+        "help": "Carbon accounting protocol to solve for. The breakeven solve runs one protocol at a time."
+    },
+    "solver.target_npv": {
+        "streamlit_function": "number_input",
+        "component": "Solver NPV target",
+        "help": "The NPV the solved scenario should produce. Leave at $0 for the breakeven point."
+    },
+    "solver.sweep_levers": {
+        "streamlit_function": "multiselect",
+        "component": "Solver sensitivity lever selector",
+        "help": "Pick one or two financial levers to vary. Breakeven acreage is re-solved for every combination of the selected values."
+    },
+    "solver.variable_toggle": {
+        "streamlit_function": "radio",
+        "component": "Solver breakeven-variable toggle",
+        "help": "What to solve for. Acreage breakeven is a single figure; TPA breakeven is a range, since NPV is nonlinear in density."
+    },
+    "solver.tpa_mode": {
+        "streamlit_function": "radio",
+        "component": "Solver trees-per-acre mode selector",
+        "help": "Vary the whole mix (Scalar), one species (Single species), or report a range per species (Per species)."
+    },
+    "solver.tpa_species": {
+        "streamlit_function": "selectbox",
+        "component": "Solver single-species selector",
+        "help": "Species whose TPA is solved for; others stay fixed."
     }
   }
+}

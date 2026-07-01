@@ -43,8 +43,11 @@ from model_service.schemas import (
     ScenarioDefaults,
     ScenarioRequest,
     ScenarioResponse,
+    TpaSweepRequest,
+    TpaSweepResponse,
 )
 from model_service.store import get_store
+from model_service.tpa_sweep import solve_tpa_range
 from utils.config import get_api_base_url
 
 logger = logging.getLogger(__name__)
@@ -319,6 +322,20 @@ def scenario_run(req: ScenarioRequest):
     """
     try:
         result = run_scenario(req.model_dump(exclude_none=False))
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return result
+
+
+@app.post("/scenario/solve-tpa", response_model=TpaSweepResponse)
+def scenario_solve_tpa(req: TpaSweepRequest):
+    """
+    Grid-sweep species_tpa and return the TPA range(s) where NPV meets the target.
+    NPV is nonlinear in TPA, so the range is read off the curve, not solved
+    closed-form. mode sweeps a mix multiplier, one species, or every species.
+    """
+    try:
+        result = solve_tpa_range(req.model_dump(exclude_none=False))
     except (KeyError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return result

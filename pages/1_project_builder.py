@@ -1,40 +1,58 @@
-import streamlit as st
-import folium
-from streamlit_folium import st_folium
 import json
-import geopandas as gpd
 import os
 import tempfile
-import numpy as np
-from pathlib import Path
-from shapely.geometry import shape, Point, box
 import zipfile
-from geopy.geocoders import Nominatim
 
-from utils.functions.helper import  H
-from utils.functions.site_select import load_geojson_fragment, load_geojson_or_shapefile, build_map, build_highlight_layer, show_clicked_variant, display_selected_info, auto_select_variant_from_point, _process_pending_click, variant_chooser
+import streamlit as st
+from geopy.geocoders import Nominatim
+from shapely.geometry import Point
+from streamlit_folium import st_folium
+
+from utils.functions.helper import H
 from utils.functions.plant_design import run_chart
+from utils.functions.site_select import (
+    _process_pending_click,
+    auto_select_variant_from_point,
+    build_highlight_layer,
+    build_map,
+    display_selected_info,
+    load_geojson_fragment,
+    load_geojson_or_shapefile,
+    show_clicked_variant,
+    variant_chooser,
+)
+from utils.functions.solver import run_solver
 
 # Page Configuration
 st.set_page_config(layout="wide", page_title="Project Builder", page_icon="🌲")
 
-# Initialize Session State 
+# Initialize Session State
 if "active_tab" not in st.session_state:
     st.session_state.active_tab = "Site Selection Map"
 
 # File Paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-local_shapefile = os.path.join(BASE_DIR, "data", "FVSVariantMap20210525", "FVS_Variants_and_Locations_4326.shp")
-simplified_geojson = os.path.join(BASE_DIR, "data", "FVSVariantMap20210525", "FVS_Variants_and_Locations_4326_simplified.geojson")
+local_shapefile = os.path.join(
+    BASE_DIR, "data", "FVSVariantMap20210525", "FVS_Variants_and_Locations_4326.shp"
+)
+simplified_geojson = os.path.join(
+    BASE_DIR,
+    "data",
+    "FVSVariantMap20210525",
+    "FVS_Variants_and_Locations_4326_simplified.geojson",
+)
 
 # Sidebar: Project Workflow
 st.sidebar.markdown("## Project Workflow")
 
-with open(os.path.join(BASE_DIR, "conf/base/workflow_steps.json"), "r", encoding="utf-8") as f:
+with open(
+    os.path.join(BASE_DIR, "conf/base/workflow_steps.json"), "r", encoding="utf-8"
+) as f:
     workflow_steps = json.load(f)
 
 # Custom CSS for sidebar step styling
-st.sidebar.markdown("""
+st.sidebar.markdown(
+    """
     <style>
     .workflow-step {
         padding: 8px 12px;
@@ -51,7 +69,9 @@ st.sidebar.markdown("""
         color: #555;
     }
     </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 # Render each step with highlight plus caption under the correct one
 for step in workflow_steps:
@@ -61,7 +81,7 @@ for step in workflow_steps:
     # Step title
     st.sidebar.markdown(
         f'<div class="workflow-step {step_class}">{step["label"]}</div>',
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
     # Step caption (only for the active step), split by line
@@ -95,21 +115,41 @@ if st.session_state.active_tab == "Site Selection Map":
 
     # Load supported FVS variant polygons once so address lookups can auto-select
     # variant before map rendering.
-    geojson_str, tooltip_fields = load_geojson_fragment(simplified_geojson, local_shapefile)
-        
-    with st.expander(label="Add Point by latitude/longitude or look up an address", expanded=False):
-        st.subheader("Go to Lat/Lon") 
-        col1, col2, col3, col4, col5, col6, col7, col8, col9, col10 = st.columns([1, 1, 1, 1, 1, 1, 1, 1, 1, 1])
+    geojson_str, tooltip_fields = load_geojson_fragment(
+        simplified_geojson, local_shapefile
+    )
+
+    with st.expander(
+        label="Add Point by latitude/longitude or look up an address", expanded=False
+    ):
+        st.subheader("Go to Lat/Lon")
+        col1, col2, col3, col4, col5, col6, col7, col8, col9, col10 = st.columns(
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+        )
 
         with col1:
-            lat = st.number_input("Latitude", value=45.5, format="%.3f", help=None, width=200)
+            lat = st.number_input(
+                "Latitude", value=45.5, format="%.3f", help=None, width=200
+            )
         with col2:
-            lon = st.number_input("Longitude", value=-118.0, format="%.3f", help=None, width=200)
+            lon = st.number_input(
+                "Longitude", value=-118.0, format="%.3f", help=None, width=200
+            )
 
         add_point_button = st.button("Add Point to Map")
 
-        st.subheader("Go to Address")        
-        col1_r2, col2_r2, col3_r2, col4_r2, col5_r2, col6_r2, col7_r2, col8_r2, col9_r2 = st.columns([1, 1, 1, 1, 1, 1, 1, 1, 1])
+        st.subheader("Go to Address")
+        (
+            col1_r2,
+            col2_r2,
+            col3_r2,
+            col4_r2,
+            col5_r2,
+            col6_r2,
+            col7_r2,
+            col8_r2,
+            col9_r2,
+        ) = st.columns([1, 1, 1, 1, 1, 1, 1, 1, 1])
 
         with col1_r2:
             street = st.text_input("Street Address")
@@ -117,7 +157,7 @@ if st.session_state.active_tab == "Site Selection Map":
             city = st.text_input("City/Town")
         with col3_r2:
             state = st.text_input("State")
-        
+
         go_address_button = st.button("Go to Address")
 
     if add_point_button:
@@ -145,10 +185,14 @@ if st.session_state.active_tab == "Site Selection Map":
                 # Auto-select variant from the geocoded address point
                 matched = auto_select_variant_from_point(new_pt, geojson_str)
                 if matched:
-                    st.success("Address matched a supported FVS variant. Variant auto-selected.")
+                    st.success(
+                        "Address matched a supported FVS variant. Variant auto-selected."
+                    )
                     st.rerun()
                 else:
-                    st.warning("Address found, but it does not intersect a supported FVS variant polygon.")
+                    st.warning(
+                        "Address found, but it does not intersect a supported FVS variant polygon."
+                    )
             else:
                 st.error("Address not found.")
         else:
@@ -159,7 +203,7 @@ if st.session_state.active_tab == "Site Selection Map":
             "Upload GeoJSON (.geojson) or all shapefile components seperatly (.shp, .shx, .dbf, .prj) or zipped (.zip)",
             accept_multiple_files=True,
             type=["geojson", "shp", "shx", "dbf", "prj", "cpg", "zip"],
-            width = 600
+            width=600,
         )
 
         upload_button = st.button("Upload file to map")
@@ -171,7 +215,9 @@ if st.session_state.active_tab == "Site Selection Map":
                 del st.session_state[key]
 
         if uploaded_files:
-            if len(uploaded_files) == 1 and uploaded_files[0].name.lower().endswith(".zip"):
+            if len(uploaded_files) == 1 and uploaded_files[0].name.lower().endswith(
+                ".zip"
+            ):
                 st.write("ZIP file detected!")
                 uploaded_file = uploaded_files[0]
 
@@ -187,17 +233,28 @@ if st.session_state.active_tab == "Site Selection Map":
                 extracted_files = os.listdir(tmpdir)
                 print("Extracted files:", extracted_files)
 
-                extracted_full_paths = [os.path.join(tmpdir, f) for f in extracted_files]
+                extracted_full_paths = [
+                    os.path.join(tmpdir, f) for f in extracted_files
+                ]
 
-                target = next((f for f in extracted_full_paths if f.lower().endswith((".shp", ".geojson"))), None)
+                target = next(
+                    (
+                        f
+                        for f in extracted_full_paths
+                        if f.lower().endswith((".shp", ".geojson"))
+                    ),
+                    None,
+                )
                 if target:
-                    st.session_state.upload_file = [target]  # Wrap in list to match function signature
+                    st.session_state.upload_file = [
+                        target
+                    ]  # Wrap in list to match function signature
                 else:
                     st.error("No .shp or .geojson file found inside ZIP.")
             else:
                 st.write("Not a ZIP file or multiple files uploaded.")
                 st.session_state.upload_file = uploaded_files
-        
+
     uploaded_geojson_str, uploaded_tooltip_fields = None, None
     if st.session_state.upload_file:
         uploaded_geojson_str, uploaded_tooltip_fields = load_geojson_or_shapefile(
@@ -212,7 +269,7 @@ if st.session_state.active_tab == "Site Selection Map":
         "Select FVS Variant",
         anchor=None,
         divider=False,
-        help=H("site.subheader_select_variant")
+        help=H("site.subheader_select_variant"),
     )
 
     # Process any pending map click BEFORE building the map
@@ -230,9 +287,7 @@ if st.session_state.active_tab == "Site Selection Map":
         tooltip_fields=tooltip_fields,
     )
 
-    highlight_fg = build_highlight_layer(
-        st.session_state.get("clicked_feature")
-    )
+    highlight_fg = build_highlight_layer(st.session_state.get("clicked_feature"))
 
     map_data = st_folium(
         m,
@@ -247,9 +302,9 @@ if st.session_state.active_tab == "Site Selection Map":
     display_selected_info()
     variant_chooser()
 
-    # Fill the button placeholder now that click state is up to date
+    # Fill the button placeholder now that click state is up to date.
     if st.session_state.get("selected_variant"):
-        with _button_slot:
+        with _button_slot.container():
             if st.button(
                 "➡️ Planting Design",
                 use_container_width=True,
@@ -258,24 +313,53 @@ if st.session_state.active_tab == "Site Selection Map":
             ):
                 st.session_state.active_tab = "Planting Design"
                 st.rerun()
+            if st.button(
+                "🧮 Solver",
+                use_container_width=True,
+                help=H("site.button_forward_to_solver"),
+            ):
+                st.session_state.active_tab = "Solver"
+                st.rerun()
 
     if reset_button:
         # Remove from session state
         for key in ["upload_file", "uploaded_geojson_str", "uploaded_tooltip_fields"]:
             if key in st.session_state:
                 del st.session_state[key]
-        
-        st.rerun()
-else:
 
-    col1, col2 = st.columns([8, 3]) 
+        st.rerun()
+elif st.session_state.active_tab == "Planting Design":
+    col1, col2 = st.columns([8, 3])
 
     with col1:
         st.title("🌲 Planting Design", anchor=None, help=H("planting.title"))
 
     with col2:
-        if st.button("⬅️ Site Selection", use_container_width=True, help=H("planting.button_back_to_site"), type='primary'):
+        if st.button(
+            "⬅️ Site Selection",
+            use_container_width=True,
+            help=H("planting.button_back_to_site"),
+            type="primary",
+        ):
             st.session_state.active_tab = "Site Selection Map"
             st.rerun()
 
     run_chart()
+
+elif st.session_state.active_tab == "Solver":
+    col1, col2 = st.columns([8, 3])
+
+    with col1:
+        st.title("🧮 Solver", anchor=None, help=H("solver.title"))
+
+    with col2:
+        if st.button(
+            "⬅️ Site Selection",
+            use_container_width=True,
+            help=H("planting.button_back_to_site"),
+            type="primary",
+        ):
+            st.session_state.active_tab = "Site Selection Map"
+            st.rerun()
+
+    run_solver()
