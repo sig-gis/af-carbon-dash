@@ -214,5 +214,4 @@
         "component": "Solver single-species selector",
         "help": "Species whose TPA is solved for; others stay fixed."
     }
-  }
 }
