@@ -22,6 +22,21 @@ joblib model directory.
 """
 
 from aff_dash_client.client import AFFDashClient
-from aff_dash_client.types import Defaults, ScenarioResult, ScenarioSummary
+from aff_dash_client.types import (
+    Defaults,
+    ScenarioResult,
+    ScenarioSummary,
+    TpaInterval,
+    TpaRangeResult,
+    TpaSweepResult,
+)
 
-__all__ = ["AFFDashClient", "Defaults", "ScenarioResult", "ScenarioSummary"]
+__all__ = [
+    "AFFDashClient",
+    "Defaults",
+    "ScenarioResult",
+    "ScenarioSummary",
+    "TpaInterval",
+    "TpaRangeResult",
+    "TpaSweepResult",
+]
