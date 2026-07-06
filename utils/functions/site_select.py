@@ -516,6 +516,111 @@ def auto_select_variant_from_point(point, geojson_str):
         return None
     return st.session_state["clicked_props"]
 
+
+def auto_select_variant_from_latlon(lat, lon, geojson_str):
+    """
+    Resolve and set the selected variant/session state from user-entered
+    latitude/longitude values.
+
+    Shapely Point expects x/y order, so this creates Point(lon, lat).
+    Returns the selected feature's properties if found, else None.
+    """
+    if lat is None or lon is None or not geojson_str:
+        return None
+
+    try:
+        lat = float(lat)
+        lon = float(lon)
+    except (TypeError, ValueError):
+        st.warning("Latitude and longitude must be valid numbers.")
+        return None
+
+    point = Point(lon, lat)
+    selected_props = auto_select_variant_from_point(point, geojson_str)
+
+    if selected_props:
+        st.session_state["points"] = [point]
+        st.session_state["last_added_type"] = "point"
+        return selected_props
+
+    return None
+
+
+def auto_select_variant_from_upload(upload_geojson, geojson_str):
+    """
+    Resolve and set the selected variant/session state from an uploaded
+    shapefile/GeoJSON.
+
+    Uses the uploaded geometry's representative point first, then falls back
+    to intersecting the uploaded geometry against supported FVS polygons.
+    Returns the selected feature's properties if found, else None.
+    """
+    if not upload_geojson or not geojson_str:
+        return None
+
+    try:
+        upload_json = (
+            json.loads(upload_geojson)
+            if isinstance(upload_geojson, str)
+            else upload_geojson
+        )
+
+        uploaded_geoms = [
+            shape(feat["geometry"])
+            for feat in upload_json.get("features", [])
+            if feat.get("geometry")
+        ]
+
+        if not uploaded_geoms:
+            return None
+
+        # First try: use a representative point from the uploaded geometry.
+        # This point is guaranteed to fall inside the geometry.
+        point = uploaded_geoms[0].representative_point()
+        candidates = variants_at_point(point, geojson_str)
+
+        # Fallback: if the representative point does not hit a supported FVS
+        # polygon, intersect the whole uploaded geometry with the FVS polygons.
+        if not candidates:
+            fvs_features = json.loads(geojson_str).get("features", [])
+            registry = _fetch_registry()
+            all_candidates = []
+
+            for feat in fvs_features:
+                geom_json = feat.get("geometry")
+                if not geom_json:
+                    continue
+
+                try:
+                    fvs_geom = shape(geom_json)
+                except Exception:
+                    continue
+
+                if any(
+                    fvs_geom.intersects(uploaded_geom)
+                    for uploaded_geom in uploaded_geoms
+                ):
+                    all_candidates.extend(
+                        _candidates_from_feature(feat, registry)
+                    )
+
+            # Deduplicate by variant + loccode.
+            deduped = {}
+            for c in all_candidates:
+                deduped[(c["variant"], c["loccode"])] = c
+
+            candidates = [deduped[k] for k in sorted(deduped.keys())]
+
+        if not _select_candidates(candidates):
+            return None
+
+        st.session_state["last_added_type"] = "upload"
+        return st.session_state["clicked_props"]
+
+    except Exception as e:
+        st.warning(f"Could not auto-select FVS variant from uploaded file: {e}")
+        return None
+
 def build_highlight_layer(feature: dict | None) -> folium.FeatureGroup | None:
     """Build a FeatureGroup for the selected feature highlight.
 

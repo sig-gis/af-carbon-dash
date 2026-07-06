@@ -9,5 +9,47 @@
     "issuance_fee_per_ert": 0.15,
     "anticipated_inflation": 0,
     "discount_rate": 6.0,
-    "planting_cost": 1000
+    "planting_cost": 1000,
+    "protocol_overrides": {
+        "ACR": {
+            "cost_per_cfi_plot": 150,
+            "registry_fees": 8500,
+            "issuance_fee_per_ert": 0.2,
+            "validation_cost": 15000,
+            "verification_cost": 50000,
+            "planting_cost": 1000
+        },
+        "CAR": {
+            "cost_per_cfi_plot": 150,
+            "registry_fees": 1500,
+            "issuance_fee_per_ert": 0.2,
+            "validation_cost": 15000,
+            "verification_cost": 50000,
+            "planting_cost": 1000
+        },
+        "VERRA": {
+            "cost_per_cfi_plot": 150,
+            "registry_fees": 11750,
+            "issuance_fee_per_ert": 0.23,
+            "validation_cost": 15000,
+            "verification_cost": 50000,
+            "planting_cost": 1000
+        },
+        "GS": {
+            "cost_per_cfi_plot": 150,
+            "registry_fees": 7500,
+            "issuance_fee_per_ert": 0.25,
+            "validation_cost": 15000,
+            "verification_cost": 50000,
+            "planting_cost": 1000
+        },
+        "ISO": {
+            "cost_per_cfi_plot": 150,
+            "registry_fees": 0,
+            "issuance_fee_per_ert": 0,
+            "validation_cost": 0,
+            "verification_cost": 0,
+            "planting_cost": 1000
+        }
+    }
 }
