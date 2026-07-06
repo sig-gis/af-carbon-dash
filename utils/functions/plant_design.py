@@ -475,7 +475,7 @@ def _credits_keys(prefix: str = "credits_") -> list[str]:
     Return all proforma input keys (prefixed) that should persist for the Credits section.
     Uses the JSON defaults as the source for which keys exist.
     """
-    defaults = _load_proforma_defaults()
+    defaults = _proforma_base_defaults()
     return [prefix + k for k in defaults.keys()]
 
 
@@ -484,9 +484,63 @@ def _seed_defaults(prefix: str = "credits_"):
     Seed Streamlit session state with default financial and credit parameters
     based on proforma defaults. Only sets missing keys.
     """
-    defaults = _load_proforma_defaults()
+    defaults = _proforma_base_defaults()
     for k, v in defaults.items():
         st.session_state.setdefault(prefix + k, v)
+
+
+def _proforma_base_defaults() -> dict:
+    """Return the global/fallback proforma defaults.
+
+    Supports both the original flat proforma_presets.json structure and the new
+    structure with protocol-specific overrides:
+
+        {
+            "num_plots": 250,
+                flat fallback defaults ...,
+            "protocol_overrides": {
+                "ACR": {"registry_fees": 8500},
+                ...
+            }
+        }
+    """
+    raw = _load_proforma_defaults() or {}
+
+    # If a future JSON is wrapped as {"defaults": {...}, "protocol_overrides": {...}},
+    # use the wrapped defaults. Otherwise keep the current flat structure and
+    # ignore nested override blocks when building the fallback defaults.
+    if isinstance(raw.get("defaults"), dict):
+        return raw["defaults"].copy()
+
+    return {
+        k: v
+        for k, v in raw.items()
+        if k not in {"defaults", "protocol_overrides", "protocols"}
+    }
+
+
+def _proforma_protocol_overrides() -> dict:
+    """Return protocol-specific proforma overrides from proforma_presets.json."""
+    raw = _load_proforma_defaults() or {}
+    overrides = raw.get("protocol_overrides") or raw.get("protocols") or {}
+    return overrides if isinstance(overrides, dict) else {}
+
+
+def _proforma_defaults_for_protocol(protocol: str) -> dict:
+    """Merge fallback defaults with protocol-specific overrides.
+
+    Blank/null override values are ignored so incomplete protocol rows, such as
+    ISO with some blank cells, safely fall back to the global defaults.
+    """
+    defaults = _proforma_base_defaults()
+    overrides = _proforma_protocol_overrides().get(protocol, {})
+
+    if isinstance(overrides, dict):
+        for k, v in overrides.items():
+            if v is not None:
+                defaults[k] = v
+
+    return defaults
 
 
 def _sync_active_variant():
@@ -1039,7 +1093,7 @@ def credits_inputs(prefix: str = "credits_") -> dict:
         )
         return {}
 
-    defaults = _load_proforma_defaults()
+    defaults = _proforma_base_defaults()
     PRICE_OPTIONS = [15.0, 25.0, 35.0, 45.0, 55.0]
     def _nearest_price_option(value):
         return min(PRICE_OPTIONS, key=lambda x: abs(x - float(value)))
@@ -1050,24 +1104,44 @@ def credits_inputs(prefix: str = "credits_") -> dict:
 
     # Keep values only for selected protocols, and seed defaults for newly selected ones.
     protocol_state = {p: protocol_state[p] for p in protocols if p in protocol_state}
+    fixed_financial_keys = [
+        "cost_per_cfi_plot",
+        "credit_price_increase",
+        "registry_fees",
+        "validation_cost",
+        "verification_cost",
+        "issuance_fee_per_ert",
+        "anticipated_inflation",
+        "discount_rate",
+    ]
+
     for protocol in protocols:
+        protocol_defaults = _proforma_defaults_for_protocol(protocol)
+
         if protocol not in protocol_state:
             protocol_state[protocol] = {
                 "num_plots": synced_num_plots,
-                "cost_per_cfi_plot": defaults.get("cost_per_cfi_plot", 150),
-                "price_per_ert_initial": defaults.get("price_per_ert_initial", 25.0),
-                "credit_price_increase": defaults.get("credit_price_increase", 2.0),
-                "registry_fees": defaults.get("registry_fees", 500),
-                "validation_cost": defaults.get("validation_cost", 45000),
-                "verification_cost": defaults.get("verification_cost", 25000),
-                "issuance_fee_per_ert": defaults.get("issuance_fee_per_ert", 0.15),
-                "anticipated_inflation": defaults.get("anticipated_inflation", 0.0),
-                "discount_rate": defaults.get("discount_rate", 6.0),
-                "planting_cost": defaults.get("planting_cost", 1000),
+                "cost_per_cfi_plot": protocol_defaults.get("cost_per_cfi_plot", defaults.get("cost_per_cfi_plot", 150)),
+                "price_per_ert_initial": protocol_defaults.get("price_per_ert_initial", defaults.get("price_per_ert_initial", 25.0)),
+                "credit_price_increase": protocol_defaults.get("credit_price_increase", defaults.get("credit_price_increase", 2.0)),
+                "registry_fees": protocol_defaults.get("registry_fees", defaults.get("registry_fees", 500)),
+                "validation_cost": protocol_defaults.get("validation_cost", defaults.get("validation_cost", 45000)),
+                "verification_cost": protocol_defaults.get("verification_cost", defaults.get("verification_cost", 25000)),
+                "issuance_fee_per_ert": protocol_defaults.get("issuance_fee_per_ert", defaults.get("issuance_fee_per_ert", 0.15)),
+                "anticipated_inflation": protocol_defaults.get("anticipated_inflation", defaults.get("anticipated_inflation", 0.0)),
+                "discount_rate": protocol_defaults.get("discount_rate", defaults.get("discount_rate", 6.0)),
+                "planting_cost": protocol_defaults.get("planting_cost", defaults.get("planting_cost", 1000)),
             }
 
         # Always sync Number of Plots to the current net acres threshold.
         protocol_state[protocol]["num_plots"] = synced_num_plots
+
+        # Fixed assumptions should always reflect the current protocol-specific
+        # preset file. Editable assumptions are intentionally not overwritten
+        # after they have been seeded, so user edits persist.
+        for key in fixed_financial_keys:
+            if key in protocol_defaults:
+                protocol_state[protocol][key] = protocol_defaults[key]
 
     st.session_state[table_state_key] = protocol_state
 
