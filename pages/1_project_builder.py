@@ -44,7 +44,6 @@ simplified_geojson = os.path.join(
     "FVSVariantMap20210525",
     "FVS_Variants_and_Locations_4326_simplified.geojson"
 )
-_button_slot = st.empty()
 
 st.sidebar.markdown("## Project Workflow")
 
@@ -347,8 +346,13 @@ if st.session_state.active_tab == "Site Selection Map":
     variant_chooser()
 
     # Fill the button placeholder now that click state is up to date.
+    # Show navigation buttons below the map.
     if st.session_state.get("selected_variant"):
-        with _button_slot.container():
+        st.divider()
+
+        col1, col2 = st.columns(2)
+
+        with col1:
             if st.button(
                 "➡️ Planting Design",
                 use_container_width=True,
@@ -357,6 +361,8 @@ if st.session_state.active_tab == "Site Selection Map":
             ):
                 st.session_state.active_tab = "Planting Design"
                 st.rerun()
+
+        with col2:
             if st.button(
                 "🧮 Solver",
                 use_container_width=True,
