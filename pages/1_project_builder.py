@@ -348,7 +348,37 @@ if st.session_state.active_tab == "Site Selection Map":
     # Fill the button placeholder now that click state is up to date.
     # Show navigation buttons below the map.
     if st.session_state.get("selected_variant"):
+        # st.divider()
+
+        # col1, col2 = st.columns(2)
+
+        # with col1:
+        #     if st.button(
+        #         "➡️ Planting Design",
+        #         use_container_width=True,
+        #         help=H("site.button_forward_to_planting"),
+        #         type="primary",
+        #     ):
+        #         st.session_state.active_tab = "Planting Design"
+        #         st.rerun()
+
+        # with col2:
+        #     if st.button(
+        #         "🧮 Solver",
+        #         use_container_width=True,
+        #         help=H("site.button_forward_to_solver"),
+        #     ):
+        #         st.session_state.active_tab = "Solver"
+        #         st.rerun()
+        # Show navigation buttons below the map.
         st.divider()
+
+        location_selected = bool(st.session_state.get("selected_variant"))
+
+        disabled_msg = (
+            "Select a location first using Step 1: click the map, enter coordinates/address, "
+            "or upload a shapefile/GeoJSON."
+        )
 
         col1, col2 = st.columns(2)
 
@@ -356,8 +386,9 @@ if st.session_state.active_tab == "Site Selection Map":
             if st.button(
                 "➡️ Planting Design",
                 use_container_width=True,
-                help=H("site.button_forward_to_planting"),
+                help=H("site.button_forward_to_planting") if location_selected else disabled_msg,
                 type="primary",
+                disabled=not location_selected,
             ):
                 st.session_state.active_tab = "Planting Design"
                 st.rerun()
@@ -366,7 +397,8 @@ if st.session_state.active_tab == "Site Selection Map":
             if st.button(
                 "🧮 Solver",
                 use_container_width=True,
-                help=H("site.button_forward_to_solver"),
+                help=H("site.button_forward_to_solver") if location_selected else disabled_msg,
+                disabled=not location_selected,
             ):
                 st.session_state.active_tab = "Solver"
                 st.rerun()
