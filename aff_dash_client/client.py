@@ -6,7 +6,7 @@ import os
 from typing import Any
 
 from aff_dash_client.backends import HTTPBackend, LocalBackend
-from aff_dash_client.types import Defaults, ScenarioResult
+from aff_dash_client.types import Defaults, ScenarioResult, TpaSweepResult
 
 DEFAULT_API_URL = "https://model-service-api-dev-526758851260.us-west1.run.app"
 DEFAULT_BULK_BATCH_SIZE = 1000
@@ -49,7 +49,9 @@ class AFFDashClient:
         if local_models_dir is not None:
             self._backend = LocalBackend(local_models_dir)
         else:
-            url = api_base_url or os.environ.get("CARBON_API_BASE_URL") or DEFAULT_API_URL
+            url = (
+                api_base_url or os.environ.get("CARBON_API_BASE_URL") or DEFAULT_API_URL
+            )
             self._backend = HTTPBackend(url, timeout=timeout)
 
     # ----- public API -------------------------------------------------------
@@ -80,10 +82,17 @@ class AFFDashClient:
         unless overridden.
         """
         payload = self._build_payload(
-            variant=variant, loccode=loccode, survival=survival, si=si,
-            species_tpa=species_tpa, pct_level=pct_level, net_acres=net_acres,
-            protocols=protocols, financial_params=financial_params,
-            npv_year=npv_year, return_dataframes=return_dataframes,
+            variant=variant,
+            loccode=loccode,
+            survival=survival,
+            si=si,
+            species_tpa=species_tpa,
+            pct_level=pct_level,
+            net_acres=net_acres,
+            protocols=protocols,
+            financial_params=financial_params,
+            npv_year=npv_year,
+            return_dataframes=return_dataframes,
         )
         return ScenarioResult.from_api(self._backend.run(payload))
 
@@ -109,10 +118,17 @@ class AFFDashClient:
         the server raises 400.
         """
         payload = self._build_payload(
-            variant=variant, loccode=loccode, survival=survival, si=si,
-            species_tpa=species_tpa, pct_level=pct_level, net_acres=None,
-            protocols=protocols, financial_params=financial_params,
-            npv_year=npv_year, return_dataframes=return_dataframes,
+            variant=variant,
+            loccode=loccode,
+            survival=survival,
+            si=si,
+            species_tpa=species_tpa,
+            pct_level=pct_level,
+            net_acres=None,
+            protocols=protocols,
+            financial_params=financial_params,
+            npv_year=npv_year,
+            return_dataframes=return_dataframes,
         )
         payload["solve"] = {
             "variable": "net_acres",
@@ -146,10 +162,17 @@ class AFFDashClient:
         ``financial_params``.
         """
         payload = self._build_payload(
-            variant=variant, loccode=loccode, survival=survival, si=si,
-            species_tpa=species_tpa, pct_level=pct_level, net_acres=None,
-            protocols=protocols, financial_params=financial_params,
-            npv_year=npv_year, return_dataframes=return_dataframes,
+            variant=variant,
+            loccode=loccode,
+            survival=survival,
+            si=si,
+            species_tpa=species_tpa,
+            pct_level=pct_level,
+            net_acres=None,
+            protocols=protocols,
+            financial_params=financial_params,
+            npv_year=npv_year,
+            return_dataframes=return_dataframes,
         )
         payload["solve"] = {
             "variable": "net_acres",
@@ -157,6 +180,61 @@ class AFFDashClient:
             "value": float(target_npv),
         }
         return ScenarioResult.from_api(self._backend.run(payload))
+
+    def solve_tpa_range(
+        self,
+        *,
+        variant: str,
+        loccode: str,
+        target_npv: float,
+        mode: str = "scalar",
+        species: int | str | None = None,
+        op: str = ">=",
+        survival: float | None = None,
+        si: float | None = None,
+        species_tpa: list[float] | None = None,
+        pct_level: str | None = None,
+        net_acres: float | None = None,
+        protocols: list[str] | None = None,
+        financial_params: dict[str, dict[str, float]] | None = None,
+        npv_year: int | None = None,
+        grid: dict | None = None,
+        include_curve: bool = True,
+    ) -> TpaSweepResult:
+        """Grid-sweep ``species_tpa`` and return the range(s) where NPV ``op`` ``target_npv``.
+
+        target_npv, op: hurdle and comparison (``">="`` = meets/exceeds).
+        mode: ``"scalar"`` sweeps a mix multiplier; ``"species"`` sweeps one
+            species (index or code), others fixed; ``"per_species"`` sweeps each
+            species and returns a box (see ``TpaSweepResult.box()``).
+        species_tpa: base mix; defaults to the (variant, loccode) default.
+        grid: ``{"lo_factor","hi_factor","steps"}`` (relative, default 0.25×–4×,
+            25 steps) or ``{"lo","hi","steps"}`` (absolute).
+
+        Ranges flagged ``lo_clipped``/``hi_clipped`` hit the swept bounds; widen
+        ``grid`` to find the true edge.
+        """
+        payload = self._build_payload(
+            variant=variant,
+            loccode=loccode,
+            survival=survival,
+            si=si,
+            species_tpa=species_tpa,
+            pct_level=pct_level,
+            net_acres=net_acres,
+            protocols=protocols,
+            financial_params=financial_params,
+            npv_year=npv_year,
+        )
+        payload["mode"] = mode
+        payload["op"] = op
+        payload["target_npv"] = float(target_npv)
+        payload["include_curve"] = include_curve
+        if species is not None:
+            payload["species"] = species
+        if grid is not None:
+            payload["grid"] = grid
+        return TpaSweepResult.from_api(self._backend.solve_tpa(payload))
 
     def run_bulk(self, scenarios: list[dict]) -> dict:
         """Evaluate up to 1000 scenarios in one request."""
@@ -175,19 +253,23 @@ class AFFDashClient:
         into the input list, not the per-batch index.
         """
         if batch_size < 1 or batch_size > DEFAULT_BULK_BATCH_SIZE:
-            raise ValueError(f"batch_size must be between 1 and {DEFAULT_BULK_BATCH_SIZE}")
+            raise ValueError(
+                f"batch_size must be between 1 and {DEFAULT_BULK_BATCH_SIZE}"
+            )
 
         all_results: list[dict | None] = []
         all_errors: list[dict] = []
         for batch_start in range(0, len(scenarios), batch_size):
-            batch = scenarios[batch_start:batch_start + batch_size]
+            batch = scenarios[batch_start : batch_start + batch_size]
             resp = self.run_bulk(batch)
             all_results.extend(resp["results"])
             for err in resp["errors"]:
-                all_errors.append({
-                    "index": batch_start + err["index"],
-                    "error": err["error"],
-                })
+                all_errors.append(
+                    {
+                        "index": batch_start + err["index"],
+                        "error": err["error"],
+                    }
+                )
         return all_results, all_errors
 
     # ----- internals --------------------------------------------------------

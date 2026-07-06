@@ -1,15 +1,12 @@
-import streamlit as st
-import folium
-from streamlit_folium import st_folium
 import json
-import geopandas as gpd
 import os
 import tempfile
-import numpy as np
-from pathlib import Path
-from shapely.geometry import shape, Point, box
 import zipfile
+
+import streamlit as st
 from geopy.geocoders import Nominatim
+from shapely.geometry import Point
+from streamlit_folium import st_folium
 
 from utils.functions.helper import H
 from utils.functions.site_select import (
@@ -25,29 +22,29 @@ from utils.functions.site_select import (
     variant_chooser,
 )
 from utils.functions.plant_design import run_chart
+from utils.functions.solver import run_solver
 
 
 st.set_page_config(layout="wide", page_title="Project Builder", page_icon="🌲")
 
-
+# Initialize Session State
 if "active_tab" not in st.session_state:
     st.session_state.active_tab = "Site Selection Map"
-
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 local_shapefile = os.path.join(
     BASE_DIR,
     "data",
     "FVSVariantMap20210525",
-    "FVS_Variants_and_Locations_4326.shp",
+    "FVS_Variants_and_Locations_4326.shp"
 )
 simplified_geojson = os.path.join(
     BASE_DIR,
     "data",
     "FVSVariantMap20210525",
-    "FVS_Variants_and_Locations_4326_simplified.geojson",
+    "FVS_Variants_and_Locations_4326_simplified.geojson"
 )
-
+_button_slot = st.empty()
 
 st.sidebar.markdown("## Project Workflow")
 
@@ -57,8 +54,7 @@ with open(
     encoding="utf-8",
 ) as f:
     workflow_steps = json.load(f)
-
-
+    
 st.sidebar.markdown(
     """
     <style>
@@ -81,7 +77,6 @@ st.sidebar.markdown(
     unsafe_allow_html=True,
 )
 
-
 for step in workflow_steps:
     is_active = st.session_state.active_tab == step["tab"]
     step_class = "active-step" if is_active else "inactive-step"
@@ -96,10 +91,8 @@ for step in workflow_steps:
             if line.strip():
                 st.sidebar.caption(line.strip())
 
-
 st.sidebar.markdown("---")
 st.sidebar.info("Having Trouble? Visit the FAQ page above for more information.")
-
 
 if st.session_state.active_tab == "Site Selection Map":
     st.title(
@@ -242,7 +235,7 @@ if st.session_state.active_tab == "Site Selection Map":
         reset_button = st.button("Reset file uploads")
 
     if upload_button:
-        for key in ["upload_file", "uploaded_geojson_str", "uploaded_tooltip_fields"]:
+        for key in ["upload_file", "uploaded_geojson_str", "uploaded_tooltip_fields", "upload_auto_selected"]:
             if key in st.session_state:
                 del st.session_state[key]
 
@@ -298,12 +291,14 @@ if st.session_state.active_tab == "Site Selection Map":
         st.session_state["last_added_type"] = "upload"
         st.session_state["last_upload"] = uploaded_geojson_str
 
-        if uploaded_geojson_str:
+        if uploaded_geojson_str and not st.session_state.get("upload_auto_selected"):
             matched = auto_select_variant_from_upload(
                 uploaded_geojson_str,
                 geojson_str,
             )
 
+            st.session_state["upload_auto_selected"] = True
+            
             if matched:
                 st.success(
                     "Uploaded geometry matched a supported FVS variant. Variant auto-selected."
@@ -336,9 +331,7 @@ if st.session_state.active_tab == "Site Selection Map":
         tooltip_fields=tooltip_fields,
     )
 
-    highlight_fg = build_highlight_layer(
-        st.session_state.get("clicked_feature")
-    )
+    highlight_fg = build_highlight_layer(st.session_state.get("clicked_feature"))
 
     map_data = st_folium(
         m,
@@ -353,17 +346,24 @@ if st.session_state.active_tab == "Site Selection Map":
     display_selected_info()
     variant_chooser()
 
-    st.markdown("")
-
+    # Fill the button placeholder now that click state is up to date.
     if st.session_state.get("selected_variant"):
-        if st.button(
-            "➡️ Planting Design",
-            use_container_width=True,
-            help=H("site.button_forward_to_planting"),
-            type="primary",
-        ):
-            st.session_state.active_tab = "Planting Design"
-            st.rerun()
+        with _button_slot.container():
+            if st.button(
+                "➡️ Planting Design",
+                use_container_width=True,
+                help=H("site.button_forward_to_planting"),
+                type="primary",
+            ):
+                st.session_state.active_tab = "Planting Design"
+                st.rerun()
+            if st.button(
+                "🧮 Solver",
+                use_container_width=True,
+                help=H("site.button_forward_to_solver"),
+            ):
+                st.session_state.active_tab = "Solver"
+                st.rerun()
 
     if reset_button:
         for key in [
@@ -371,13 +371,13 @@ if st.session_state.active_tab == "Site Selection Map":
             "uploaded_geojson_str",
             "uploaded_tooltip_fields",
             "last_upload",
+            "upload_auto_selected"
         ]:
             if key in st.session_state:
                 del st.session_state[key]
 
         st.rerun()
-
-else:
+elif st.session_state.active_tab == "Planting Design":
     col1, col2 = st.columns([8, 3])
 
     with col1:
@@ -398,3 +398,21 @@ else:
             st.rerun()
 
     run_chart()
+
+elif st.session_state.active_tab == "Solver":
+    col1, col2 = st.columns([8, 3])
+
+    with col1:
+        st.title("🧮 Solver", anchor=None, help=H("solver.title"))
+
+    with col2:
+        if st.button(
+            "⬅️ Site Selection",
+            use_container_width=True,
+            help=H("planting.button_back_to_site"),
+            type="primary",
+        ):
+            st.session_state.active_tab = "Site Selection Map"
+            st.rerun()
+
+    run_solver()
