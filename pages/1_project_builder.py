@@ -407,11 +407,6 @@ if st.session_state.active_tab == "Site Selection Map":
 
     location_selected = bool(st.session_state.get("selected_variant"))
 
-    disabled_msg = (
-        "Select a location first using Step 1: click the map, enter coordinates/address, "
-        "or upload a shapefile/GeoJSON."
-    )
-
     col1, col2 = st.columns(2)
 
     with col1:
@@ -428,7 +423,7 @@ if st.session_state.active_tab == "Site Selection Map":
             st.button(
                 "➡️ Planting Design",
                 use_container_width=True,
-                help=disabled_msg,
+                help=H("site.button_disabled_planting"),
                 type="primary",
                 disabled=True,
             )
@@ -446,7 +441,7 @@ if st.session_state.active_tab == "Site Selection Map":
             st.button(
                 "🧮 Solver",
                 use_container_width=True,
-                help=disabled_msg,
+                help="site.button_disabled_planting",
                 disabled=True,
             )
 
@@ -462,7 +457,7 @@ if st.session_state.active_tab == "Site Selection Map":
                     del st.session_state[key]
 
             st.rerun()
-            
+
 elif st.session_state.active_tab == "Planting Design":
     col1, col2 = st.columns([8, 3])
 

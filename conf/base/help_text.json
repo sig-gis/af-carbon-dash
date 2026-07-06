@@ -19,6 +19,11 @@
       "component": "Continue button from Site Selection to Planting Scenario",
       "help": "Continue to the Planting Scenario calculations."
     },
+    "site.button_disabled_planting": {
+      "streamlit_function": "button",
+      "component": "Disabled continue button from Site Selection to Planting Scenario",
+      "help": "Select a location first using Step 1: click the map, enter coordinates/address, or upload a shapefile/GeoJSON."
+    },
     "planting.title": {
       "streamlit_function": "title",
       "component": "Planting Scenario page title",
