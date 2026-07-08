@@ -492,6 +492,21 @@ def _apply_candidate(c: dict):
     st.session_state["selected_varloc_name"] = c.get("locname") or ""
     st.session_state["clicked_feature"] = c["feature"]
     st.session_state["clicked_props"] = c["feature"].get("properties", {}) or {}
+    st.session_state.pop("upload_variant_choice_required", None)
+
+
+def _clear_variant_selection():
+    """Clear the currently applied variant while preserving candidate options."""
+    for key in [
+        "active_variant",
+        "selected_variant",
+        "selected_varloc_code",
+        "FVSLocCode",
+        "selected_varloc_name",
+        "clicked_feature",
+        "clicked_props",
+    ]:
+        st.session_state.pop(key, None)
 
 
 def _select_candidates(candidates: list[dict]) -> bool:
@@ -499,10 +514,40 @@ def _select_candidates(candidates: list[dict]) -> bool:
     st.session_state["variant_candidates"] = candidates
     # New selection: reset the chooser widget so it re-defaults to the first option.
     st.session_state.pop("site_variant_choice", None)
+    st.session_state.pop("upload_variant_choice_required", None)
     if not candidates:
         return False
     _apply_candidate(candidates[0])
     return True
+
+
+def _select_upload_candidates(candidates: list[dict]) -> bool:
+    """Store upload-derived candidates and require a choice when ambiguous.
+
+    Uploads that intersect exactly one candidate keep the existing auto-select
+    behavior. Uploads that intersect multiple candidates intentionally do not
+    apply the first candidate; the user must choose from ``variant_chooser``.
+    """
+    st.session_state["variant_candidates"] = candidates
+    st.session_state.pop("site_variant_choice", None)
+    st.session_state.pop("upload_variant_choice_required", None)
+
+    if not candidates:
+        _clear_variant_selection()
+        return False
+
+    if len(candidates) == 1:
+        _apply_candidate(candidates[0])
+        return True
+
+    _clear_variant_selection()
+    st.session_state["upload_variant_choice_required"] = True
+    return False
+
+
+def upload_variant_choice_required() -> bool:
+    """Return True when an upload overlaps multiple variants awaiting a map click."""
+    return bool(st.session_state.get("upload_variant_choice_required"))
 
 
 def auto_select_variant_from_point(point, geojson_str):
@@ -551,8 +596,8 @@ def auto_select_variant_from_upload(upload_geojson, geojson_str):
     Resolve and set the selected variant/session state from an uploaded
     shapefile/GeoJSON.
 
-    Uses the uploaded geometry's representative point first, then falls back
-    to intersecting the uploaded geometry against supported FVS polygons.
+    Intersects the full uploaded geometry against supported FVS polygons so
+    uploads spanning multiple variants are treated as ambiguous.
     Returns the selected feature's properties if found, else None.
     """
     if not upload_geojson or not geojson_str:
@@ -574,44 +619,36 @@ def auto_select_variant_from_upload(upload_geojson, geojson_str):
         if not uploaded_geoms:
             return None
 
-        # First try: use a representative point from the uploaded geometry.
-        # This point is guaranteed to fall inside the geometry.
-        point = uploaded_geoms[0].representative_point()
-        candidates = variants_at_point(point, geojson_str)
+        fvs_features = json.loads(geojson_str).get("features", [])
+        registry = _fetch_registry()
+        all_candidates = []
 
-        # Fallback: if the representative point does not hit a supported FVS
-        # polygon, intersect the whole uploaded geometry with the FVS polygons.
-        if not candidates:
-            fvs_features = json.loads(geojson_str).get("features", [])
-            registry = _fetch_registry()
-            all_candidates = []
+        for feat in fvs_features:
+            geom_json = feat.get("geometry")
+            if not geom_json:
+                continue
 
-            for feat in fvs_features:
-                geom_json = feat.get("geometry")
-                if not geom_json:
-                    continue
+            try:
+                fvs_geom = shape(geom_json)
+            except Exception:
+                continue
 
-                try:
-                    fvs_geom = shape(geom_json)
-                except Exception:
-                    continue
+            if any(
+                fvs_geom.intersects(uploaded_geom)
+                for uploaded_geom in uploaded_geoms
+            ):
+                all_candidates.extend(
+                    _candidates_from_feature(feat, registry)
+                )
 
-                if any(
-                    fvs_geom.intersects(uploaded_geom)
-                    for uploaded_geom in uploaded_geoms
-                ):
-                    all_candidates.extend(
-                        _candidates_from_feature(feat, registry)
-                    )
+        # Deduplicate by variant + loccode.
+        deduped = {}
+        for c in all_candidates:
+            deduped[(c["variant"], c["loccode"])] = c
 
-            # Deduplicate by variant + loccode.
-            deduped = {}
-            for c in all_candidates:
-                deduped[(c["variant"], c["loccode"])] = c
+        candidates = [deduped[k] for k in sorted(deduped.keys())]
 
-            candidates = [deduped[k] for k in sorted(deduped.keys())]
-
-        if not _select_candidates(candidates):
+        if not _select_upload_candidates(candidates):
             return None
 
         st.session_state["last_added_type"] = "upload"
@@ -758,6 +795,13 @@ def variant_chooser():
     the user can override. A single-candidate selection renders nothing extra
     (``display_selected_info`` already shows the resolved variant).
     """
+    if upload_variant_choice_required():
+        st.warning(
+            "Your uploaded file overlaps multiple FVS variants. Please click "
+            "the variant/location you want to use on the map before continuing."
+        )
+        return
+
     candidates = st.session_state.get("variant_candidates") or []
     if len(candidates) <= 1:
         return
