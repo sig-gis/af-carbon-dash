@@ -18,7 +18,6 @@ from utils.functions.site_select import (
     display_selected_info,
     auto_select_variant_from_point,
     auto_select_variant_from_upload,
-    upload_variant_choice_required,
     _process_pending_click,
     variant_chooser,
 )
@@ -303,11 +302,6 @@ if st.session_state.active_tab == "Site Selection Map":
                 st.success(
                     "Uploaded geometry matched a supported FVS variant. Variant auto-selected."
                 )
-            elif upload_variant_choice_required():
-                st.warning(
-                    "Uploaded geometry overlaps multiple supported FVS variants. "
-                    "Please click the variant/location you want to use on the map."
-                )
             else:
                 st.warning(
                     "Uploaded geometry does not intersect a supported FVS variant."
@@ -462,9 +456,7 @@ if st.session_state.active_tab == "Site Selection Map":
                 "uploaded_geojson_str",
                 "uploaded_tooltip_fields",
                 "last_upload",
-                "upload_auto_selected",
-                "upload_variant_choice_required",
-                "variant_candidates",
+                "upload_auto_selected"
             ]:
                 if key in st.session_state:
                     del st.session_state[key]
