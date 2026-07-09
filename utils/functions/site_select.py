@@ -10,6 +10,7 @@ import requests
 from pathlib import Path
 import io
 from shapely.geometry import shape, box, Point
+from shapely.ops import unary_union
 
 from utils.config import get_api_base_url
 from utils.functions.map_colors import color_for_feature
@@ -427,11 +428,12 @@ def _registry_variants(base: str, loccode: str, registry: list[dict]) -> list[st
     return registered or [base]
 
 
-def variants_at_point(point, geojson_str) -> list[dict]:
-    """Collect every FVS variant whose polygon contains ``point``.
+def _variants_intersecting(test_geom, geojson_str) -> list[dict]:
+    """Collect every FVS variant whose polygon intersects ``test_geom``.
 
-    Returns a sorted, de-duplicated list of option dicts, one per concrete
-    registered variant at every overlapping (base, loccode):
+    ``test_geom`` may be any shapely geometry — a clicked ``Point`` or an
+    uploaded polygon. Returns a sorted, de-duplicated list of option dicts, one
+    per concrete registered variant at every overlapping (base, loccode):
 
         {"variant", "loccode", "locname", "base", "feature"}
 
@@ -439,7 +441,7 @@ def variants_at_point(point, geojson_str) -> list[dict]:
     same-base sub-variants (WC_1, WC_2) and unrelated bases sharing the spot
     (PN, SO) — that a single map click would otherwise hide.
     """
-    if point is None or not geojson_str:
+    if test_geom is None or not geojson_str:
         return []
     try:
         features = json.loads(geojson_str).get("features", [])
@@ -457,7 +459,7 @@ def variants_at_point(point, geojson_str) -> list[dict]:
             geom = shape(geom_json)
         except Exception:
             continue
-        if not geom.intersects(point):
+        if not geom.intersects(test_geom):
             continue
 
         props = feat.get("properties", {}) or {}
@@ -481,6 +483,32 @@ def variants_at_point(point, geojson_str) -> list[dict]:
             )
 
     return [options[k] for k in sorted(options.keys())]
+
+
+def variants_at_point(point, geojson_str) -> list[dict]:
+    """Collect every FVS variant whose polygon contains ``point`` (see
+    ``_variants_intersecting`` for the returned shape)."""
+    return _variants_intersecting(point, geojson_str)
+
+
+def variants_at_geometry(uploaded_geojson_str, geojson_str) -> list[dict]:
+    """Collect every FVS variant whose polygon overlaps an uploaded geometry.
+
+    Unions all features in ``uploaded_geojson_str`` (a shapefile/GeoJSON the
+    user uploaded) and returns the overlap set in the same shape as
+    ``variants_at_point``. Used to auto-select the VarLoc after upload without
+    requiring a manual map click (#127).
+    """
+    if not uploaded_geojson_str:
+        return []
+    try:
+        feats = json.loads(uploaded_geojson_str).get("features", [])
+        geoms = [shape(f["geometry"]) for f in feats if f.get("geometry")]
+    except Exception:
+        return []
+    if not geoms:
+        return []
+    return _variants_intersecting(unary_union(geoms), geojson_str)
 
 
 def _apply_candidate(c: dict):

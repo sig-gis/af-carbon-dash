@@ -20,7 +20,7 @@ from model_service.main import (
     load_variant_species,
 )
 from utils.config import get_api_base_url, normalize_params
-from utils.functions.helper import H
+from utils.functions.helper import HELP, H
 from utils.functions.slider_bounds import clamp, slider_bounds
 from utils.functions.statefulness import (
     _backup_keys,
@@ -31,6 +31,8 @@ from utils.functions.statefulness import (
     _species_keys,
     _species_label,
 )
+
+SI_INSENSITIVE_VARIANTS = {"CI", "IE"}
 
 
 def _resolve_sub_variants(map_variant: str, loccode: str) -> list[str]:
@@ -654,12 +656,14 @@ def planting_sliders():
         key="survival",
         help=H("planting.slider_survival"),
     )
+    si_locked = variant.split("_")[0] in SI_INSENSITIVE_VARIANTS
     st.slider(
         "Site Index",
         bounds["si_min"],
         bounds["si_max"],
         key="si",
-        help=H("planting.slider_si"),
+        disabled=si_locked,
+        help=H("planting.slider_si_disabled") if si_locked else H("planting.slider_si"),
     )
 
     st.markdown(
@@ -709,7 +713,11 @@ def carbon_chart():
     )
     loccode = st.session_state.get("selected_varloc_code", "609")
 
-    _PCT_LABELS = {"PCT0": "None", "PCT1": "Light", "PCT2": "Moderate"}
+    _PCT_LABELS = HELP.get("planting.pct_level", {}).get("labels") or {
+        "PCT0": "None — no pre-commercial thinning",
+        "PCT1": "Light thinning",
+        "PCT2": "Moderate thinning",
+    }
     # Fetch available PCT levels with retention percentages for this variant/location
     try:
         _pct_resp = requests.get(
@@ -727,7 +735,7 @@ def carbon_chart():
     def _fmt_pct(code: str) -> str:
         label = _PCT_LABELS.get(code, code)
         ret = _pct_info.get(code)
-        return f"{label} — {ret}%" if ret is not None else label
+        return f"{label} ({ret}% of trees retained)" if ret is not None else label
 
     pct_level = st.selectbox(
         "Pre-commercial Thin (PCT)",
@@ -812,7 +820,7 @@ def carbon_chart():
             "scales": False,
         },
     }
-    
+
     # Convert aboveground live biomass carbon to CO2e
     if "ABLD_C" in df.columns:
         df["CO2e"] = df["ABLD_C"] * 3.667
@@ -989,9 +997,7 @@ def carbon_units():
     plot_df = plot_df.sort_values(["Protocol", "Year"])
 
     # Calculate cumulative CUs for each protocol
-    plot_df["Cumulative_CU"] = (
-        plot_df.groupby("Protocol")["CU"].cumsum()
-    )
+    plot_df["Cumulative_CU"] = plot_df.groupby("Protocol")["CU"].cumsum()
 
     # Filter to 5-year intervals for chart/table display
     plot_df, include_years = _filter_to_five_year_intervals(
@@ -1070,15 +1076,12 @@ def carbon_units():
         st.markdown("**Cumulative CU Estimates**")
         st.dataframe(
             cumulative_table_df.style.format(
-                {
-                    col: "{:,.2f}"
-                    for col in cumulative_table_df.columns
-                    if col != "Year"
-                }
+                {col: "{:,.2f}" for col in cumulative_table_df.columns if col != "Year"}
             ),
             use_container_width=True,
             hide_index=True,
         )
+
 
 def credits_inputs(prefix: str = "credits_") -> dict:
     """
@@ -1095,8 +1098,10 @@ def credits_inputs(prefix: str = "credits_") -> dict:
 
     defaults = _proforma_base_defaults()
     PRICE_OPTIONS = [15.0, 25.0, 35.0, 45.0, 55.0]
+
     def _nearest_price_option(value):
         return min(PRICE_OPTIONS, key=lambda x: abs(x - float(value)))
+
     net_acres = float(st.session_state.get("net_acres", 0) or 0)
     synced_num_plots = 200 if net_acres <= 10000 else 250
     table_state_key = f"{prefix}protocol_params"
@@ -1278,9 +1283,7 @@ def credits_inputs(prefix: str = "credits_") -> dict:
         )
 
     # Persist edited values by protocol while keeping fixed values unchanged.
-    edited_by_protocol = {
-        row["Protocol"]: row for _, row in edited_df.iterrows()
-    }
+    edited_by_protocol = {row["Protocol"]: row for _, row in edited_df.iterrows()}
 
     for protocol in protocols:
         row = edited_by_protocol[protocol]
@@ -1437,7 +1440,9 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
     if toggle_nr:
         plot_df["Net_Revenue"] = plot_df["Net_Revenue"].round(-1)
     else:
-        plot_df["Net_Revenue"] = (plot_df["Net_Revenue"] / first_params["net_acres"]).round(-1)
+        plot_df["Net_Revenue"] = (
+            plot_df["Net_Revenue"] / first_params["net_acres"]
+        ).round(-1)
 
     chart_title = "Total" if toggle_nr else "Per Acre"
 
@@ -1461,10 +1466,12 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
     summaries_df_display["Total Net Revenue, $"] = summaries_df_display[
         "total_net"
     ].map(lambda x: "${:,.0f}".format(round(x, -1)))
-    summaries_df_display[npv_col] = summaries_df_display["npv_yr"
-    ].map(lambda x: "${:,.0f}".format(round(x, -1)))
-    summaries_df_display[npv_per_acre_col] = summaries_df_display["npv_per_acre"
-    ].map(lambda x: "${:,.0f}".format(round(x, -1)))
+    summaries_df_display[npv_col] = summaries_df_display["npv_yr"].map(
+        lambda x: "${:,.0f}".format(round(x, -1))
+    )
+    summaries_df_display[npv_per_acre_col] = summaries_df_display["npv_per_acre"].map(
+        lambda x: "${:,.0f}".format(round(x, -1))
+    )
 
     # Keep only the columns to show
     summaries_df_display = summaries_df_display[

@@ -15,7 +15,25 @@ from pathlib import Path
 
 import geopandas as gpd
 import matplotlib.pyplot as plt
+import numpy as np
 from PIL import Image
+from shapely.ops import transform as shapely_transform
+
+
+def _unwrap_lon(geom):
+    """Shift positive longitudes by -360 so an antimeridian-crossing feature is
+    contiguous instead of spanning the whole globe.
+
+    Safe for the CONUS+AK FVS dataset: every real longitude is negative except
+    the Aleutian tips that wrap past +180. Without this, Alaska's Aleutians
+    feature has a naive lon span of ~359deg and its map renders the entire globe.
+    """
+
+    def _shift(x, y, z=None):
+        x = np.where(np.asarray(x) > 0, np.asarray(x) - 360.0, x)
+        return (x, y) if z is None else (x, y, z)
+
+    return shapely_transform(_shift, geom)
 
 
 def _safe_name(value: object, fallback: str) -> str:
@@ -32,7 +50,9 @@ def parse_args() -> argparse.Namespace:
             "extent (same zoom) and consistent styling."
         )
     )
-    p.add_argument("--input", required=True, help="Input vector path (SHP/GPKG/GeoJSON).")
+    p.add_argument(
+        "--input", required=True, help="Input vector path (SHP/GPKG/GeoJSON)."
+    )
     p.add_argument("--output-dir", required=True, help="Directory to write PNG files.")
     p.add_argument(
         "--id-column",
@@ -42,8 +62,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--filename-prefix", default="", help="Optional filename prefix.")
     p.add_argument("--filename-suffix", default="", help="Optional filename suffix.")
     p.add_argument("--dpi", type=int, default=300, help="PNG DPI (default: 300).")
-    p.add_argument("--fig-width", type=float, default=8.0, help="Figure width in inches.")
-    p.add_argument("--fig-height", type=float, default=6.0, help="Figure height in inches.")
+    p.add_argument(
+        "--fig-width", type=float, default=8.0, help="Figure width in inches."
+    )
+    p.add_argument(
+        "--fig-height", type=float, default=6.0, help="Figure height in inches."
+    )
     p.add_argument(
         "--match-example",
         default=None,
@@ -62,18 +86,41 @@ def parse_args() -> argparse.Namespace:
         help="Legacy global extent padding (unused in per-feature mode).",
     )
     p.add_argument("--bg-color", default="#f5f7f9", help="Figure background color.")
-    p.add_argument("--context-fill", default="#d9dee3", help="Context polygon fill color.")
-    p.add_argument("--context-edge", default="#9daab5", help="Context polygon edge color.")
+    p.add_argument(
+        "--context-fill", default="#d9dee3", help="Context polygon fill color."
+    )
+    p.add_argument(
+        "--context-edge", default="#9daab5", help="Context polygon edge color."
+    )
     p.add_argument(
         "--highlight-fill",
         default="none",
         help="Highlighted polygon fill color (default: none for transparent fill).",
     )
-    p.add_argument("--highlight-edge", default="#00383a", help="Highlighted polygon edge color.")
-    p.add_argument("--context-alpha", type=float, default=0.45, help="Context alpha (default: 0.45).")
-    p.add_argument("--highlight-alpha", type=float, default=0.85, help="Highlight alpha (default: 0.85).")
-    p.add_argument("--context-linewidth", type=float, default=0.5, help="Context edge linewidth.")
-    p.add_argument("--highlight-linewidth", type=float, default=1.1, help="Highlight edge linewidth.")
+    p.add_argument(
+        "--highlight-edge", default="#00383a", help="Highlighted polygon edge color."
+    )
+    p.add_argument(
+        "--context-alpha",
+        type=float,
+        default=0.45,
+        help="Context alpha (default: 0.45).",
+    )
+    p.add_argument(
+        "--highlight-alpha",
+        type=float,
+        default=0.85,
+        help="Highlight alpha (default: 0.85).",
+    )
+    p.add_argument(
+        "--context-linewidth", type=float, default=0.5, help="Context edge linewidth."
+    )
+    p.add_argument(
+        "--highlight-linewidth",
+        type=float,
+        default=1.1,
+        help="Highlight edge linewidth.",
+    )
     return p.parse_args()
 
 
@@ -147,7 +194,16 @@ def export_feature_pngs(args: argparse.Namespace) -> int:
         fig, ax = plt.subplots(figsize=(fig_width, fig_height), facecolor=args.bg_color)
         ax.set_facecolor(args.bg_color)
 
-        gdf.plot(
+        # Alaska's Aleutians cross the antimeridian
+        context_gdf = gdf
+        highlight_geom = row.geometry
+        fbounds = highlight_geom.bounds
+        if fbounds[2] - fbounds[0] > 180:
+            context_gdf = gdf.copy()
+            context_gdf["geometry"] = context_gdf.geometry.apply(_unwrap_lon)
+            highlight_geom = _unwrap_lon(highlight_geom)
+
+        context_gdf.plot(
             ax=ax,
             color=args.context_fill,
             edgecolor=args.context_edge,
@@ -155,7 +211,7 @@ def export_feature_pngs(args: argparse.Namespace) -> int:
             linewidth=args.context_linewidth,
         )
 
-        gpd.GeoDataFrame([row], crs=gdf.crs).plot(
+        gpd.GeoDataFrame([{"geometry": highlight_geom}], crs=gdf.crs).plot(
             ax=ax,
             color=args.highlight_fill,
             edgecolor=args.highlight_edge,
@@ -163,7 +219,7 @@ def export_feature_pngs(args: argparse.Namespace) -> int:
             linewidth=args.highlight_linewidth,
         )
 
-        fminx, fminy, fmaxx, fmaxy = row.geometry.bounds
+        fminx, fminy, fmaxx, fmaxy = highlight_geom.bounds
         xlim, ylim = _expanded_feature_viewport(
             fminx,
             fminy,

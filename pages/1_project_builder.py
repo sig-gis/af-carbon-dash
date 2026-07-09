@@ -9,21 +9,21 @@ from shapely.geometry import Point
 from streamlit_folium import st_folium
 
 from utils.functions.helper import H
+from utils.functions.plant_design import run_chart
 from utils.functions.site_select import (
-    load_geojson_fragment,
-    load_geojson_or_shapefile,
-    build_map,
-    build_highlight_layer,
-    show_clicked_variant,
-    display_selected_info,
+    _process_pending_click,
     auto_select_variant_from_point,
     auto_select_variant_from_upload,
-    _process_pending_click,
+    build_highlight_layer,
+    build_map,
+    display_selected_info,
+    load_geojson_fragment,
+    load_geojson_or_shapefile,
+    show_clicked_variant,
     variant_chooser,
+    variants_at_geometry,
 )
-from utils.functions.plant_design import run_chart
 from utils.functions.solver import run_solver
-
 
 st.set_page_config(layout="wide", page_title="Project Builder", page_icon="🌲")
 
@@ -33,16 +33,13 @@ if "active_tab" not in st.session_state:
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 local_shapefile = os.path.join(
-    BASE_DIR,
-    "data",
-    "FVSVariantMap20210525",
-    "FVS_Variants_and_Locations_4326.shp"
+    BASE_DIR, "data", "FVSVariantMap20210525", "FVS_Variants_and_Locations_4326.shp"
 )
 simplified_geojson = os.path.join(
     BASE_DIR,
     "data",
     "FVSVariantMap20210525",
-    "FVS_Variants_and_Locations_4326_simplified.geojson"
+    "FVS_Variants_and_Locations_4326_simplified.geojson",
 )
 
 st.sidebar.markdown("## Project Workflow")
@@ -53,7 +50,7 @@ with open(
     encoding="utf-8",
 ) as f:
     workflow_steps = json.load(f)
-    
+
 st.sidebar.markdown(
     """
     <style>
@@ -182,9 +179,7 @@ if st.session_state.active_tab == "Site Selection Map":
                 "Latitude/Longitude matched a supported FVS variant. Variant auto-selected."
             )
         else:
-            st.warning(
-                "Latitude/Longitude does not intersect a supported FVS variant."
-            )
+            st.warning("Latitude/Longitude does not intersect a supported FVS variant.")
 
         st.rerun()
 
@@ -234,14 +229,18 @@ if st.session_state.active_tab == "Site Selection Map":
         reset_button = st.button("Reset file uploads")
 
     if upload_button:
-        for key in ["upload_file", "uploaded_geojson_str", "uploaded_tooltip_fields", "upload_auto_selected"]:
+        for key in [
+            "upload_file",
+            "uploaded_geojson_str",
+            "uploaded_tooltip_fields",
+            "upload_auto_selected",
+        ]:
             if key in st.session_state:
                 del st.session_state[key]
 
         if uploaded_files:
-            if (
-                len(uploaded_files) == 1
-                and uploaded_files[0].name.lower().endswith(".zip")
+            if len(uploaded_files) == 1 and uploaded_files[0].name.lower().endswith(
+                ".zip"
             ):
                 st.write("ZIP file detected!")
                 uploaded_file = uploaded_files[0]
@@ -259,8 +258,7 @@ if st.session_state.active_tab == "Site Selection Map":
                 print("Extracted files:", extracted_files)
 
                 extracted_full_paths = [
-                    os.path.join(tmpdir, f)
-                    for f in extracted_files
+                    os.path.join(tmpdir, f) for f in extracted_files
                 ]
 
                 target = next(
@@ -297,7 +295,7 @@ if st.session_state.active_tab == "Site Selection Map":
             )
 
             st.session_state["upload_auto_selected"] = True
-            
+
             if matched:
                 st.success(
                     "Uploaded geometry matched a supported FVS variant. Variant auto-selected."
@@ -456,13 +454,13 @@ if st.session_state.active_tab == "Site Selection Map":
                 "uploaded_geojson_str",
                 "uploaded_tooltip_fields",
                 "last_upload",
-                "upload_auto_selected"
+                "upload_auto_selected",
             ]:
                 if key in st.session_state:
                     del st.session_state[key]
 
             st.rerun()
-            
+
 elif st.session_state.active_tab == "Planting Design":
     col1, col2 = st.columns([8, 3])
 

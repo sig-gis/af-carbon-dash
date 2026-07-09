@@ -49,6 +49,21 @@
       "component": "Site Index slider",
       "help": "Site index (SI) is a widely-used forestry concept used to describe the inherent productivity of a site in a standardized frame of reference, i.e., the expected height of an average tree of a given species after a given number of years."
     },
+    "planting.slider_si_disabled": {
+      "streamlit_function": "slider",
+      "component": "Disabled Site Index slider (Inland Empire / Central Idaho variants)",
+      "help": "Site Index is fixed for this variant. The Inland Empire (IE) and Central Idaho (CI) variants do not use site index to predict growth, so it has no effect on the carbon yield here — the slider is locked at a default value."
+    },
+    "planting.pct_level": {
+      "streamlit_function": "selectbox",
+      "component": "Pre-commercial Thin (PCT) selector",
+      "help": "Pre-commercial thinning (PCT) removes some young trees before they are merchantable to concentrate growth on the remaining stems. The percentage shown for each level is the portion of trees retained after thinning. None (PCT0) leaves the stand unthinned; Light (PCT1) and Moderate (PCT2) retain progressively fewer trees. Available levels vary by variant and location.",
+      "labels": {
+        "PCT0": "None — no pre-commercial thinning",
+        "PCT1": "Light thinning",
+        "PCT2": "Moderate thinning"
+      }
+    },
     "planting.species_mix_header": {
       "streamlit_function": "markdown",
       "component": "Header text above species TPA sliders",
