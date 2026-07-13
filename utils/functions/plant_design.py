@@ -354,6 +354,37 @@ def _regrid_series_to_five_year_intervals(
     return reg, include_years
 
 
+def _co2e_accumulation_summary(
+    df: pd.DataFrame,
+    value_col: str = "CO2e",
+    year_col: str = "Year",
+    base_year: int = CHART_BASE_YEAR,
+    horizons: tuple[int, ...] = (10, 50, 100),
+) -> pd.DataFrame:
+    """Return CO2e accumulation values interpolated at project-year horizons."""
+    if df.empty or value_col not in df.columns or year_col not in df.columns:
+        return pd.DataFrame()
+
+    curve = df[[year_col, value_col]].copy()
+    curve[year_col] = pd.to_numeric(curve[year_col], errors="coerce")
+    curve[value_col] = pd.to_numeric(curve[value_col], errors="coerce")
+    curve = curve.dropna(subset=[year_col, value_col]).sort_values(year_col)
+
+    if curve.empty:
+        return pd.DataFrame()
+
+    x = curve[year_col].astype(float).to_numpy()
+    y = curve[value_col].astype(float).to_numpy()
+    target_years = np.array([base_year + horizon for horizon in horizons], dtype=float)
+    values = np.interp(target_years, x, y)
+
+    return pd.DataFrame(
+        [
+            {f"Year {horizon}": f"{value:,.2f}" for horizon, value in zip(horizons, values)}
+        ]
+    )
+
+
 def _protocol_color_scale(protocols: list[str]) -> alt.Scale:
     """Build a deterministic Altair color scale for selected protocols."""
     domain = [p for p in protocols if p in PROTOCOL_COLOR_MAP]
@@ -838,6 +869,22 @@ def carbon_chart():
         for col, meta in available.items():
             if meta["scales"]:
                 plot_df[col] = plot_df[col] * net_acres
+
+    if "CO2e" in plot_df.columns:
+        co2e_unit = (
+            METRIC_DEFS["CO2e"]["unit_project"]
+            if toggle_oc
+            else METRIC_DEFS["CO2e"]["unit"]
+        )
+        summary_df = _co2e_accumulation_summary(plot_df)
+        if not summary_df.empty:
+            st.markdown("**CO2e Accumulation Summary**")
+            st.caption(
+                "Modeled CO2e accumulation is interpolated from aboveground live biomass carbon "
+                f"at 10-, 50-, and 100-year project horizons and shown in {co2e_unit}."
+            )
+            st.dataframe(summary_df, use_container_width=True, hide_index=True)
+            st.divider()
 
     if len(available) > 1:
         # FVS model: dual metric selectors
