@@ -870,22 +870,6 @@ def carbon_chart():
             if meta["scales"]:
                 plot_df[col] = plot_df[col] * net_acres
 
-    if "CO2e" in plot_df.columns:
-        co2e_unit = (
-            METRIC_DEFS["CO2e"]["unit_project"]
-            if toggle_oc
-            else METRIC_DEFS["CO2e"]["unit"]
-        )
-        summary_df = _co2e_accumulation_summary(plot_df)
-        if not summary_df.empty:
-            st.markdown("**CO2e Accumulation Summary**")
-            st.caption(
-                "Modeled CO2e accumulation is interpolated from aboveground live biomass carbon "
-                f"at 10-, 50-, and 100-year project horizons and shown in {co2e_unit}."
-            )
-            st.dataframe(summary_df, use_container_width=True, hide_index=True)
-            st.divider()
-
     if len(available) > 1:
         # FVS model: dual metric selectors
         metric_labels = {m["label"]: col for col, m in available.items()}
@@ -1817,6 +1801,24 @@ def run_chart():
         if "carbon_df" not in st.session_state:
             st.error("No carbon data found. Adjust sliders above first.")
             st.stop()
+
+        carbon_summary_df = st.session_state.carbon_df.copy()
+        if "ABLD_C" in carbon_summary_df.columns:
+            carbon_summary_df["CO2e"] = (
+                pd.to_numeric(carbon_summary_df["ABLD_C"], errors="coerce") * 3.667
+            )
+            carbon_summary_df["CO2e"] = carbon_summary_df["CO2e"] * st.session_state.get(
+                "net_acres", 1
+            )
+            summary_df = _co2e_accumulation_summary(carbon_summary_df)
+            if not summary_df.empty:
+                st.markdown("**CO2e Accumulation Summary**")
+                st.caption(
+                    "Modeled CO2e accumulation is interpolated from aboveground live biomass carbon "
+                    "at 10-, 50-, and 100-year project horizons and shown in tons CO2e."
+                )
+                st.dataframe(summary_df, use_container_width=True, hide_index=True)
+                st.divider()
 
         # restore backup and init state for carbon units
         _restore_backup(_carbon_units_keys(), backup_name="_carbon_units_backup")
