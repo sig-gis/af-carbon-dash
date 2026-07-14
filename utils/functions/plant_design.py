@@ -1027,7 +1027,7 @@ def carbon_units():
     # Sort before cumulative calculations
     plot_df = plot_df.sort_values(["Protocol", "Year"])
 
-    # Calculate cumulative CUs for each protocol
+    # Calculate cumulative CO2e values for each protocol
     plot_df["Cumulative_CU"] = plot_df.groupby("Protocol")["CU"].cumsum()
 
     # Filter to 5-year intervals for chart/table display
@@ -1036,20 +1036,20 @@ def carbon_units():
     )
 
     # ----------------------------
-    # Annual CU chart
+    # Annual CO2e chart
     # ----------------------------
     _plot_fading_line_chart(
         data=plot_df,
         x_col="Year",
         y_col="CU",
-        title="Annual CU Estimates " + chart_title,
-        y_title="CUs " + chart_title,
+        title="Annual CO2e Estimates " + chart_title,
+        y_title="CO2e " + chart_title,
         include_years=include_years,
         series_col="Protocol",
         show_future_hatch=True,
     )
 
-    # Annual CU table
+    # Annual CO2e table
     annual_table_df = (
         plot_df.pivot_table(
             index="Year",
@@ -1064,7 +1064,7 @@ def carbon_units():
 
     if not annual_table_df.empty:
         annual_table_df["Year"] = annual_table_df["Year"].astype(int)
-        st.markdown("**Annual CU Estimates**")
+        st.markdown("**Annual CO2e Estimates**")
         st.dataframe(
             annual_table_df.style.format(
                 {col: "{:,.2f}" for col in annual_table_df.columns if col != "Year"}
@@ -1076,20 +1076,20 @@ def carbon_units():
     st.divider()
 
     # ----------------------------
-    # Cumulative CU chart
+    # Cumulative CO2e chart
     # ----------------------------
     _plot_fading_line_chart(
         data=plot_df,
         x_col="Year",
         y_col="Cumulative_CU",
-        title="Cumulative CU Estimates " + chart_title,
-        y_title="Cumulative CUs " + chart_title,
+        title="Cumulative CO2e Estimates " + chart_title,
+        y_title="Cumulative CO2e " + chart_title,
         include_years=include_years,
         series_col="Protocol",
         show_future_hatch=True,
     )
 
-    # Cumulative CU table
+    # Cumulative CO2e table
     cumulative_table_df = (
         plot_df.pivot_table(
             index="Year",
@@ -1104,7 +1104,7 @@ def carbon_units():
 
     if not cumulative_table_df.empty:
         cumulative_table_df["Year"] = cumulative_table_df["Year"].astype(int)
-        st.markdown("**Cumulative CU Estimates**")
+        st.markdown("**Cumulative CO2e Estimates**")
         st.dataframe(
             cumulative_table_df.style.format(
                 {col: "{:,.2f}" for col in cumulative_table_df.columns if col != "Year"}
@@ -1183,7 +1183,7 @@ def credits_inputs(prefix: str = "credits_") -> dict:
 
     st.markdown("Financial Options by Protocol", help=H("credits.expander_subheader"))
     st.info(
-        "Edit **Initial Planting Cost / Acre** and **Initial Price / CU** on the left. "
+        "Edit **Initial Planting Cost / Acre** and **Initial Price / CO2e** on the left. "
         "The values on the right are fixed assumptions used by the financial model."
     )
 
@@ -1247,7 +1247,7 @@ def credits_inputs(prefix: str = "credits_") -> dict:
                     help=H("credits.inputs.planting_cost"),
                 ),
                 "price_per_ert_initial": st.column_config.SelectboxColumn(
-                    "Initial Price / CU",
+                    "Initial Price / CO2e",
                     options=PRICE_OPTIONS,
                     required=True,
                     help=H("credits.inputs.price_per_ert_initial"),
@@ -1281,7 +1281,7 @@ def credits_inputs(prefix: str = "credits_") -> dict:
                     help=H("credits.inputs.registry_fees"),
                 ),
                 "issuance_fee_per_ert": st.column_config.NumberColumn(
-                    "Issuance Fee / CU",
+                    "Issuance Fee / CO2e",
                     format="$ %.4f",
                     help=H("credits.inputs.issuance_fee_per_ert"),
                 ),
@@ -1392,11 +1392,11 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
     """
     if "merged_df" not in st.session_state:
         st.error(
-            "No carbon data found. Return to the Carbon Units Estimate section first."
+            "No carbon data found. Return to the CO2e Estimate section first."
         )
         st.stop()
 
-    # Extract merged CU data per protocol
+    # Extract merged CO2e data per protocol
     df_ert_ac_all = st.session_state.merged_df[["Year", "CU", "Protocol"]].copy()
     df_ert_ac_all = df_ert_ac_all.replace([np.inf, -np.inf], np.nan)
     df_ert_ac_all = df_ert_ac_all.dropna(subset=["CU"])
@@ -1639,7 +1639,7 @@ def generate_report():
             "column2": str(st.session_state.get("credits_cost_per_cfi_plot", 1)),
         },
         {
-            "column1": "Initial Price per CU, $",
+            "column1": "Initial Price per CO2e, $",
             "column2": str(st.session_state.get("credits_price_per_ert_initial", 1.0)),
         },
         {
@@ -1663,7 +1663,7 @@ def generate_report():
             "column2": str(st.session_state.get("credits_registry_fees", 1)),
         },
         {
-            "column1": "Issuance Fee per CU, $",
+            "column1": "Issuance Fee per CO2e, $",
             "column2": str(st.session_state.get("credits_issuance_fee_per_ert", 0.0)),
         },
         {
@@ -1682,7 +1682,7 @@ def generate_report():
 
     # Carbon data from merged_df - map to expected column names
     carbon_df = st.session_state.merged_df[["Year", "CU", "Protocol"]].copy()
-    carbon_df = carbon_df.rename(columns={"CU": "CUs"})
+    carbon_df = carbon_df.rename(columns={"CU": "CO2e"})
 
     # Report chart alignment: derive cumulative onsite CO2 from carbon curve and
     # interpolate onto report years to avoid zero-fills from year-grid mismatch.
@@ -1786,7 +1786,7 @@ def generate_report():
 def run_chart():
     """
     Top-level workflow controller. Runs planting sliders, carbon chart,
-    carbon unit chart, financial inputs, and financial results.
+    CO2e chart, financial inputs, and financial results.
     """
     # Row 1: Planting sliders | Carbon chart
     with st.expander(label="Planting Parameters", expanded=True):
@@ -1820,7 +1820,7 @@ def run_chart():
                 st.dataframe(summary_df, use_container_width=True, hide_index=True)
                 st.divider()
 
-        # restore backup and init state for carbon units
+        # restore backup and init state for CO2e estimates
         _restore_backup(_carbon_units_keys(), backup_name="_carbon_units_backup")
         _init_carbon_units_state()
 
@@ -1834,7 +1834,7 @@ def run_chart():
 
         st.session_state["carbon_units_inputs"] = {"protocols": protocols}
 
-        # backup latest selections for carbon units
+        # backup latest selections for CO2e estimates
         _backup_keys(_carbon_units_keys(), backup_name="_carbon_units_backup")
 
         carbon_units()
