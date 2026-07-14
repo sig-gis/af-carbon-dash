@@ -1813,12 +1813,18 @@ def run_chart():
             summary_df = _co2e_accumulation_summary(carbon_summary_df)
             if not summary_df.empty:
                 st.markdown("**CO2e Accumulation Summary**")
+                cu_txt = '''
+                CO₂e represents the carbon dioxide equivalent of the carbon sequestered by the project. The reported CO₂e values account for applicable deductions,  
+                including leakage (emissions that occur outside the project boundary as a result of project activities), buffer pool contributions for risk mitigation,  
+                and any other required adjustments under the relevant accounting framework. As a result, CO₂e reflects the net climate benefit attributable to the project after these considerations.
+                '''
+                st.markdown(cu_txt)
                 st.caption(
                     "Modeled CO2e accumulation is interpolated from aboveground live biomass carbon "
                     "at 10-, 50-, and 100-year project horizons and shown in tons CO2e."
                 )
                 st.dataframe(summary_df, use_container_width=True, hide_index=True)
-                st.divider()
+                # st.divider()
 
         # restore backup and init state for CO2e estimates
         _restore_backup(_carbon_units_keys(), backup_name="_carbon_units_backup")
