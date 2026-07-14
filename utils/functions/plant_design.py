@@ -1814,9 +1814,7 @@ def run_chart():
             if not summary_df.empty:
                 st.markdown("**CO2e Accumulation Summary**")
                 cu_txt = '''
-                CO₂e represents the carbon dioxide equivalent of the carbon sequestered by the project. The reported CO₂e values account for applicable deductions,  
-                including leakage (emissions that occur outside the project boundary as a result of project activities), buffer pool contributions for risk mitigation,  
-                and any other required adjustments under the relevant accounting framework. As a result, CO₂e reflects the net climate benefit attributable to the project after these considerations.
+                CO₂e represents the carbon dioxide equivalent of the carbon sequestered by the project. The reported CO₂e values account for applicable deductions, including leakage (emissions that occur outside the project boundary as a result of project activities), buffer pool contributions for risk mitigation, and any other required adjustments under the relevant accounting framework. As a result, CO₂e reflects the net climate benefit attributable to the project after these considerations.
                 '''
                 st.markdown(cu_txt)
                 st.caption(
