@@ -1182,10 +1182,11 @@ def credits_inputs(prefix: str = "credits_") -> dict:
     st.session_state[table_state_key] = protocol_state
 
     st.markdown("Financial Options by Protocol", help=H("credits.expander_subheader"))
-    st.info(
-        "Edit **Initial Planting Cost / Acre** and **Initial Price / CO2e** on the left. "
-        "The values on the right are fixed assumptions used by the financial model."
-    )
+    st.caption("For more information on a specific assumption, hover your cursor over the column header you'd like more details on.")
+    # st.info(
+    #     "Edit **Initial Planting Cost / Acre** and **Initial Price / CO2e** on the left. "
+    #     "The values on the right are fixed assumptions used by the financial model."
+    # )
 
     editable_df = pd.DataFrame(
         [
