@@ -11,12 +11,16 @@ Example:
 from __future__ import annotations
 
 import argparse
+import math
 from pathlib import Path
 
 import geopandas as gpd
+import matplotlib.patheffects as pe
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.patches import Rectangle
 from PIL import Image
+from shapely.geometry import Point
 from shapely.ops import transform as shapely_transform
 
 
@@ -121,6 +125,44 @@ def parse_args() -> argparse.Namespace:
         default=1.1,
         help="Highlight edge linewidth.",
     )
+    p.add_argument(
+        "--no-inset",
+        action="store_true",
+        help="Disable the locator inset map.",
+    )
+    p.add_argument(
+        "--no-scalebar",
+        action="store_true",
+        help="Disable the scale bar.",
+    )
+    p.add_argument(
+        "--inset-width-frac",
+        type=float,
+        default=0.30,
+        help="Inset width as fraction of main axes width (default: 0.30).",
+    )
+    p.add_argument(
+        "--inset-zoom-factor",
+        type=float,
+        default=3.0,
+        help="Inset extent as multiple of feature span (default: 3.0).",
+    )
+    p.add_argument(
+        "--inset-min-span",
+        type=float,
+        default=8.0,
+        help="Minimum inset width in degrees longitude (default: 8.0).",
+    )
+    p.add_argument(
+        "--states",
+        default="data/cb_2023_us_state_20m.zip",
+        help="US state boundaries layer for the inset basemap.",
+    )
+    p.add_argument(
+        "--locator-color",
+        default="#c62828",
+        help="Locator viewport box color (default: #c62828).",
+    )
     return p.parse_args()
 
 
@@ -140,6 +182,7 @@ def _expanded_feature_viewport(
     maxy: float,
     padding_pct: float,
     target_aspect: float,
+    lon_scale: float = 1.0,
 ) -> tuple[tuple[float, float], tuple[float, float]]:
     width = max(maxx - minx, 1e-9)
     height = max(maxy - miny, 1e-9)
@@ -150,13 +193,148 @@ def _expanded_feature_viewport(
     cx = (minx + maxx) / 2.0
     cy = (miny + maxy) / 2.0
 
-    current_aspect = (2.0 * half_w) / max(2.0 * half_h, 1e-9)
+    current_aspect = (2.0 * half_w * lon_scale) / max(2.0 * half_h, 1e-9)
     if current_aspect > target_aspect:
-        half_h = half_w / max(target_aspect, 1e-9)
+        half_h = half_w * lon_scale / max(target_aspect, 1e-9)
     else:
-        half_w = half_h * target_aspect
+        half_w = half_h * target_aspect / lon_scale
 
     return (cx - half_w, cx + half_w), (cy - half_h, cy + half_h)
+
+
+def _farthest_corner(highlight_geom, xlim, ylim, w: float, h: float, margin: float = 0.025):
+    corners = {
+        "sw": (Point(xlim[0], ylim[0]), (margin, margin)),
+        "se": (Point(xlim[1], ylim[0]), (1 - margin - w, margin)),
+        "nw": (Point(xlim[0], ylim[1]), (margin, 1 - margin - h)),
+        "ne": (Point(xlim[1], ylim[1]), (1 - margin - w, 1 - margin - h)),
+    }
+    key = max(corners, key=lambda k: highlight_geom.distance(corners[k][0]))
+    return key, corners[key][1]
+
+
+def _nice_miles(target: float) -> float:
+    power = math.floor(math.log10(max(target, 1e-9)))
+    for mult in (5, 2, 1):
+        nice = mult * 10**power
+        if nice <= target:
+            return nice
+    return 10**power
+
+
+def _draw_scale_bar(ax, xlim, ylim, corner: str, color: str) -> None:
+    dx, dy = xlim[1] - xlim[0], ylim[1] - ylim[0]
+    mi_per_deg = 69.172 * math.cos(math.radians((ylim[0] + ylim[1]) / 2.0))
+    miles = _nice_miles(0.25 * dx * mi_per_deg)
+    bar = miles / mi_per_deg
+
+    x0 = xlim[0] + 0.05 * dx if corner.endswith("w") else xlim[1] - 0.05 * dx - bar
+    y = ylim[0] + 0.05 * dy
+    halo = [pe.withStroke(linewidth=3, foreground="#ffffff")]
+    ax.plot(
+        [x0, x0 + bar],
+        [y, y],
+        color=color,
+        linewidth=2,
+        solid_capstyle="butt",
+        path_effects=halo,
+    )
+    for x in (x0, x0 + bar):
+        ax.plot(
+            [x, x],
+            [y, y + 0.012 * dy],
+            color=color,
+            linewidth=1.5,
+            path_effects=halo,
+        )
+    ax.text(
+        x0 + bar / 2.0,
+        y + 0.02 * dy,
+        f"{miles:g} mi",
+        ha="center",
+        va="bottom",
+        fontsize=11,
+        color=color,
+        path_effects=halo,
+    )
+
+
+def _draw_locator_inset(
+    ax,
+    states_gdf,
+    context_gdf,
+    highlight_geom,
+    main_xlim,
+    main_ylim,
+    target_aspect: float,
+    args: argparse.Namespace,
+) -> None:
+    fminx, fminy, fmaxx, fmaxy = highlight_geom.bounds
+    cx = (fminx + fmaxx) / 2.0
+    cy = (fminy + fmaxy) / 2.0
+    lon_scale = math.cos(math.radians(cy))
+    half_w = max((fmaxx - fminx) * args.inset_zoom_factor, args.inset_min_span) / 2.0
+    half_h = (
+        max(
+            (fmaxy - fminy) * args.inset_zoom_factor,
+            args.inset_min_span * lon_scale / target_aspect,
+        )
+        / 2.0
+    )
+    if half_w * lon_scale / half_h > target_aspect:
+        half_h = half_w * lon_scale / target_aspect
+    else:
+        half_w = half_h * target_aspect / lon_scale
+    ix0, ix1, iy0, iy1 = cx - half_w, cx + half_w, cy - half_h, cy + half_h
+
+    w = h = args.inset_width_frac
+    corner, (x0, y0) = _farthest_corner(highlight_geom, main_xlim, main_ylim, w, h)
+
+    iax = ax.inset_axes([x0, y0, w, h])
+    iax.set_facecolor("#ffffff")
+    states_gdf.plot(
+        ax=iax,
+        color="#e8ecef",
+        edgecolor="#8894a0",
+        linewidth=0.6,
+        aspect=None,
+    )
+    context_gdf.plot(
+        ax=iax,
+        facecolor="none",
+        edgecolor=args.context_edge,
+        linewidth=0.3,
+        aspect=None,
+    )
+    gpd.GeoSeries([highlight_geom]).plot(
+        ax=iax, color=args.highlight_edge, aspect=None
+    )
+
+    # Dynamic inset map sizing
+    bw = max(main_xlim[1] - main_xlim[0], 0.05 * (ix1 - ix0))
+    bh = max(main_ylim[1] - main_ylim[0], 0.05 * (iy1 - iy0))
+    if bw < 0.7 * (ix1 - ix0) and bh < 0.7 * (iy1 - iy0):
+        cx = (main_xlim[0] + main_xlim[1]) / 2.0
+        cy = (main_ylim[0] + main_ylim[1]) / 2.0
+        iax.add_patch(
+            Rectangle(
+                (cx - bw / 2, cy - bh / 2),
+                bw,
+                bh,
+                fill=False,
+                edgecolor=args.locator_color,
+                linewidth=0.9,
+            )
+        )
+    iax.set_xlim(ix0, ix1)
+    iax.set_ylim(iy0, iy1)
+    iax.set_aspect(1.0 / lon_scale, adjustable="box")
+    iax.set_xticks([])
+    iax.set_yticks([])
+    for spine in iax.spines.values():
+        spine.set_edgecolor("#9daab5")
+        spine.set_linewidth(0.6)
+    return corner
 
 
 def export_feature_pngs(args: argparse.Namespace) -> int:
@@ -184,6 +362,12 @@ def export_feature_pngs(args: argparse.Namespace) -> int:
 
     fig_width = width_px / args.dpi
     fig_height = height_px / args.dpi
+
+    if not args.no_inset:
+        gdf_u = gdf.copy()
+        gdf_u["geometry"] = gdf_u.geometry.apply(_unwrap_lon)
+        states_u = gpd.read_file(args.states).to_crs(4326)
+        states_u["geometry"] = states_u.geometry.apply(_unwrap_lon)
 
     count = 0
     for idx, row in gdf.iterrows():
@@ -220,6 +404,7 @@ def export_feature_pngs(args: argparse.Namespace) -> int:
         )
 
         fminx, fminy, fmaxx, fmaxy = highlight_geom.bounds
+        cos_lat = math.cos(math.radians((fminy + fmaxy) / 2.0))
         xlim, ylim = _expanded_feature_viewport(
             fminx,
             fminy,
@@ -227,12 +412,30 @@ def export_feature_pngs(args: argparse.Namespace) -> int:
             fmaxy,
             args.feature_padding_pct,
             target_aspect,
+            lon_scale=cos_lat,
         )
 
         ax.set_xlim(*xlim)
         ax.set_ylim(*ylim)
-        ax.set_aspect("equal", adjustable="box")
+        ax.set_aspect(1.0 / cos_lat, adjustable="box")
         ax.axis("off")
+
+        inset_corner = None
+        if not args.no_inset:
+            inset_corner = _draw_locator_inset(
+                ax,
+                states_u,
+                gdf_u,
+                highlight_geom,
+                xlim,
+                ylim,
+                target_aspect,
+                args,
+            )
+
+        if not args.no_scalebar:
+            bar_corner = "se" if inset_corner == "sw" else "sw"
+            _draw_scale_bar(ax, xlim, ylim, bar_corner, args.highlight_edge)
 
         fig.savefig(out_path, dpi=args.dpi, bbox_inches=None, pad_inches=0.0)
         plt.close(fig)
