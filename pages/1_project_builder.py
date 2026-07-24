@@ -2,13 +2,21 @@ import json
 import os
 import tempfile
 import zipfile
+from pathlib import Path
 
 import streamlit as st
+import streamlit.components.v1 as components
 from geopy.geocoders import Nominatim
 from shapely.geometry import Point
 from streamlit_folium import st_folium
 
 from utils.functions.helper import H
+from utils.functions.gcs_upload import (
+    create_signed_upload_url,
+    delete_gcs_object,
+    download_gcs_object_to_tempfile,
+    make_site_upload_object_name,
+)
 from utils.functions.plant_design import run_chart
 from utils.functions.site_select import (
     _process_pending_click,
@@ -228,6 +236,78 @@ if st.session_state.active_tab == "Site Selection Map":
         upload_button = st.button("Upload file to map")
         reset_button = st.button("Reset file uploads")
 
+        st.markdown("---")
+        st.caption(
+            "Large zipped shapefile upload: use this when Cloud Run rejects the normal upload. "
+            "The browser uploads the ZIP directly to temporary Google Cloud Storage."
+        )
+
+        large_upload_name = st.text_input(
+            "Large ZIP filename",
+            value="site_selection_upload.zip",
+            help="This name is only used for the temporary GCS object path.",
+        )
+
+        if st.button("Prepare large ZIP upload"):
+            object_name = make_site_upload_object_name(large_upload_name)
+            try:
+                signed_url, gcs_uri = create_signed_upload_url(object_name)
+                st.session_state["large_upload_signed_url"] = signed_url
+                st.session_state["large_upload_gcs_uri"] = gcs_uri
+                st.success("Signed upload URL created. Choose your ZIP below and upload it to GCS.")
+            except Exception as e:
+                st.error(f"Could not create signed upload URL: {e}")
+
+        if st.session_state.get("large_upload_signed_url"):
+            signed_url_json = json.dumps(st.session_state["large_upload_signed_url"])
+            components.html(
+                f"""
+                <div style="font-family: sans-serif; border: 1px solid #ddd; border-radius: 6px; padding: 12px; max-width: 660px;">
+                  <label style="display:block; font-weight:600; margin-bottom:8px;">Choose zipped shapefile for direct GCS upload</label>
+                  <input id="gcs-file" type="file" accept=".zip" />
+                  <button id="gcs-upload" style="margin-left:8px; padding:4px 10px;">Upload to GCS</button>
+                  <div id="gcs-status" style="margin-top:10px; color:#555;">Waiting for file...</div>
+                  <script>
+                    const signedUrl = {signed_url_json};
+                    const status = document.getElementById('gcs-status');
+                    document.getElementById('gcs-upload').onclick = async () => {{
+                      const fileInput = document.getElementById('gcs-file');
+                      if (!fileInput.files.length) {{
+                        status.textContent = 'Choose a .zip file first.';
+                        status.style.color = '#b00020';
+                        return;
+                      }}
+                      const file = fileInput.files[0];
+                      status.textContent = `Uploading ${{file.name}} (${{(file.size / 1048576).toFixed(1)}} MB)...`;
+                      status.style.color = '#555';
+                      try {{
+                        const response = await fetch(signedUrl, {{
+                          method: 'PUT',
+                          headers: {{'Content-Type': 'application/zip'}},
+                          body: file
+                        }});
+                        if (!response.ok) {{
+                          throw new Error(`Upload failed: HTTP ${{response.status}} ${{response.statusText}}`);
+                        }}
+                        status.textContent = 'Upload complete. Now click "Process large GCS upload" in Streamlit.';
+                        status.style.color = '#177233';
+                      }} catch (err) {{
+                        status.textContent = err.toString();
+                        status.style.color = '#b00020';
+                      }}
+                    }};
+                  </script>
+                </div>
+                """,
+                height=150,
+            )
+            st.caption(f"Temporary upload target: `{st.session_state['large_upload_gcs_uri']}`")
+
+        process_large_upload_button = st.button(
+            "Process large GCS upload",
+            disabled=not bool(st.session_state.get("large_upload_gcs_uri")),
+        )
+
     if upload_button:
         for key in [
             "upload_file",
@@ -277,6 +357,57 @@ if st.session_state.active_tab == "Site Selection Map":
             else:
                 st.write("Not a ZIP file or multiple files uploaded.")
                 st.session_state.upload_file = uploaded_files
+
+    if process_large_upload_button:
+        for key in [
+            "upload_file",
+            "uploaded_geojson_str",
+            "uploaded_tooltip_fields",
+            "upload_auto_selected",
+        ]:
+            if key in st.session_state:
+                del st.session_state[key]
+
+        gcs_uri = st.session_state.get("large_upload_gcs_uri")
+        if not gcs_uri:
+            st.error("Prepare and upload a large ZIP file first.")
+        else:
+            try:
+                with st.spinner("Downloading uploaded ZIP from temporary cloud storage..."):
+                    zip_path = download_gcs_object_to_tempfile(gcs_uri, suffix=".zip")
+
+                tmpdir = tempfile.mkdtemp()
+                with zipfile.ZipFile(zip_path, "r") as zip_ref:
+                    zip_ref.extractall(tmpdir)
+
+                extracted_full_paths = [
+                    str(path) for path in Path(tmpdir).rglob("*") if path.is_file()
+                ]
+
+                target = next(
+                    (
+                        f
+                        for f in extracted_full_paths
+                        if f.lower().endswith((".shp", ".geojson"))
+                    ),
+                    None,
+                )
+
+                if target:
+                    st.session_state.upload_file = [target]
+                    st.success("Large ZIP downloaded and prepared for map processing.")
+                    try:
+                        delete_gcs_object(gcs_uri)
+                        st.session_state.pop("large_upload_signed_url", None)
+                        st.session_state.pop("large_upload_gcs_uri", None)
+                    except Exception as cleanup_error:
+                        st.warning(
+                            f"Upload was processed, but temporary GCS cleanup failed: {cleanup_error}"
+                        )
+                else:
+                    st.error("No .shp or .geojson file found inside uploaded ZIP.")
+            except Exception as e:
+                st.error(f"Could not process large GCS upload: {e}")
 
     uploaded_geojson_str, uploaded_tooltip_fields = None, None
 
@@ -455,6 +586,8 @@ if st.session_state.active_tab == "Site Selection Map":
                 "uploaded_tooltip_fields",
                 "last_upload",
                 "upload_auto_selected",
+                "large_upload_signed_url",
+                "large_upload_gcs_uri",
             ]:
                 if key in st.session_state:
                     del st.session_state[key]
