@@ -132,4 +132,4 @@ jobs:
             --region ${{ env.REGION }} \
             --allow-unauthenticated \
             --service-account="${{ secrets.GCP_SERVICE_ACCOUNT }}" \
-            --set-env-vars "CARBON_API_BASE_URL=${{ steps.api_url.outputs.url }},ENV=${{ steps.env.outputs.env_name }},GCP_PROJECT=${{ env.GCP_PROJECT_ID }},MODEL_STORE_BACKEND=gcs,MODEL_STORE_BUCKET=${{ env.MODEL_BUCKET }}"
+            --set-env-vars "CARBON_API_BASE_URL=${{ steps.api_url.outputs.url }},ENV=${{ steps.env.outputs.env_name }},GCP_PROJECT=${{ env.GCP_PROJECT_ID }},MODEL_STORE_BACKEND=gcs,MODEL_STORE_BUCKET=${{ env.MODEL_BUCKET }},GOOGLE_SERVICE_ACCOUNT_EMAIL=${{ secrets.GCP_SERVICE_ACCOUNT }}"
