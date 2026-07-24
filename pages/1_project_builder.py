@@ -341,17 +341,23 @@ if st.session_state.active_tab == "Site Selection Map":
                     os.path.join(tmpdir, f) for f in extracted_files
                 ]
 
-                target = next(
+                geojson_target = next(
                     (
                         f
                         for f in extracted_full_paths
-                        if f.lower().endswith((".shp", ".geojson"))
+                        if f.lower().endswith(".geojson")
                     ),
                     None,
                 )
+                shp_target = next(
+                    (f for f in extracted_full_paths if f.lower().endswith(".shp")),
+                    None,
+                )
 
-                if target:
-                    st.session_state.upload_file = [target]
+                if geojson_target:
+                    st.session_state.upload_file = [geojson_target]
+                elif shp_target:
+                    st.session_state.upload_file = extracted_full_paths
                 else:
                     st.error("No .shp or .geojson file found inside ZIP.")
             else:
@@ -384,17 +390,32 @@ if st.session_state.active_tab == "Site Selection Map":
                     str(path) for path in Path(tmpdir).rglob("*") if path.is_file()
                 ]
 
-                target = next(
+                geojson_target = next(
                     (
                         f
                         for f in extracted_full_paths
-                        if f.lower().endswith((".shp", ".geojson"))
+                        if f.lower().endswith(".geojson")
                     ),
                     None,
                 )
+                shp_target = next(
+                    (f for f in extracted_full_paths if f.lower().endswith(".shp")),
+                    None,
+                )
 
-                if target:
-                    st.session_state.upload_file = [target]
+                if geojson_target:
+                    st.session_state.upload_file = [geojson_target]
+                    st.success("Large ZIP downloaded and prepared for map processing.")
+                    try:
+                        delete_gcs_object(gcs_uri)
+                        st.session_state.pop("large_upload_signed_url", None)
+                        st.session_state.pop("large_upload_gcs_uri", None)
+                    except Exception as cleanup_error:
+                        st.warning(
+                            f"Upload was processed, but temporary GCS cleanup failed: {cleanup_error}"
+                        )
+                elif shp_target:
+                    st.session_state.upload_file = extracted_full_paths
                     st.success("Large ZIP downloaded and prepared for map processing.")
                     try:
                         delete_gcs_object(gcs_uri)
