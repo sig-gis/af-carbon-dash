@@ -45,6 +45,8 @@ jobs:
           echo "DASH_SERVICE=af-dash${{ steps.env.outputs.dash_suffix }}" >> $GITHUB_ENV
           echo "DASH_IMAGE=gcr.io/${{ secrets.GCP_PROJECT_ID }}/af-dash${{ steps.env.outputs.dash_suffix }}:${{ github.sha }}" >> $GITHUB_ENV
           echo "MODEL_BUCKET=af-carbon-models${{ steps.env.outputs.bucket_suffix }}" >> $GITHUB_ENV
+          echo "UPLOAD_BUCKET=af-carbon-upload${{ steps.env.outputs.bucket_suffix }}" >> $GITHUB_ENV
+
 
       - name: Authenticate to Google Cloud (WIF)
         uses: google-github-actions/auth@v2
@@ -132,4 +134,4 @@ jobs:
             --region ${{ env.REGION }} \
             --allow-unauthenticated \
             --service-account="${{ secrets.GCP_SERVICE_ACCOUNT }}" \
-            --set-env-vars "CARBON_API_BASE_URL=${{ steps.api_url.outputs.url }},ENV=${{ steps.env.outputs.env_name }},GCP_PROJECT=${{ env.GCP_PROJECT_ID }},MODEL_STORE_BACKEND=gcs,MODEL_STORE_BUCKET=${{ env.MODEL_BUCKET }},GOOGLE_SERVICE_ACCOUNT_EMAIL=${{ secrets.GCP_SERVICE_ACCOUNT }}"
+            --set-env-vars "CARBON_API_BASE_URL=${{ steps.api_url.outputs.url }},ENV=${{ steps.env.outputs.env_name }},GCP_PROJECT=${{ env.GCP_PROJECT_ID }},MODEL_STORE_BACKEND=gcs,MODEL_STORE_BUCKET=${{ env.MODEL_BUCKET }},GOOGLE_SERVICE_ACCOUNT_EMAIL=${{ secrets.GCP_SERVICE_ACCOUNT }},SITE_UPLOAD_BUCKET=${{ env.UPLOAD_BUCKET }}"
