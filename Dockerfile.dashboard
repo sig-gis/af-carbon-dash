@@ -29,4 +29,4 @@ ENV PYTHONPATH=/app
 EXPOSE 8080
 
 # Cloud Run supplies PORT; default to 8080 for local runs
-CMD ["sh", "-c", "streamlit run carbon_dash.py --server.address=0.0.0.0 --server.port=${PORT:-8080} --server.headless=true"]
+CMD ["sh", "-c", "streamlit run carbon_dash.py --server.address=0.0.0.0 --server.port=${PORT:-8080} --server.headless=true --server.maxUploadSize=1024"]
