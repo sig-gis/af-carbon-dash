@@ -719,6 +719,11 @@ def planting_sliders():
         st.warning(
             f"Total initial TPA exceeds {tpa_cap} and may present an unrealistic scenario. Consider adjusting sliders."
         )
+    elif total_tpa == 0:
+        st.error(
+            "Set at least one species above 0 TPA. A planting design with no trees "
+            "produces no carbon."
+        )
 
     # Store as positional list for the API
     st.session_state["species_tpa"] = [int(st.session_state.get(k, 0)) for k in sp_keys]

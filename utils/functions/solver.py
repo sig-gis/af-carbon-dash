@@ -414,6 +414,13 @@ def _solver_inputs() -> dict | None:
         st.slider(_species_label(variant, i), 0, tpa_cap, key=spk)
     species_tpa = [int(st.session_state.get(k, 0)) for k in sp_keys]
 
+    if sum(species_tpa) == 0:
+        st.warning(
+            "Set at least one species above 0 TPA. A planting design with no trees "
+            "produces no carbon, so there is nothing to solve for."
+        )
+        return None
+
     st.markdown("**Carbon & Financials**")
     c1, c2, c3 = st.columns(3)
     with c1:

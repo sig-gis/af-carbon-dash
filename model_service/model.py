@@ -684,6 +684,12 @@ def _carbon_for_inputs_cached(
     models = get_fvs_models(variant, loccode, pct_level)
     if models is not None:
         wide = predict_fvs_metrics(models, survival, si, list(species_tpa))
+        if not wide.empty and sum(species_tpa) == 0:
+            # No trees planted means no stand, so every projected metric is 0.
+            wide = wide.copy()
+            for col in wide.columns:
+                if col != "Year":
+                    wide[col] = 0.0
         if not wide.empty:
             if "ABLD_C" in wide.columns:
                 wide["Annual_ABLD_C"] = (
@@ -702,6 +708,9 @@ def _carbon_for_inputs_cached(
         survival=survival,
         si=si,
     )
+    if sum(species_tpa) == 0:
+        # ABLD_C is 0 from species since TPA is 0
+        rows = [{**r, "ABLD_C": 0.0, "Annual_ABLD_C": 0.0} for r in rows]
     rows.insert(0, {"Year": PROFORMA_YEAR_START, "ABLD_C": 0.0, "Annual_ABLD_C": 0.0})
     return pd.DataFrame(rows), "coefficients"
 
