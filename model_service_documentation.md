@@ -1,394 +1,166 @@
 # Model Service Documentation
 
-This document provides detailed documentation for the functions and classes in the FastAPI service for carbon modeling and financial proforma calculations.
+This document describes the current model service in `af-carbon-dash`. The service is a FastAPI application that supports carbon estimation, carbon-unit conversion, proforma calculations, scenario runs, breakeven solving, model registry access, filtered GeoJSON, and PDF report generation.
 
-## Overview
+## Current Directory Context
 
-The model service consists of three main scripts:
+Important paths:
 
-- **main.py**: FastAPI application with endpoints for data serving and computations
-- **model.py**: Core computational functions for carbon modeling and financial analysis
-- **schemas.py**: Pydantic models for request/response validation
+- `carbon_dash.py`: Streamlit dashboard entry point.
+- `model_service/main.py`: FastAPI app, endpoints, startup lifecycle, and report generation.
+- `model_service/model.py`: core FVS, carbon, proforma, scenario, and solve logic.
+- `model_service/schemas.py`: Pydantic request and response models.
+- `model_service/tpa_sweep.py`: TPA breakeven sweep/range solver.
+- `model_service/geo.py`: filtered GeoJSON generation from the model registry.
+- `model_service/config_sync.py`: synchronization of shipped config defaults into the model store.
+- `model_service/store/`: model, config, and GeoJSON storage abstraction.
+- `aff_dash_client/`: programmatic Python client and CLI for scenario runs.
+- `pages/1_project_builder.py`: Project Builder page with Site Selection, Planting Design, and Solver.
+- `pages/3_admin.py`: Model Management page for non-production environments.
 
-## main.py
+## Service Overview
 
-### Utility Functions
+The FastAPI app is created in `model_service/main.py` as `FastAPI(title="Carbon Model Service", lifespan=lifespan)`.
 
-#### `load_json(filename: str)`
-Loads and parses a JSON file from the base configuration directory.
+The current modeling pipeline is:
 
-**Parameters:**
-- `filename` (str): Name of the JSON file to load
+1. Resolve variant, location, PCT, and species inputs.
+2. Use registered FVS-derived model predictions when available.
+3. Fall back to coefficient-based carbon calculations when FVS models are unavailable.
+4. Convert carbon outputs to protocol-specific carbon units.
+5. Calculate financial proforma rows and summary metrics.
+6. Optionally solve breakeven acreage or TPA ranges.
 
-**Returns:**
-- dict: Parsed JSON data
+## Startup Behavior
 
-**Usage:**
-Used internally to load static configuration data like coefficients and presets.
+The `lifespan` function runs on startup. It loads the model registry, synchronizes default configuration from `conf/base`, and builds the cached filtered GeoJSON used by the dashboard map. Model files are loaded lazily on first use rather than all at startup.
 
-#### `fetch_carbon_coefficients()`
-Fetches carbon coefficients from an external API.
+The `refresh_geojson()` function rebuilds the cached filtered GeoJSON from the configured model store.
 
-**Returns:**
-- dict: Carbon coefficients data
+## Configuration
 
-**Usage:**
-Retrieves dynamic carbon modeling coefficients from the API.
+The service uses shipped configuration under `conf/base`, including carbon coefficients, proforma presets, species labels, protocol rules, variant species, variant presets, and workflow steps.
 
-#### `_load_proforma_defaults()`
-Private function that fetches proforma presets from the API.
+Shared helpers in `utils/config.py` include:
 
-**Returns:**
-- dict: Proforma preset data
+- `get_api_base_url()`: resolves the model-service base URL and honors `CARBON_API_BASE_URL`.
+- `normalize_params(params)`: converts numpy and scientific values into JSON-safe values.
 
-**Usage:**
-Internal function for loading default financial parameters.
+## Main API Endpoints
 
-#### `load_variant_presets()`
-Fetches forest variant presets from the API.
+Reference data endpoints:
 
-**Returns:**
-- dict: Variant preset data
+- `GET /carbon/coefficients`: returns coefficient-based carbon-model parameters.
+- `GET /proforma/presets`: returns default proforma assumptions.
+- `GET /variant/presets`: returns effective variant presets.
+- `GET /species/labels`: returns species-code labels.
+- `GET /protocol/rules`: returns carbon protocol rules.
+- `GET /variant/species`: returns effective variant-to-species mappings.
+- `GET /health`: returns service status.
 
-**Usage:**
-Retrieves preset configurations for different forest types.
+Geo and registry endpoints:
 
-#### `load_species_labels()`
-Fetches species label mappings from the API.
+- `GET /geo/variants`: returns filtered GeoJSON containing locations with registered models.
+- `POST /geo/refresh`: rebuilds the filtered GeoJSON cache.
+- `GET /models/registry`: returns the current model registry.
+- `GET /models/pct-info`: returns available PCT levels and retention percentages for a variant/location pair.
 
-**Returns:**
-- dict: Species label data
+Carbon and financial endpoints:
 
-**Usage:**
-Provides human-readable labels for tree species codes.
+- `POST /carbon/calculate`: calculates carbon metrics for a variant/location/PCT/species scenario.
+- `POST /carbon/units`: converts carbon rows into protocol-specific carbon units.
+- `POST /proforma/compute`: computes proforma rows and financial summaries.
 
-#### `load_protocol_rules()`
-Fetches protocol-specific rules from the API.
+Scenario endpoints:
 
-**Returns:**
-- dict: Protocol rules data
+- `GET /scenario/defaults`: returns default scenario inputs for a variant/location pair.
+- `POST /scenario/run`: runs the full carbon-to-financial scenario pipeline.
+- `POST /scenario/bulk`: evaluates up to 1000 scenarios in one request.
+- `POST /scenario/solve-tpa`: sweeps species TPA values to find ranges where NPV meets a target.
 
-**Usage:**
-Retrieves rules for different carbon credit protocols (ACR, CAR, VERRA, etc.).
+Report endpoint:
 
-### API Endpoints
+- `POST /reports/generate`: generates a PDF report with Quarto from dashboard-provided data.
 
-#### `GET /carbon/coefficients`
-Returns carbon model coefficients.
+## Carbon Calculation
 
-**Returns:**
-- JSON response with coefficient data
+`POST /carbon/calculate` uses the `CarbonInputs` schema. Current fields include:
 
-**Usage:**
-Provides coefficients used in carbon score calculations.
+- `variant`
+- `loccode`
+- `survival`
+- `si`
+- `species_tpa`
+- `pct_level`, defaulting to `PCT0`
 
-#### `GET /proforma/presets`
-Returns proforma calculation presets.
+The endpoint first tries to load matching FVS models by variant, location code, and PCT level. If model output is available, it returns FVS-based projections. If not, it falls back to coefficient-based carbon scores. The response includes `carbon_df` and `model_source`, where `model_source` is `fvs` or `coefficients`.
 
-**Returns:**
-- JSON response with preset financial parameters
+## Scenario Evaluation
 
-**Usage:**
-Default parameters for financial modeling.
+`POST /scenario/run` uses `ScenarioRequest` and returns `ScenarioResponse`. It can backfill missing values from `default_scenario(variant, loccode)`.
 
-#### `GET /variant/presets`
-Returns forest variant presets.
+Important scenario fields include:
 
-**Returns:**
-- JSON response with variant configurations
+- `variant`
+- `loccode`
+- `survival`
+- `si`
+- `species_tpa`
+- `pct_level`
+- `net_acres`
+- `protocols`
+- `financial_params`
+- `npv_year`
+- `solve`
+- `return_dataframes`
 
-**Usage:**
-Preset configurations for different forest management scenarios.
+The optional solve directive can solve for `net_acres` needed to reach a target metric such as NPV.
 
-#### `GET /species/labels`
-Returns species label mappings.
+## TPA Sweep
 
-**Returns:**
-- JSON response with species code to label mappings
+`POST /scenario/solve-tpa` uses `TpaSweepRequest`. It supports these modes:
 
-**Usage:**
-Human-readable species names for UI display.
+- `scalar`: scales the full species mix.
+- `species`: varies one selected species.
+- `per_species`: evaluates each species separately.
 
-#### `GET /protocol/rules`
-Returns protocol-specific rules.
+The response includes feasible intervals and optional curve points showing how NPV changes across the TPA sweep.
 
-**Returns:**
-- JSON response with protocol rules
+## Core Model Functions
 
-**Usage:**
-Rules for calculating carbon credits under different protocols.
+- `get_fvs_models(variant, loccode, pct_level)`: loads and caches a registered joblib model collection from the model store.
+- `predict_fvs_metrics(models, survival, si, species_tpa)`: runs FVS-derived sklearn models and returns wide-format annual outputs.
+- `compute_carbon_scores(...)`: coefficient-based fallback carbon model.
+- `compute_carbon_units(...)`: converts carbon values into protocol-specific carbon units.
+- `compute_proforma(...)`: computes yearly financial proforma rows.
+- `compute_summaries(...)`: computes total net revenue, NPV, NPV horizon, and NPV per acre.
+- `default_scenario(...)`: builds complete default inputs for a variant/location pair.
+- `run_scenario(...)`: executes the full carbon, carbon-unit, proforma, summary, and optional solve pipeline.
 
-#### `GET /health`
-Health check endpoint.
+## Schemas
 
-**Returns:**
-- `{"status": "ok"}`
+Major schemas in `model_service/schemas.py` include:
 
-**Usage:**
-Service availability monitoring.
+- Proforma: `ProformaRequest`, `ProformaSummary`, `ProformaResponse`
+- Carbon: `CarbonInputs`, `CarbonResponse`, `ProtocolRule`, `CarbonUnitsRequest`, `CarbonUnitsResponse`
+- Report: `ReportData`, `ReportRequest`
+- Scenario: `SolveDirective`, `ScenarioRequest`, `ScenarioSummary`, `ScenarioResponse`, `ScenarioDefaults`, `BulkScenarioRequest`, `BulkScenarioError`, `BulkScenarioResponse`
+- TPA sweep: `TpaGrid`, `TpaSweepRequest`, `TpaInterval`, `TpaCurvePoint`, `TpaRangeResult`, `TpaSweepResponse`
 
-#### `POST /proforma/compute`
-Computes financial proforma and summaries.
+## Dashboard Integration
 
-**Request Body:**
-- `ProformaRequest` schema
+The Streamlit dashboard calls the model service through `get_api_base_url()` and `requests`.
 
-**Response:**
-- `ProformaResponse` with proforma rows and summaries
+- Site Selection uses GeoJSON and registry-aware variant availability.
+- Planting Design calls carbon, carbon-unit, proforma, and report workflows.
+- Solver calls scenario endpoints for breakeven acreage, sensitivity grids, and TPA sweeps.
+- Model Management updates model registry and associated variant/species/preset metadata outside production.
 
-**Usage:**
-Main endpoint for financial analysis of carbon credit projects.
+## Operational Notes
 
-#### `POST /carbon/calculate`
-Calculates carbon sequestration scores over time.
-
-**Request Body:**
-- `CarbonInputs` schema
-
-**Response:**
-- `CarbonResponse` with yearly carbon scores
-
-**Usage:**
-Computes carbon sequestration based on tree planting parameters.
-
-#### `POST /carbon/units`
-Calculates carbon units (credits) for different protocols.
-
-**Request Body:**
-- `CarbonUnitsRequest` schema
-
-**Response:**
-- `CarbonUnitsResponse` with carbon unit calculations
-
-**Usage:**
-Converts carbon scores to tradable carbon credits under various protocols.
-
-#### `POST /reports/generate`
-Generates a PDF report using Quarto and project-specific data.
-
-**Request Body:**
-- `ReportRequest` schema (see `schemas.py`). The request includes a `data` object with:
-  - `planting_design` (List[List[str | number]]): Two-column rows for the strategy summary.
-  - `species_mix` (List[List[str | number]]): Two-column rows for the species mix.
-  - `financial_options1` (List[List[str | number]]): Two-column rows for financial options (table 1).
-  - `financial_options2` (List[List[str | number]]): Two-column rows for financial options (table 2).
-  - `carbon` (List[Dict]): Carbon projection rows used for charts.
-  - `selected_variant` (str): Expected variants are `EC` or `PN` (normalized/validated server-side).
-
-**Response:**
-- `application/pdf` file response with a generated report (e.g., `report_YYYY-MM-DD_HHMMSS.pdf`).
-
-**Runtime Behavior:**
-- Writes request data to `/tmp/quarto/data/*.csv`.
-- Calls `quarto render` on `model_service/quarto/report.ipynb` with `--execute`.
-- Uses the following environment variables during rendering:
-  - `QUARTO_DATA_DIR`: Path to the temp CSV directory (`/tmp/quarto/data`).
-  - `QUARTO_FIG_DIR`: Path to static figure assets (`model_service/quarto/data/fig`).
-
-**Static Assets:**
-- Variant images must be present in `model_service/quarto/data/fig` (e.g., `ECvariant.png`, `PNvariant.png`).
-- Ensure these assets are included in the container image for Cloud Run builds.
-
-**Usage:**
-Produces a Quarto-generated PDF report that combines tabular summaries, charts, and variant imagery.
-
-## model.py
-
-### `compute_proforma(df_ert_ac: pd.DataFrame, p: dict) -> pd.DataFrame`
-Computes financial proforma for carbon credit sales.
-
-**Parameters:**
-- `df_ert_ac` (DataFrame): Carbon units per acre by year and protocol
-- `p` (dict): Financial parameters including costs, prices, acres, etc.
-
-**Returns:**
-- DataFrame: Detailed yearly financial data including revenues, costs, and net revenue
-
-**Key Logic:**
-- Groups data by protocol
-- Calculates credit sales (every 5 years)
-- Applies escalating credit prices
-- Includes validation, verification, survey, registry, issuance, planting, and seedling costs
-- Computes net revenue per year
-
-**Usage:**
-Financial modeling for carbon credit projects to determine profitability.
-
-### `compute_summaries(df_pf: pd.DataFrame, params: dict, npv_years: int = 20) -> pd.DataFrame`
-Computes financial summaries per protocol.
-
-**Parameters:**
-- `df_pf` (DataFrame): Proforma data from `compute_proforma`
-- `params` (dict): Financial parameters
-- `npv_years` (int): Years for NPV calculation (default 20)
-
-**Returns:**
-- DataFrame: Per-protocol summaries including total net revenue, NPV, and NPV per acre
-
-**Key Logic:**
-- Groups proforma data by protocol
-- Calculates total net revenue
-- Computes NPV using discount rate
-- Provides per-acre financial metrics
-
-**Usage:**
-Summarizes financial performance across different carbon credit protocols.
-
-### `compute_carbon_scores(coefficients: Dict, tpa_df: float, tpa_rc: float, tpa_wh: float, survival: float, si: float)`
-Calculates carbon sequestration scores over project years.
-
-**Parameters:**
-- `coefficients` (dict): Carbon model coefficients by year
-- `tpa_df` (float): Trees per acre - dominant forest
-- `tpa_rc` (float): Trees per acre - riparian corridor
-- `tpa_wh` (float): Trees per acre - wildlife habitat
-- `survival` (float): Tree survival rate
-- `si` (float): Site index
-
-**Returns:**
-- List[dict]: Yearly carbon scores with Year, C_Score, and Annual_C_Score
-
-**Key Logic:**
-- Applies linear regression model using coefficients for each year
-- Calculates cumulative and annual carbon sequestration
-- Uses tree density, survival, and site quality factors
-
-**Usage:**
-Core carbon modeling function to estimate sequestration over time.
-
-### `compute_carbon_units(df_carbon: pd.DataFrame, protocols: list[str], protocol_rules: dict | None = None) -> pd.DataFrame`
-Calculates carbon units (credits) under different protocols.
-
-**Parameters:**
-- `df_carbon` (DataFrame): Carbon scores by year
-- `protocols` (list[str]): List of protocols to calculate for
-- `protocol_rules` (dict): Protocol-specific rules (optional)
-
-**Returns:**
-- DataFrame: Carbon units by year and protocol
-
-**Key Logic:**
-- Converts carbon scores to CO2 equivalent
-- Applies protocol-specific coefficients
-- Performs cubic spline interpolation for smooth curves
-- Calculates project vs baseline deltas
-- Applies buffer requirements where specified
-- Handles multiple protocols simultaneously
-
-**Usage:**
-Converts raw carbon sequestration data into tradable carbon credits.
-
-## schemas.py
-
-### Data Models
-
-#### `ProformaRequest`
-Request model for proforma computation.
-
-**Fields:**
-- `df_ert_ac` (List[Dict]): Rows with Year, CU (carbon units), Protocol
-- `params` (Dict): Financial parameters
-
-#### `ProformaSummary`
-Summary data for each protocol.
-
-**Fields:**
-- `Protocol` (str): Protocol name
-- `total_net` (float): Total net revenue
-- `npv_yr` (float): NPV over the configured horizon (see `npv_year`)
-- `npv_year` (int): The horizon used to compute `npv_yr` (e.g. 20, 40)
-- `npv_per_acre` (float): NPV per acre
-
-#### `ProformaResponse`
-Response model for proforma endpoint.
-
-**Fields:**
-- `proforma_rows` (list[dict]): Detailed proforma data
-- `summaries` (list[ProformaSummary]): Per-protocol summaries
-
-#### `CarbonInputs`
-Input parameters for carbon calculation.
-
-**Fields:**
-- `tpa_df` (float): Trees per acre - dominant forest
-- `tpa_rc` (float): Trees per acre - riparian corridor
-- `tpa_wh` (float): Trees per acre - wildlife habitat
-- `survival` (float): Survival rate
-- `si` (float): Site index
-
-#### `CarbonYearResult`
-Yearly carbon calculation result.
-
-**Fields:**
-- `Year` (int): Project year
-- `C_Score` (float): Cumulative carbon score
-- `Annual_C_Score` (float): Annual carbon sequestration
-
-#### `CarbonResponse`
-Response model for carbon calculation endpoint.
-
-**Fields:**
-- `carbon_df` (List[CarbonYearResult]): Yearly carbon results
-
-#### `ProtocolRule`
-Rules for a specific protocol.
-
-**Fields:**
-- `BUF` (float): Buffer percentage
-- `coeff` (float): Conversion coefficient
-- `apply_buf` (bool): Whether to apply buffer
-
-#### `ProtocolRules`
-Type alias for protocol rules dictionary.
-
-#### `CarbonUnitsRequest`
-Request model for carbon units calculation.
-
-**Fields:**
-- `carbon_rows` (List[Dict]): Carbon score data (Year, C_Score)
-- `protocols` (List[str]): Protocols to calculate for
-- `protocol_rules` (ProtocolRules): Custom rules (optional)
-
-#### `CarbonUnitsResponse`
-Response model for carbon units endpoint.
-
-**Fields:**
-- `rows` (List[Dict]): Carbon unit calculations by year and protocol
-
-## Related Configuration Files
-
-### `utils/config.py`
-
-This file provides configuration utilities used by the model service.
-
-#### `get_api_base_url() -> str`
-Resolves the base URL for external API calls.
-
-**Returns:**
-- str: The API base URL
-
-**Key Logic:**
-- Checks `CARBON_API_BASE_URL` environment variable first
-- Falls back to production API URL if not set
-- Includes localhost option for development (commented out)
-- Enforces production rules to prevent localhost usage in production
-
-**Usage:**
-Used in main.py to construct API endpoints for fetching external data.
-
-#### `normalize_params(params: dict) -> dict`
-Converts parameter dictionary to JSON-safe Python primitives.
-
-**Parameters:**
-- `params` (dict): Dictionary containing various data types
-
-**Returns:**
-- dict: Cleaned dictionary with JSON-safe values
-
-**Key Logic:**
-- Converts numpy scalars to Python floats
-- Replaces NaN and infinite values with None
-- Preserves other data types unchanged
-
-**Usage:**
-Ensures parameters can be safely serialized to JSON for API responses or logging.
+- Set `CARBON_API_BASE_URL` for deployed dashboard environments.
+- Model files must exist in the configured model store under `models/`.
+- `registry.json` controls available variant/location/PCT combinations.
+- Filtered GeoJSON exposes only locations with registered models.
+- Report generation requires Quarto and report assets in the runtime image.
+- `ENV=production` hides the Model Management page.
