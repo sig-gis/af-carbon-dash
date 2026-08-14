@@ -319,6 +319,58 @@ def _five_year_values(max_year: int, start_year) -> list[int]:
         return [start_year]
     return list(range(start_year, int(max_year) + 1, 5))
 
+def _dynamic_baseline_year(df: pd.DataFrame, year_col: str = "Year", step_years: int = 5) -> int:
+    """Return the dynamic zero-baseline year immediately before the first modeled year."""
+    years = pd.to_numeric(df[year_col], errors="coerce").dropna()
+    if years.empty:
+        raise ValueError("Cannot determine baseline year from empty/non-numeric Year values.")
+    return int(years.min()) - step_years
+
+
+def _prepend_dynamic_zero_row(
+    df: pd.DataFrame,
+    value_col: str,
+    year_col: str = "Year",
+    step_years: int = 5,
+) -> tuple[pd.DataFrame, int]:
+    """Prepend a zero row at first modeled year - step_years for single-series charts."""
+    out = df.copy()
+    baseline_year = _dynamic_baseline_year(out, year_col=year_col, step_years=step_years)
+
+    zero_row = {col: np.nan for col in out.columns}
+    zero_row[year_col] = baseline_year
+    zero_row[value_col] = 0.0
+
+    out = pd.concat([pd.DataFrame([zero_row]), out], ignore_index=True)
+    out = out.sort_values(year_col).reset_index(drop=True)
+
+    return out, baseline_year
+
+
+def _prepend_dynamic_zero_rows_by_group(
+    df: pd.DataFrame,
+    group_col: str,
+    value_col: str,
+    groups: list[str] | None = None,
+    year_col: str = "Year",
+    step_years: int = 5,
+) -> tuple[pd.DataFrame, int]:
+    """Prepend zero rows at first modeled year - step_years for each group."""
+    out = df.copy()
+    baseline_year = _dynamic_baseline_year(out, year_col=year_col, step_years=step_years)
+
+    if groups is None:
+        groups = out[group_col].dropna().unique().tolist()
+
+    zero_rows = pd.DataFrame(
+        [{year_col: baseline_year, group_col: group, value_col: 0.0} for group in groups]
+    )
+
+    out = pd.concat([zero_rows, out], ignore_index=True)
+    out = out.sort_values([group_col, year_col]).reset_index(drop=True)
+
+    return out, baseline_year
+
 
 def _filter_to_five_year_intervals(
     df: pd.DataFrame,
@@ -927,10 +979,17 @@ def carbon_chart():
             # )
 
             df_m = plot_df[["Year", col]].copy()
-            chart_start_year = int(df_m["Year"].min())
+            df_m, chart_start_year = _prepend_dynamic_zero_row(
+                df_m,
+                value_col=col,
+                year_col="Year",
+            )
 
             df_m, inc = _regrid_series_to_five_year_intervals(
-                df_m, value_col=col, year_col="Year", start_year=chart_start_year
+                df_m,
+                value_col=col,
+                year_col="Year",
+                start_year=chart_start_year,
             )
 
             chart = (
@@ -971,10 +1030,17 @@ def carbon_chart():
         #     plot_df, value_col="ABLD_C", year_col="Year", start_year=CHART_BASE_YEAR
         # )
 
-        chart_start_year = int(plot_df["Year"].min())
+        plot_df, chart_start_year = _prepend_dynamic_zero_row(
+            plot_df,
+            value_col="ABLD_C",
+            year_col="Year",
+        )
 
         plot_df, include_years = _regrid_series_to_five_year_intervals(
-            plot_df, value_col="ABLD_C", year_col="Year", start_year=chart_start_year
+            plot_df,
+            value_col="ABLD_C",
+            year_col="Year",
+            start_year=chart_start_year,
         )
 
         line = (
@@ -1018,10 +1084,22 @@ def carbon_units():
         st.info("Select at least one protocol.")
         return
 
+    # payload = {
+    #     "carbon_rows": st.session_state.carbon_df[["Year", "ABLD_C"]].to_dict(
+    #         orient="records"
+    #     ),
+    #     "protocols": protocols,
+    # }
+    
+    carbon_rows_df = st.session_state.carbon_df[["Year", "ABLD_C"]].copy()
+    carbon_rows_df, carbon_baseline_year = _prepend_dynamic_zero_row(
+        carbon_rows_df,
+        value_col="ABLD_C",
+        year_col="Year",
+    )
+
     payload = {
-        "carbon_rows": st.session_state.carbon_df[["Year", "ABLD_C"]].to_dict(
-            orient="records"
-        ),
+        "carbon_rows": carbon_rows_df.to_dict(orient="records"),
         "protocols": protocols,
     }
 
@@ -1039,6 +1117,12 @@ def carbon_units():
     if final_df.empty:
         st.error("No protocols selected or no data available to plot.")
         return
+
+    zero_cu_rows = pd.DataFrame(
+        [{"Year": carbon_baseline_year, "Protocol": protocol, "CU": 0.0} for protocol in protocols]
+    )
+    final_df = pd.concat([zero_cu_rows, final_df], ignore_index=True)
+    final_df = final_df.sort_values(["Protocol", "Year"]).reset_index(drop=True)
 
     st.session_state.merged_df = final_df
 
@@ -1406,10 +1490,11 @@ def credits_inputs(prefix: str = "credits_") -> dict:
     # year_start = 2026
 
     merged_df = st.session_state.get("merged_df")
-    if merged_df is not None and not merged_df.empty and "Year" in merged_df.columns:
-        year_start = int(pd.to_numeric(merged_df["Year"], errors="coerce").min())
-    else:
-        year_start = 2024
+    if merged_df is None or merged_df.empty or "Year" not in merged_df.columns:
+        st.error("No carbon estimate years found. Run Carbon Estimates before Credits.")
+        st.stop()
+
+    year_start = int(pd.to_numeric(merged_df["Year"], errors="coerce").dropna().min())
 
     years_advance = 35
     net_acres = st.session_state["net_acres"]
@@ -1513,7 +1598,16 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
     #     df_chart, year_col="Year", start_year=CHART_BASE_YEAR
     # )
 
-    chart_start_year = int(pd.to_numeric(df_pf["Year"], errors="coerce").min())
+    # chart_start_year = int(pd.to_numeric(df_pf["Year"], errors="coerce").min())
+
+    chart_start_year = int(year_start)
+
+    protocols_for_chart = df_pf["Protocol"].dropna().unique().tolist()
+    zero_revenue_rows = pd.DataFrame(
+        [{"Year": chart_start_year, "Protocol": protocol, "Net_Revenue": 0.0} for protocol in protocols_for_chart]
+    )
+    df_pf = pd.concat([zero_revenue_rows, df_pf], ignore_index=True)
+    df_pf = df_pf.sort_values(["Protocol", "Year"]).reset_index(drop=True)
 
     include_years = _five_year_values(year_stop, start_year=chart_start_year)
 
