@@ -263,10 +263,10 @@ def calculate_carbon(inputs: CarbonInputs):
                 )
 
             # Prepend base year row
-            zero_row = {col: 0.0 for col in wide.columns}
-            zero_row["Year"] = 2026
-            wide = pd.concat([pd.DataFrame([zero_row]), wide], ignore_index=True)
-            wide = wide.sort_values("Year").reset_index(drop=True)
+            # zero_row = {col: 0.0 for col in wide.columns}
+            # zero_row["Year"] = 2026
+            # wide = pd.concat([pd.DataFrame([zero_row]), wide], ignore_index=True)
+            # wide = wide.sort_values("Year").reset_index(drop=True)
 
             return {
                 "carbon_df": wide.to_dict(orient="records"),
@@ -281,14 +281,14 @@ def calculate_carbon(inputs: CarbonInputs):
         survival=inputs.survival,
         si=inputs.si,
     )
-    results.insert(
-        0,
-        {
-            "Year": 2026,
-            "ABLD_C": 0.0,
-            "Annual_ABLD_C": 0.0,
-        },
-    )
+    # results.insert(
+    #     0,
+    #     {
+    #         "Year": 2026,
+    #         "ABLD_C": 0.0,
+    #         "Annual_ABLD_C": 0.0,
+    #     },
+    # )
 
     return {
         "carbon_df": results,

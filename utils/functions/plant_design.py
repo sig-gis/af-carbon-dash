@@ -190,8 +190,12 @@ def _plot_fading_line_chart(
     """Render a Plotly line chart with optional year-40+ hatch background."""
     fig = go.Figure()
 
-    hatch_start_year = CHART_BASE_YEAR + HATCH_START_AGE
-    x_end = max(include_years) if include_years else CHART_BASE_YEAR
+    # hatch_start_year = CHART_BASE_YEAR + HATCH_START_AGE
+    # x_end = max(include_years) if include_years else CHART_BASE_YEAR
+    chart_start_year = min(include_years) if include_years else int(data[x_col].min())
+    hatch_start_year = chart_start_year + HATCH_START_AGE
+    x_end = max(include_years) if include_years else chart_start_year
+
     if (
         show_future_hatch
         and x_end > hatch_start_year
@@ -295,7 +299,8 @@ def _plot_fading_line_chart(
         tickvals=include_years,
         tickformat="d",
         tickangle=30,
-        range=[CHART_BASE_YEAR, max(include_years)],
+        # range=[CHART_BASE_YEAR, max(include_years)],
+        range=[chart_start_year, max(include_years)],
         showgrid=True,
         gridcolor="rgba(0,0,0,0.15)",
     )
@@ -308,7 +313,7 @@ def _plot_fading_line_chart(
     st.plotly_chart(fig, use_container_width=True)
 
 
-def _five_year_values(max_year: int, start_year: int = CHART_BASE_YEAR) -> list[int]:
+def _five_year_values(max_year: int, start_year) -> list[int]:
     """Return 5-year x-axis values from start_year through max_year (inclusive range)."""
     if max_year < start_year:
         return [start_year]
@@ -318,10 +323,15 @@ def _five_year_values(max_year: int, start_year: int = CHART_BASE_YEAR) -> list[
 def _filter_to_five_year_intervals(
     df: pd.DataFrame,
     year_col: str = "Year",
-    start_year: int = CHART_BASE_YEAR,
+    # start_year: int = CHART_BASE_YEAR,
+    start_year: int | None = None,
 ) -> tuple[pd.DataFrame, list[int]]:
     """Keep rows at/after start_year and restricted to 5-year intervals from start_year."""
     out = df.copy()
+
+    if start_year is None:
+        start_year = int(pd.to_numeric(out[year_col], errors="coerce").min())
+
     out = out[out[year_col] >= start_year]
     if out.empty:
         return out, [start_year]
@@ -330,15 +340,19 @@ def _filter_to_five_year_intervals(
     out = out[out[year_col].isin(include_years)]
     return out, include_years
 
-
 def _regrid_series_to_five_year_intervals(
     df: pd.DataFrame,
     value_col: str,
     year_col: str = "Year",
-    start_year: int = CHART_BASE_YEAR,
+    # start_year: int = CHART_BASE_YEAR,
+    start_year: int | None = None,
 ) -> tuple[pd.DataFrame, list[int]]:
     """Interpolate a single series onto 5-year grid from start_year."""
     out = df.copy()
+
+    if start_year is None:
+        start_year = int(pd.to_numeric(out[year_col], errors="coerce").min())
+
     out = out[out[year_col] >= start_year]
     out = out[[year_col, value_col]].dropna().sort_values(year_col)
     if out.empty:
@@ -353,12 +367,12 @@ def _regrid_series_to_five_year_intervals(
     reg = pd.DataFrame({year_col: xi.astype(int), value_col: yi})
     return reg, include_years
 
-
 def _co2e_accumulation_summary(
     df: pd.DataFrame,
     value_col: str = "CO2e",
     year_col: str = "Year",
-    base_year: int = CHART_BASE_YEAR,
+    # base_year: int = CHART_BASE_YEAR,
+    base_year: int | None = None,
     horizons: tuple[int, ...] = (10, 50, 100),
 ) -> pd.DataFrame:
     """Return CO2e accumulation values interpolated at project-year horizons."""
@@ -372,6 +386,9 @@ def _co2e_accumulation_summary(
 
     if curve.empty:
         return pd.DataFrame()
+
+    if base_year is None:
+        base_year = int(curve[year_col].min())
 
     x = curve[year_col].astype(float).to_numpy()
     y = curve[value_col].astype(float).to_numpy()
@@ -464,43 +481,42 @@ def _build_future_hatch_layers(
 
     return rect + stripes
 
+# def _prepend_zero_year_row(
+#     df: pd.DataFrame,
+#     value_col: str,
+#     year_col: str = "Year",
+#     base_year: int = CHART_BASE_YEAR,
+# ) -> pd.DataFrame:
+#     """Prepend a synthetic base-year row (value=0) for single-series charts."""
+#     out = df.copy()
+#     out = out[out[year_col] != base_year]
+#     zero_row = {col: np.nan for col in out.columns}
+#     zero_row[year_col] = base_year
+#     zero_row[value_col] = 0.0
+#     out = pd.concat([pd.DataFrame([zero_row]), out], ignore_index=True)
+#     return out.sort_values(year_col).reset_index(drop=True)
 
-def _prepend_zero_year_row(
-    df: pd.DataFrame,
-    value_col: str,
-    year_col: str = "Year",
-    base_year: int = CHART_BASE_YEAR,
-) -> pd.DataFrame:
-    """Prepend a synthetic base-year row (value=0) for single-series charts."""
-    out = df.copy()
-    out = out[out[year_col] != base_year]
-    zero_row = {col: np.nan for col in out.columns}
-    zero_row[year_col] = base_year
-    zero_row[value_col] = 0.0
-    out = pd.concat([pd.DataFrame([zero_row]), out], ignore_index=True)
-    return out.sort_values(year_col).reset_index(drop=True)
 
+# def _prepend_zero_year_rows_by_group(
+#     df: pd.DataFrame,
+#     group_col: str,
+#     value_col: str,
+#     year_col: str = "Year",
+#     base_year: int = CHART_BASE_YEAR,
+# ) -> pd.DataFrame:
+#     """Prepend a synthetic base-year row (value=0) for each group in multi-series charts."""
+#     out = df.copy()
+#     out = out[out[year_col] != base_year]
+#     groups = out[group_col].dropna().unique().tolist()
 
-def _prepend_zero_year_rows_by_group(
-    df: pd.DataFrame,
-    group_col: str,
-    value_col: str,
-    year_col: str = "Year",
-    base_year: int = CHART_BASE_YEAR,
-) -> pd.DataFrame:
-    """Prepend a synthetic base-year row (value=0) for each group in multi-series charts."""
-    out = df.copy()
-    out = out[out[year_col] != base_year]
-    groups = out[group_col].dropna().unique().tolist()
+#     if not groups:
+#         return out
 
-    if not groups:
-        return out
-
-    zero_rows = pd.DataFrame(
-        [{year_col: base_year, group_col: g, value_col: 0.0} for g in groups]
-    )
-    out = pd.concat([zero_rows, out], ignore_index=True)
-    return out.sort_values([group_col, year_col]).reset_index(drop=True)
+#     zero_rows = pd.DataFrame(
+#         [{year_col: base_year, group_col: g, value_col: 0.0} for g in groups]
+#     )
+#     out = pd.concat([zero_rows, out], ignore_index=True)
+#     return out.sort_values([group_col, year_col]).reset_index(drop=True)
 
 
 def _credits_keys(prefix: str = "credits_") -> list[str]:
@@ -903,12 +919,20 @@ def carbon_chart():
             unit = (
                 meta["unit_project"] if (toggle_oc and meta["scales"]) else meta["unit"]
             )
-            df_m = _prepend_zero_year_row(
-                plot_df[["Year", col]].copy(), value_col=col, base_year=CHART_BASE_YEAR
-            )
+            # df_m = _prepend_zero_year_row(
+            #     plot_df[["Year", col]].copy(), value_col=col, base_year=CHART_BASE_YEAR
+            # )
+            # df_m, inc = _regrid_series_to_five_year_intervals(
+            #     df_m, value_col=col, year_col="Year", start_year=CHART_BASE_YEAR
+            # )
+
+            df_m = plot_df[["Year", col]].copy()
+            chart_start_year = int(df_m["Year"].min())
+
             df_m, inc = _regrid_series_to_five_year_intervals(
-                df_m, value_col=col, year_col="Year", start_year=CHART_BASE_YEAR
+                df_m, value_col=col, year_col="Year", start_year=chart_start_year
             )
+
             chart = (
                 alt.Chart(df_m)
                 .mark_line(point=True)
@@ -917,7 +941,8 @@ def carbon_chart():
                         "Year:Q",
                         title="Year",
                         axis=alt.Axis(values=inc, format="d", labelAngle=30),
-                        scale=alt.Scale(domain=[CHART_BASE_YEAR, max(inc)]),
+                        # scale=alt.Scale(domain=[CHART_BASE_YEAR, max(inc)]),
+                        scale=alt.Scale(domain=[chart_start_year, max(inc)]),
                     ),
                     y=alt.Y(f"{col}:Q", title=f"{label} ({unit})"),
                     tooltip=["Year", col],
@@ -939,11 +964,17 @@ def carbon_chart():
         chart_title = (
             "Onsite Carbon (tons/project)" if toggle_oc else "Onsite Carbon (tons/acre)"
         )
-        plot_df = _prepend_zero_year_row(
-            plot_df, value_col="ABLD_C", base_year=CHART_BASE_YEAR
-        )
+        # plot_df = _prepend_zero_year_row(
+        #     plot_df, value_col="ABLD_C", base_year=CHART_BASE_YEAR
+        # )
+        # plot_df, include_years = _regrid_series_to_five_year_intervals(
+        #     plot_df, value_col="ABLD_C", year_col="Year", start_year=CHART_BASE_YEAR
+        # )
+
+        chart_start_year = int(plot_df["Year"].min())
+
         plot_df, include_years = _regrid_series_to_five_year_intervals(
-            plot_df, value_col="ABLD_C", year_col="Year", start_year=CHART_BASE_YEAR
+            plot_df, value_col="ABLD_C", year_col="Year", start_year=chart_start_year
         )
 
         line = (
@@ -954,7 +985,8 @@ def carbon_chart():
                     "Year:Q",
                     title="Year",
                     axis=alt.Axis(values=include_years, format="d", labelAngle=30),
-                    scale=alt.Scale(domain=[CHART_BASE_YEAR, max(include_years)]),
+                    # scale=alt.Scale(domain=[CHART_BASE_YEAR, max(include_years)]),
+                    scale=alt.Scale(domain=[chart_start_year, max(include_years)]),
                 ),
                 y=alt.Y("ABLD_C:Q", title=chart_title),
                 tooltip=["Year", "ABLD_C"],
@@ -965,15 +997,15 @@ def carbon_chart():
 
     # Summary output
     if "ABLD_C" in plot_df.columns:
+        final_co2e = plot_df["ABLD_C"].iloc[-1] * 3.667
         st.success(
-            f"Final Carbon Output (year {int(plot_df['Year'].max())}): {plot_df['ABLD_C'].iloc[-1]:,.2f}"
+            f"Final CO2e Output (year {int(plot_df['Year'].max())}): {final_co2e:,.2f} tons CO2e"
         )
 
     if model_source == "coefficients":
         st.caption(
             "Using coefficient-based estimates. Add FVS model files for richer predictions."
         )
-
 
 def carbon_units():
     if "carbon_df" not in st.session_state:
@@ -1022,12 +1054,12 @@ def carbon_units():
     chart_title = "(tons/project)" if toggle_ce else "(tons/acre)"
 
     # Add synthetic base-year zero rows
-    plot_df = _prepend_zero_year_rows_by_group(
-        plot_df,
-        group_col="Protocol",
-        value_col="CU",
-        base_year=CHART_BASE_YEAR,
-    )
+    # plot_df = _prepend_zero_year_rows_by_group(
+    #     plot_df,
+    #     group_col="Protocol",
+    #     value_col="CU",
+    #     base_year=CHART_BASE_YEAR,
+    # )
 
     # Sort before cumulative calculations
     plot_df = plot_df.sort_values(["Protocol", "Year"])
@@ -1035,9 +1067,15 @@ def carbon_units():
     # Calculate cumulative CO2e values for each protocol
     plot_df["Cumulative_CU"] = plot_df.groupby("Protocol")["CU"].cumsum()
 
+    chart_start_year = int(plot_df["Year"].min())
+
     # Filter to 5-year intervals for chart/table display
+    # plot_df, include_years = _filter_to_five_year_intervals(
+    #     plot_df, year_col="Year", start_year=CHART_BASE_YEAR
+    # )
+
     plot_df, include_years = _filter_to_five_year_intervals(
-        plot_df, year_col="Year", start_year=CHART_BASE_YEAR
+        plot_df, year_col="Year", start_year=chart_start_year
     )
 
     # ----------------------------
@@ -1365,7 +1403,14 @@ def credits_inputs(prefix: str = "credits_") -> dict:
     )
 
     # constants constrained by modeling backend
-    year_start = 2026
+    # year_start = 2026
+
+    merged_df = st.session_state.get("merged_df")
+    if merged_df is not None and not merged_df.empty and "Year" in merged_df.columns:
+        year_start = int(pd.to_numeric(merged_df["Year"], errors="coerce").min())
+    else:
+        year_start = 2024
+
     years_advance = 35
     net_acres = st.session_state["net_acres"]
 
@@ -1457,15 +1502,25 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
     summaries_df = pd.concat(summary_frames, ignore_index=True)
 
     # Chart alignment: start at base year (2026), then show every 5 years
-    include_years = _five_year_values(year_stop, start_year=CHART_BASE_YEAR)
-    df_chart = _prepend_zero_year_rows_by_group(
-        df_pf,
-        group_col="Protocol",
-        value_col="Net_Revenue",
-        base_year=CHART_BASE_YEAR,
-    )
+    # include_years = _five_year_values(year_stop, start_year=CHART_BASE_YEAR)
+    # df_chart = _prepend_zero_year_rows_by_group(
+    #     df_pf,
+    #     group_col="Protocol",
+    #     value_col="Net_Revenue",
+    #     base_year=CHART_BASE_YEAR,
+    # )
+    # df_chart, include_years = _filter_to_five_year_intervals(
+    #     df_chart, year_col="Year", start_year=CHART_BASE_YEAR
+    # )
+
+    chart_start_year = int(pd.to_numeric(df_pf["Year"], errors="coerce").min())
+
+    include_years = _five_year_values(year_stop, start_year=chart_start_year)
+
     df_chart, include_years = _filter_to_five_year_intervals(
-        df_chart, year_col="Year", start_year=CHART_BASE_YEAR
+        df_pf,
+        year_col="Year",
+        start_year=chart_start_year,
     )
 
     plot_df = df_chart.copy()
@@ -1816,7 +1871,13 @@ def run_chart():
             carbon_summary_df["CO2e"] = carbon_summary_df["CO2e"] * st.session_state.get(
                 "net_acres", 1
             )
-            summary_df = _co2e_accumulation_summary(carbon_summary_df)
+            # summary_df = _co2e_accumulation_summary(carbon_summary_df)
+            summary_base_year = int(pd.to_numeric(carbon_summary_df["Year"], errors="coerce").min())
+            summary_df = _co2e_accumulation_summary(
+                carbon_summary_df,
+                base_year=summary_base_year,
+            )
+            
             if not summary_df.empty:
                 st.markdown("**CO2e Accumulation Summary**")
                 cu_txt = '''

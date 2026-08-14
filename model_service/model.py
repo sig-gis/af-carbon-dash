@@ -364,8 +364,12 @@ def compute_carbon_units(
 
         spline = make_interp_spline(X, y, k=1)
         # Enforce modeling/report baseline at 2026 for CU generation.
-        start_year = max(int(X.min()), PROFORMA_YEAR_START)
+        # start_year = max(int(X.min()), PROFORMA_YEAR_START)
+        # years_interp = np.arange(start_year, int(X.max()) + 1)
+
+        start_year = int(X.min())
         years_interp = np.arange(start_year, int(X.max()) + 1)
+
         y_interp = spline(years_interp)
 
         df_project = pd.DataFrame(
@@ -413,9 +417,8 @@ def compute_carbon_units(
 # Scenario orchestration: full carbon → CU → proforma pipeline + acreage solver
 # ---------------------------------------------------------------------------
 
-PROFORMA_YEAR_START = 2026
+# PROFORMA_YEAR_START = 2026
 PROFORMA_YEARS_ADVANCE = 35
-
 
 @lru_cache(maxsize=16)
 def _load_base_json(filename: str) -> dict:
@@ -690,16 +693,22 @@ def _carbon_for_inputs_cached(
             for col in wide.columns:
                 if col != "Year":
                     wide[col] = 0.0
+        # if not wide.empty:
+        #     if "ABLD_C" in wide.columns:
+        #         wide["Annual_ABLD_C"] = (
+        #             wide["ABLD_C"].diff().fillna(wide["ABLD_C"].iloc[0])
+        #         )
+        #     zero_row = {col: 0.0 for col in wide.columns}
+        #     zero_row["Year"] = PROFORMA_YEAR_START
+        #     wide = pd.concat([pd.DataFrame([zero_row]), wide], ignore_index=True)
+        #     wide = wide.sort_values("Year").reset_index(drop=True)
+        #     return wide, "fvs"
         if not wide.empty:
             if "ABLD_C" in wide.columns:
                 wide["Annual_ABLD_C"] = (
                     wide["ABLD_C"].diff().fillna(wide["ABLD_C"].iloc[0])
                 )
-            zero_row = {col: 0.0 for col in wide.columns}
-            zero_row["Year"] = PROFORMA_YEAR_START
-            wide = pd.concat([pd.DataFrame([zero_row]), wide], ignore_index=True)
-            wide = wide.sort_values("Year").reset_index(drop=True)
-            return wide, "fvs"
+            return wide.sort_values("Year").reset_index(drop=True), "fvs"
 
     coefficients = _load_base_json("carbon_model_coefficients.json")
     rows = compute_carbon_scores(
@@ -711,9 +720,9 @@ def _carbon_for_inputs_cached(
     if sum(species_tpa) == 0:
         # ABLD_C is 0 from species since TPA is 0
         rows = [{**r, "ABLD_C": 0.0, "Annual_ABLD_C": 0.0} for r in rows]
-    rows.insert(0, {"Year": PROFORMA_YEAR_START, "ABLD_C": 0.0, "Annual_ABLD_C": 0.0})
-    return pd.DataFrame(rows), "coefficients"
-
+    # rows.insert(0, {"Year": PROFORMA_YEAR_START, "ABLD_C": 0.0, "Annual_ABLD_C": 0.0})
+    # return pd.DataFrame(rows), "coefficients"
+    return pd.DataFrame(rows).sort_values("Year").reset_index(drop=True), "coefficients"
 
 def _carbon_for_inputs(
     variant: str,
@@ -778,12 +787,22 @@ def _proforma_for_protocol(
     npv_year: int,
 ) -> tuple[pd.DataFrame, dict]:
     """Run the proforma + summary for one protocol at a given net_acres value."""
+    # params = {
+    #     **fin_params,
+    #     "net_acres": float(net_acres),
+    #     "year_start": PROFORMA_YEAR_START,
+    #     "years_advance": PROFORMA_YEARS_ADVANCE,
+    # }
+
+    year_start = int(pd.to_numeric(df_cu["Year"], errors="coerce").min())
+
     params = {
         **fin_params,
         "net_acres": float(net_acres),
-        "year_start": PROFORMA_YEAR_START,
+        "year_start": year_start,
         "years_advance": PROFORMA_YEARS_ADVANCE,
     }
+
     df_pf = compute_proforma(df_cu, params)
     df_sum = compute_summaries(df_pf, params, npv_years=npv_year)
     summary_row = df_sum[df_sum["Protocol"] == protocol].iloc[0].to_dict()
