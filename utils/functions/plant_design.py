@@ -1603,10 +1603,32 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
     chart_start_year = int(year_start)
 
     protocols_for_chart = df_pf["Protocol"].dropna().unique().tolist()
-    zero_revenue_rows = pd.DataFrame(
-        [{"Year": chart_start_year, "Protocol": protocol, "Net_Revenue": 0.0} for protocol in protocols_for_chart]
-    )
-    df_pf = pd.concat([zero_revenue_rows, df_pf], ignore_index=True)
+
+    # Keep the real start-year financial value when it exists.
+    # If a synthetic 0 and a real negative planting-cost value both exist at the
+    # same start year, keep the lower value so the chart starts at the true upfront cost.
+    df_pf = df_pf.sort_values(["Protocol", "Year"]).reset_index(drop=True)
+
+    start_year_rows = []
+    for protocol in protocols_for_chart:
+        mask = (df_pf["Protocol"] == protocol) & (df_pf["Year"] == chart_start_year)
+
+        if mask.any():
+            start_value = min(0.0, float(df_pf.loc[mask, "Net_Revenue"].min()))
+            df_pf = df_pf.loc[~mask].copy()
+        else:
+            start_value = 0.0
+
+        start_year_rows.append(
+            {
+                "Year": chart_start_year,
+                "Protocol": protocol,
+                "Net_Revenue": start_value,
+            }
+        )
+
+    start_year_df = pd.DataFrame(start_year_rows)
+    df_pf = pd.concat([start_year_df, df_pf], ignore_index=True)
     df_pf = df_pf.sort_values(["Protocol", "Year"]).reset_index(drop=True)
 
     include_years = _five_year_values(year_stop, start_year=chart_start_year)
