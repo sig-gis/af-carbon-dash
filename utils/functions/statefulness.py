@@ -79,6 +79,47 @@ def _init_planting_state(variant: str, preset: dict):
     st.session_state["_last_variant"] = variant
 
 
+def _apply_planting_prefill(variant: str, sp_keys: list[str]):
+    """
+    Consume a one-shot ``_planting_prefill`` dict (written by the Solver's
+    "Apply to Planting Design" button) into planting session state.
+
+    Must run after ``_init_planting_state`` (so a variant change can't wipe the
+    values) and before any planting widget is instantiated in the run.
+    """
+    prefill = st.session_state.get("_planting_prefill")
+    if not prefill:
+        return
+    if prefill.get("variant") != variant:
+        # Ignore if prefill variant is not the current variant
+        st.session_state.pop("_planting_prefill", None)
+        return
+
+    for k in ("survival", "si", "net_acres"):
+        if k in prefill:
+            st.session_state[k] = int(prefill[k])
+    if "pct_level" in prefill:
+        st.session_state["pct_level"] = prefill["pct_level"]
+    for i, spk in enumerate(sp_keys):
+        if i < len(prefill.get("species_tpa", [])):
+            st.session_state[spk] = int(prefill["species_tpa"][i])
+
+    protocol = prefill.get("protocol")
+    if protocol:
+        st.session_state["carbon_units_protocols"] = [protocol]
+        st.session_state["carbon_units_inputs"] = {"protocols": [protocol]}
+        # Editable financials are seeded per protocol inside credits_inputs()
+        st.session_state["_credits_prefill"] = {
+            "protocol": protocol,
+            "planting_cost": prefill.get("planting_cost"),
+            "price_per_ert_initial": prefill.get("price_per_ert_initial"),
+        }
+    if "npv_year" in prefill:
+        st.session_state["credits_npv_year"] = int(prefill["npv_year"])
+
+    st.session_state.pop("_planting_prefill", None)
+
+
 def _init_carbon_units_state():
     """Initialize Carbon Units inputs ONLY if missing."""
     default_protocols = ["ACR", "CAR", "VERRA"]

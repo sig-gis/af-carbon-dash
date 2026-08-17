@@ -31,7 +31,7 @@ from utils.functions.site_select import (
     variant_chooser,
     variants_at_geometry,
 )
-from utils.functions.solver import run_solver
+from utils.functions.solver import current_solver_prefill, run_solver
 
 st.set_page_config(layout="wide", page_title="Project Builder", page_icon="🌲")
 
@@ -638,7 +638,7 @@ elif st.session_state.active_tab == "Planting Design":
     run_chart()
 
 elif st.session_state.active_tab == "Solver":
-    col1, col2 = st.columns([8, 3])
+    col1, col2, col3 = st.columns([6, 3, 3])
 
     with col1:
         st.title("🧮 Solver", anchor=None, help=H("solver.title"))
@@ -651,6 +651,19 @@ elif st.session_state.active_tab == "Solver":
             type="primary",
         ):
             st.session_state.active_tab = "Site Selection Map"
+            st.rerun()
+
+    with col3:
+        if st.button(
+            "🌲 Planting Design",
+            use_container_width=True,
+            help=H("site.button_forward_to_planting"),
+        ):
+            # Carry the solver's current design inputs over (not a solved value)
+            prefill = current_solver_prefill()
+            if prefill:
+                st.session_state["_planting_prefill"] = prefill
+            st.session_state.active_tab = "Planting Design"
             st.rerun()
 
     run_solver()
