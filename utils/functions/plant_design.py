@@ -23,6 +23,7 @@ from utils.config import get_api_base_url, normalize_params
 from utils.functions.helper import HELP, H
 from utils.functions.slider_bounds import clamp, slider_bounds
 from utils.functions.statefulness import (
+    _apply_planting_prefill,
     _backup_keys,
     _carbon_units_keys,
     _init_carbon_units_state,
@@ -671,6 +672,9 @@ def planting_sliders():
     # overlaps); here the user can still switch between sub-variants registered
     # at this loccode (e.g. NC_1 vs NC_2). Selection stays in sync via
     # ``active_variant``.
+    if st.session_state.get("_planting_prefill"):
+        st.session_state["active_variant"] = st.session_state["_planting_prefill"]["variant"]
+
     sub_variants = _resolve_sub_variants(map_variant, varloc_code)
     current = st.session_state.get("active_variant")
     if current not in sub_variants:
@@ -726,6 +730,7 @@ def planting_sliders():
 
     # Initialize presets ONLY if the variant truly changed
     _init_planting_state(variant, preset)
+    _apply_planting_prefill(variant, sp_keys)
 
     # Per-variant slider bounds. Clamp before rendering to avoid StreamlitValueBelowMinError.
     bounds = slider_bounds(preset)
@@ -835,6 +840,9 @@ def carbon_chart():
         _pct_info = {"PCT0": None, "PCT1": None, "PCT2": None}
 
     _pct_options = sorted(_pct_info.keys())
+
+    if "pct_level" in st.session_state and st.session_state["pct_level"] not in _pct_options:
+        st.session_state.pop("pct_level")
 
     def _fmt_pct(code: str) -> str:
         label = _PCT_LABELS.get(code, code)
@@ -1305,6 +1313,18 @@ def credits_inputs(prefix: str = "credits_") -> dict:
         for key in fixed_financial_keys:
             if key in protocol_defaults:
                 protocol_state[protocol][key] = protocol_defaults[key]
+
+    # Apply a one-shot Solver prefill of the editable fields, after seeding
+    fin_prefill = st.session_state.pop("_credits_prefill", None)
+    if fin_prefill and fin_prefill.get("protocol") in protocol_state:
+        entry = protocol_state[fin_prefill["protocol"]]
+        if fin_prefill.get("planting_cost") is not None:
+            entry["planting_cost"] = fin_prefill["planting_cost"]
+        if fin_prefill.get("price_per_ert_initial") is not None:
+            entry["price_per_ert_initial"] = _nearest_price_option(
+                fin_prefill["price_per_ert_initial"]
+            )
+        st.session_state.pop(f"{prefix}editable_financials_table", None)
 
     st.session_state[table_state_key] = protocol_state
 

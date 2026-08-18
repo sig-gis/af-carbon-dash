@@ -28,7 +28,12 @@ from utils.config import get_api_base_url, normalize_params
 from utils.functions.helper import H
 from utils.functions.plant_design import PROTOCOL_ORDER, _resolve_sub_variants
 from utils.functions.slider_bounds import clamp, slider_bounds
-from utils.functions.statefulness import _species_codes, _species_label
+from utils.functions.statefulness import (
+    _backup_keys,
+    _restore_backup,
+    _species_codes,
+    _species_label,
+)
 
 API_BASE_URL = get_api_base_url()
 
@@ -464,6 +469,87 @@ def _solver_inputs() -> dict | None:
 
 
 # --------------------------------------------------------------------------- #
+# Apply-to-Planting-Design handoff
+# --------------------------------------------------------------------------- #
+def _planting_payload(inputs: dict, *, net_acres=None, species_tpa=None) -> dict:
+    """Build the one-shot prefill dict consumed by plant_design/statefulness."""
+    fin = inputs["financial_params_pct"]
+    payload = {
+        "variant": inputs["variant"],
+        "pct_level": inputs["pct_level"],
+        "survival": inputs["survival"],
+        "si": inputs["si"],
+        "species_tpa": list(species_tpa if species_tpa is not None else inputs["species_tpa"]),
+        "protocol": inputs["protocol"],
+        "npv_year": inputs["npv_year"],
+        "planting_cost": fin["planting_cost"],
+        "price_per_ert_initial": fin["price_per_ert_initial"],
+    }
+    if net_acres is not None:
+        payload["net_acres"] = int(net_acres)
+    return payload
+
+
+def current_solver_prefill() -> dict | None:
+    """Prefill payload from the solver's current inputs in session state (no
+    solved value). Backs the header nav button, which renders before
+    run_solver() — so values are read from state, not the input widgets."""
+    map_variant = st.session_state.get("selected_variant")
+    if not map_variant:
+        return None
+    varloc_code = st.session_state.get("selected_varloc_code", "609")
+    sub_variants = _resolve_sub_variants(map_variant, varloc_code)
+    variant = st.session_state.get("solver_sub_variant")
+    if variant not in sub_variants:
+        variant = sub_variants[0]
+    sp_keys = [f"solver_sp{i + 1}_tpa" for i in range(len(_species_codes(variant)))]
+    defaults = _load_proforma_defaults()
+    return _planting_payload(
+        {
+            "variant": variant,
+            "pct_level": st.session_state.get("solver_pct_level", "PCT0"),
+            "survival": int(st.session_state.get("solver_survival", 70)),
+            "si": int(st.session_state.get("solver_si", 120)),
+            "species_tpa": [int(st.session_state.get(k, 0)) for k in sp_keys],
+            "protocol": st.session_state.get("solver_protocol", PROTOCOL_ORDER[0]),
+            "npv_year": int(st.session_state.get("solver_npv_year", 40)),
+            "financial_params_pct": {
+                "planting_cost": float(
+                    st.session_state.get(
+                        "solver_fin_planting_cost", defaults.get("planting_cost", 1000)
+                    )
+                ),
+                "price_per_ert_initial": float(
+                    st.session_state.get(
+                        "solver_fin_price_per_ert_initial",
+                        defaults.get("price_per_ert_initial", 25.0),
+                    )
+                ),
+            },
+        }
+    )
+
+
+def _apply_to_planting(payload: dict):
+    """Button callback: stage the prefill and switch tabs (rerun follows the callback)."""
+    st.session_state["_planting_prefill"] = payload
+    st.session_state.active_tab = "Planting Design"
+
+
+def _apply_button(key: str, payload: dict):
+    st.button(
+        "Apply to Planting Design",
+        key=key,
+        on_click=_apply_to_planting,
+        kwargs={"payload": payload},
+    )
+    st.caption(
+        "Prefills Planting Design with these inputs and the solved value. "
+        "Fixed financial assumptions there come from protocol presets."
+    )
+
+
+# --------------------------------------------------------------------------- #
 # Output sections
 # --------------------------------------------------------------------------- #
 # Keys in the resolved inputs dict that aren't scenario-builder arguments.
@@ -502,6 +588,10 @@ def _render_headline(inputs: dict):
     st.caption(
         f"Acreage at which {inputs['protocol']} NPV reaches "
         f"$ {inputs['target_npv']:,.0f} at the {inputs['npv_year']}-year horizon."
+    )
+    _apply_button(
+        "solver_apply_acres",
+        _planting_payload(inputs, net_acres=max(1, round(acres))),
     )
 
 
@@ -591,7 +681,7 @@ def _render_grid(inputs: dict):
         )
         st.altair_chart(heat + text, use_container_width=True, key="solver_acreage_heatmap")
     st.dataframe(
-        df.style.format({"Breakeven Acres": "{:,.0f}"}),
+        df.style.format({"Breakeven Acres": "{:,.0f}"}, na_rep="-"),
         use_container_width=True,
         hide_index=True,
     )
@@ -774,10 +864,23 @@ def _render_tpa_breakeven(inputs: dict):
             use_container_width=True,
             hide_index=True,
         )
+        _apply_button(
+            "solver_apply_tpa_scalar",
+            _planting_payload(
+                inputs,
+                species_tpa=[round(rng["lo"] * b) for b in inputs["species_tpa"]],
+            ),
+        )
     elif rng.get("lo_clipped"):
         st.success(f"{code} is non-binding; profitable across its full range up to the cap.")
     else:
         st.metric(f"{code} breakeven", f"{rng['lo']:,.0f} TPA")
+        solved_mix = list(inputs["species_tpa"])
+        solved_mix[species_sel] = round(rng["lo"])
+        _apply_button(
+            "solver_apply_tpa_species",
+            _planting_payload(inputs, species_tpa=solved_mix),
+        )
 
     # Always render the curve (a stable key keeps Streamlit from dropping it when
     # the elements above it change between reruns).
@@ -786,8 +889,39 @@ def _render_tpa_breakeven(inputs: dict):
         st.altair_chart(chart, use_container_width=True, key="solver_tpa_curve")
 
 
+def _solver_state_keys() -> list[str]:
+    """Solver input keys to back up across tab switches. Widget-only keys
+    (buttons, charts) must stay out — Streamlit forbids restoring them."""
+    keys = [
+        "solver_sub_variant",
+        "solver_pct_level",
+        "solver_survival",
+        "solver_si",
+        "solver_protocol",
+        "solver_npv_year",
+        "solver_target_npv",
+        "solver_variable",
+        "solver_tpa_mode",
+        "solver_tpa_species",
+        "solver_sweep_levers",
+    ]
+    keys += [f"solver_fin_{field}" for field, *_ in _FIN_FIELDS]
+    keys += [f"solver_sweep_vals_{lever}" for lever in LEVER_LABELS]
+    keys += [
+        k for k in st.session_state if k.startswith("solver_sp") and k.endswith("_tpa")
+    ]
+    return keys
+
+
 def run_solver():
     """Top-level Solver view entry point (mirrors plant_design.run_chart())."""
+    # Streamlit drops solver_* widget state whenever this view isn't rendered
+    # (other tab active), and the variant sentinel blocks re-seeding — restore
+    # from the backup taken at the end of the last render.
+    _restore_backup(
+        list(st.session_state.get("_solver_backup", {})), backup_name="_solver_backup"
+    )
+
     inputs = _solver_inputs()
     if inputs is None:
         return
@@ -808,3 +942,5 @@ def run_solver():
     else:
         with st.expander("Breakeven Trees-per-Acre", expanded=True):
             _render_tpa_breakeven(inputs)
+
+    _backup_keys(_solver_state_keys(), backup_name="_solver_backup")
