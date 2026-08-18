@@ -462,7 +462,7 @@ supplement: "Figure",
 
 
 #align(left)[
-  #text(weight: "bold", size: 11pt)[Different carbon protocols apply unique sets of rules related to risk buffers, leakage deductions, and measurement requirements. Because the same biological growth can be credited differently depending on these rules, different protocols may yield different carbon units (CUs) over time, even for the same underlying forest scenario.]
+  #text(weight: "bold", size: 11pt)[Different carbon protocols apply unique sets of rules related to risk buffers, leakage deductions, and measurement requirements. Because the same biological growth can be credited differently depending on these rules, different protocols may yield different CO₂e over time, even for the same underlying forest scenario.]
 ]
 
 #v(0.25cm)  // vertical gap
@@ -521,9 +521,8 @@ supplement: "Figure",
 
 #heading(level: 3, outlined: false)[Carbon Revenue]
 
-Annual carbon revenues are calculated by multiplying the annual number of carbon units
-(CUs) generated under each protocol by the assumed market price in that year. The initial
-price per CU and the annual price increase rate are set by the user. These annual revenues
+Annual carbon revenues are calculated by multiplying the annual CO₂e generated under each protocol by the assumed market price in that year. The initial
+price per CO₂e and the annual price increase rate are set by the user. These annual revenues
 are summed across the project period to produce the total revenue values.
 
 #v(0.25cm)  // vertical gap
@@ -544,7 +543,7 @@ Based on the selected project configuration and accounting requirements, the fol
   costs.
 - Validation and verification costs, which occur at fixed intervals according to
   protocol rules.
-- Registry fees and issuance fees per CU, which apply during the credit registration
+- Registry fees and issuance fees per CO₂e, which apply during the credit registration
   and issuance process.
 - Initial planting costs and seedling costs, applied at the start of the project.
 - Anticipated inflation, applied to verification-related and registry-related expenses.
@@ -572,7 +571,7 @@ supplement: "Figure",
 
 
 #align(left)[
-  #text(weight: "bold", size: 11pt)[The net revenue trend illustrates how project cashflow varies over time. Peaks typically correspond to verification or credit issuance years, as CUs are credited in discrete events rather than every year.]
+  #text(weight: "bold", size: 11pt)[The net revenue trend illustrates how project cash flow varies over time. Peaks typically correspond to verification or credit issuance years, as CO₂e credits are issued at discrete intervals rather than annually.]
 ]
 
 
