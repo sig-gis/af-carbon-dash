@@ -138,7 +138,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--inset-width-frac",
         type=float,
-        default=0.30,
+        default=0.25,
         help="Inset width as fraction of main axes width (default: 0.30).",
     )
     p.add_argument(
@@ -150,12 +150,13 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--inset-min-span",
         type=float,
-        default=8.0,
+        default=10.0,
         help="Minimum inset width in degrees longitude (default: 8.0).",
     )
     p.add_argument(
         "--states",
-        default="data/cb_2023_us_state_20m.zip",
+        # default="data/cb_2023_us_state_20m.zip",
+        default="data/tl_2025_us_state.zip",
         help="US state boundaries layer for the inset basemap.",
     )
     p.add_argument(
@@ -292,22 +293,36 @@ def _draw_locator_inset(
 
     iax = ax.inset_axes([x0, y0, w, h])
     iax.set_facecolor("#ffffff")
+    # states_gdf.plot(
+    #     ax=iax,
+    #     color="#e8ecef",
+    #     edgecolor="#8894a0",
+    #     linewidth=0.6,
+    #     aspect=None,
+    # )
+
     states_gdf.plot(
         ax=iax,
-        color="#e8ecef",
-        edgecolor="#8894a0",
-        linewidth=0.6,
+        color="#f4f6f8",
+        edgecolor="#4f5b66",
+        linewidth=1.0,
         aspect=None,
     )
-    context_gdf.plot(
+
+    # context_gdf.plot(
+    #     ax=iax,
+    #     facecolor="none",
+    #     edgecolor=args.context_edge,
+    #     linewidth=0.3,
+    #     aspect=None,
+    # )
+    gpd.GeoSeries([highlight_geom], crs=context_gdf.crs).plot(
         ax=iax,
-        facecolor="none",
-        edgecolor=args.context_edge,
-        linewidth=0.3,
+        facecolor=args.highlight_edge,
+        edgecolor=args.highlight_edge,
+        alpha=0.75,
+        linewidth=0.8,
         aspect=None,
-    )
-    gpd.GeoSeries([highlight_geom]).plot(
-        ax=iax, color=args.highlight_edge, aspect=None
     )
 
     # Dynamic inset map sizing
