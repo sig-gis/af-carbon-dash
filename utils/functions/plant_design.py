@@ -1876,16 +1876,16 @@ def generate_report():
             {
                 "Year": xi.astype(int),
                 # Keep existing report column names for compatibility with report.ipynb
-                "Annual CO2 per acre": yi,
-                "Annual CO2": yi * st.session_state.get("net_acres", 0),
+                "Annual CO2e per acre": yi,
+                "Annual CO2e": yi * st.session_state.get("net_acres", 0),
             }
         )
     else:
         carbon_scores = pd.DataFrame(
             {
                 "Year": report_years,
-                "Annual CO2 per acre": [0.0] * len(report_years),
-                "Annual CO2": [0.0] * len(report_years),
+                "Annual CO2e per acre": [0.0] * len(report_years),
+                "Annual CO2e": [0.0] * len(report_years),
             }
         )
 
@@ -1905,16 +1905,16 @@ def generate_report():
     carbon_df = carbon_df.merge(proforma_df, on=["Year", "Protocol"], how="left")
     carbon_df[
         [
-            "Annual CO2 per acre",
-            "Annual CO2",
+            "Annual COer per acre",
+            "Annual CO2e",
             "NetRevenue",
             "TotalCosts",
             "TotalRevenue",
         ]
     ] = carbon_df[
         [
-            "Annual CO2 per acre",
-            "Annual CO2",
+            "Annual CO2e per acre",
+            "Annual CO2e",
             "NetRevenue",
             "TotalCosts",
             "TotalRevenue",
