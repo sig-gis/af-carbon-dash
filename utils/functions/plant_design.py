@@ -1134,16 +1134,20 @@ def carbon_units():
 
     st.session_state.merged_df = final_df
 
-    toggle_ce = st.toggle(
-        "Show Total Project Acreage", True, "toggle_ce", H("toggle.inputs.acres")
-    )
+    toggle_ce = st.session_state.get("toggle_ce", True)
+    net_acres = st.session_state.get("net_acres", 1)
 
-    # Adjust values based on toggle
+    # Adjust values based on toggle.
+    # final_df["CU"] is per-acre, matching Planting Parameters behavior.
+    # Only multiply by net_acres when showing total project acreage.
     plot_df = final_df.copy()
     if toggle_ce:
-        plot_df["CU"] = plot_df["CU"] * st.session_state["net_acres"]
+        plot_df["CU"] = plot_df["CU"] * net_acres
 
-    chart_title = "(tons/project)" if toggle_ce else "(tons/acre)"
+    accumulation_mode_label = "Total Project" if toggle_ce else "Per Acre"
+    co2e_unit_label = "tons CO2e" if toggle_ce else "tons CO2e/acre"
+    chart_title = f"{accumulation_mode_label} ({co2e_unit_label})"
+
 
     # Add synthetic base-year zero rows
     # plot_df = _prepend_zero_year_rows_by_group(
@@ -1177,8 +1181,8 @@ def carbon_units():
         data=plot_df,
         x_col="Year",
         y_col="CU",
-        title="Annual CO2e Estimates " + chart_title,
-        y_title="CO2e " + chart_title,
+        title=f"Annual CO2e Estimates — {chart_title}",
+        y_title=f"Annual CO2e ({co2e_unit_label})",
         include_years=include_years,
         series_col="Protocol",
         show_future_hatch=True,
@@ -1199,7 +1203,7 @@ def carbon_units():
 
     if not annual_table_df.empty:
         annual_table_df["Year"] = annual_table_df["Year"].astype(int)
-        st.markdown("**Annual CO2e Estimates**")
+        st.markdown(f"**Annual CO2e Estimates — {chart_title}**")
         st.dataframe(
             annual_table_df.style.format(
                 {col: "{:,.2f}" for col in annual_table_df.columns if col != "Year"}
@@ -1217,8 +1221,8 @@ def carbon_units():
         data=plot_df,
         x_col="Year",
         y_col="Cumulative_CU",
-        title="Cumulative CO2e Estimates " + chart_title,
-        y_title="Cumulative CO2e " + chart_title,
+        title=f"Cumulative CO2e Estimates — {chart_title}",
+        y_title=f"Cumulative CO2e ({co2e_unit_label})",
         include_years=include_years,
         series_col="Protocol",
         show_future_hatch=True,
@@ -1239,7 +1243,7 @@ def carbon_units():
 
     if not cumulative_table_df.empty:
         cumulative_table_df["Year"] = cumulative_table_df["Year"].astype(int)
-        st.markdown("**Cumulative CO2e Estimates**")
+        st.markdown(f"**Cumulative CO2e Estimates — {chart_title}**")
         st.dataframe(
             cumulative_table_df.style.format(
                 {col: "{:,.2f}" for col in cumulative_table_df.columns if col != "Year"}
@@ -1994,56 +1998,132 @@ def run_chart():
             carbon_chart()
 
     # Row 2: Protocol selector -> acreage toggle -> Carbon units chart
+    # with st.expander(label="Carbon Estimates", expanded=True):
+    #     if "carbon_df" not in st.session_state:
+    #         st.error("No carbon data found. Adjust sliders above first.")
+    #         st.stop()
+
+    #     # carbon_summary_df = st.session_state.carbon_df.copy()
+    #     # if "ABLD_C" in carbon_summary_df.columns:
+    #     #     carbon_summary_df["CO2e"] = (
+    #     #         pd.to_numeric(carbon_summary_df["ABLD_C"], errors="coerce") * 3.667
+    #     #     )
+    #     #     carbon_summary_df["CO2e"] = carbon_summary_df["CO2e"] * st.session_state.get(
+    #     #         "net_acres", 1
+    #     #     )
+    #     #     # summary_df = _co2e_accumulation_summary(carbon_summary_df)
+    #     #     summary_base_year = int(pd.to_numeric(carbon_summary_df["Year"], errors="coerce").min())
+    #     #     summary_df = _co2e_accumulation_summary(
+    #     #         carbon_summary_df,
+    #     #         base_year=summary_base_year,
+    #     #     )
+            
+    #     #     if not summary_df.empty:
+    #     #         st.markdown("**CO2e Accumulation Summary**")
+    #     #         cu_txt = '''
+    #     #         CO₂e represents the carbon dioxide equivalent of the carbon sequestered by the project. The reported CO₂e values account for applicable deductions, including leakage (emissions that occur outside the project boundary as a result of project activities), buffer pool contributions for risk mitigation, and any other required adjustments under the relevant accounting framework. As a result, CO₂e reflects the net climate benefit attributable to the project after these considerations.
+    #     #         '''
+    #     #         st.markdown(cu_txt)
+    #     #         st.caption(
+    #     #             "Modeled CO2e accumulation is interpolated from aboveground live biomass carbon "
+    #     #             "at 10-, 50-, and 100-year project horizons and shown in tons CO2e."
+    #     #         )
+    #     #         st.dataframe(summary_df, use_container_width=True, hide_index=True)
+    #     #         # st.divider()
+
+    #     carbon_summary_df = st.session_state.carbon_df.copy()
+    #     if "ABLD_C" in carbon_summary_df.columns:
+    #         show_total_project_acreage = st.session_state.get("toggle_ce", True)
+    #         co2e_unit_label = (
+    #             "tons CO2e"
+    #             if show_total_project_acreage
+    #             else "tons CO2e/acre"
+    #         )
+
+    #         carbon_summary_df["CO2e"] = (
+    #             pd.to_numeric(carbon_summary_df["ABLD_C"], errors="coerce") * 3.667
+    #         )
+
+    #         if show_total_project_acreage:
+    #             carbon_summary_df["CO2e"] = carbon_summary_df["CO2e"] * st.session_state.get(
+    #                 "net_acres", 1
+    #             )
+
+    #         summary_base_year = int(
+    #             pd.to_numeric(carbon_summary_df["Year"], errors="coerce").min()
+    #         )
+    #         summary_df = _co2e_accumulation_summary(
+    #             carbon_summary_df,
+    #             base_year=summary_base_year,
+    #         )
+            
+    #         if not summary_df.empty:
+    #             st.markdown("**CO2e Accumulation Summary**")
+    #             cu_txt = '''
+    #             CO₂e represents the carbon dioxide equivalent of the carbon sequestered by the project. The reported CO₂e values account for applicable deductions, including leakage (emissions that occur outside the project boundary as a result of project activities), buffer pool contributions for risk mitigation, and any other required adjustments under the relevant accounting framework. As a result, CO₂e reflects the net climate benefit attributable to the project after these considerations.
+    #             '''
+    #             st.markdown(cu_txt)
+    #             st.caption(
+    #                 "Modeled CO2e accumulation is interpolated from aboveground live biomass carbon "
+    #                 f"at 10-, 50-, and 100-year project horizons and shown in {co2e_unit_label}."
+    #             )
+    #             st.dataframe(summary_df, use_container_width=True, hide_index=True)
+    #             # st.divider()
+
+    #     # restore backup and init state for CO2e estimates
+    #     _restore_backup(_carbon_units_keys(), backup_name="_carbon_units_backup")
+    #     _init_carbon_units_state()
+
+    #     # render widget using key only to enable restoring backups
+    #     protocols = st.multiselect(
+    #         "Select Protocol(s)",
+    #         options=["ACR", "CAR", "VERRA", "GS", "ISO"],
+    #         key="carbon_units_protocols",
+    #         help=H("carbon.protocols_multiselect"),
+    #     )
+
+    #     st.session_state["carbon_units_inputs"] = {"protocols": protocols}
+
+    #     # backup latest selections for CO2e estimates
+    #     _backup_keys(_carbon_units_keys(), backup_name="_carbon_units_backup")
+
+    #     carbon_units()
+    
+    # Row 2: Protocol selector -> acreage toggle -> Carbon units chart
     with st.expander(label="Carbon Estimates", expanded=True):
         if "carbon_df" not in st.session_state:
             st.error("No carbon data found. Adjust sliders above first.")
             st.stop()
 
-        # carbon_summary_df = st.session_state.carbon_df.copy()
-        # if "ABLD_C" in carbon_summary_df.columns:
-        #     carbon_summary_df["CO2e"] = (
-        #         pd.to_numeric(carbon_summary_df["ABLD_C"], errors="coerce") * 3.667
-        #     )
-        #     carbon_summary_df["CO2e"] = carbon_summary_df["CO2e"] * st.session_state.get(
-        #         "net_acres", 1
-        #     )
-        #     # summary_df = _co2e_accumulation_summary(carbon_summary_df)
-        #     summary_base_year = int(pd.to_numeric(carbon_summary_df["Year"], errors="coerce").min())
-        #     summary_df = _co2e_accumulation_summary(
-        #         carbon_summary_df,
-        #         base_year=summary_base_year,
-        #     )
-            
-        #     if not summary_df.empty:
-        #         st.markdown("**CO2e Accumulation Summary**")
-        #         cu_txt = '''
-        #         CO₂e represents the carbon dioxide equivalent of the carbon sequestered by the project. The reported CO₂e values account for applicable deductions, including leakage (emissions that occur outside the project boundary as a result of project activities), buffer pool contributions for risk mitigation, and any other required adjustments under the relevant accounting framework. As a result, CO₂e reflects the net climate benefit attributable to the project after these considerations.
-        #         '''
-        #         st.markdown(cu_txt)
-        #         st.caption(
-        #             "Modeled CO2e accumulation is interpolated from aboveground live biomass carbon "
-        #             "at 10-, 50-, and 100-year project horizons and shown in tons CO2e."
-        #         )
-        #         st.dataframe(summary_df, use_container_width=True, hide_index=True)
-        #         # st.divider()
+        toggle_ce = st.toggle(
+            "Show Total Project Acreage",
+            True,
+            "toggle_ce",
+            H("toggle.inputs.acres"),
+        )
+
+        show_total_project_acreage = toggle_ce
+        net_acres = st.session_state.get("net_acres", 1)
+
+        accumulation_mode_label = (
+            "Total Project"
+            if show_total_project_acreage
+            else "Per Acre"
+        )
+        co2e_unit_label = (
+            "tons CO2e"
+            if show_total_project_acreage
+            else "tons CO2e/acre"
+        )
 
         carbon_summary_df = st.session_state.carbon_df.copy()
         if "ABLD_C" in carbon_summary_df.columns:
-            show_total_project_acreage = st.session_state.get("toggle_ce", True)
-            co2e_unit_label = (
-                "tons CO2e"
-                if show_total_project_acreage
-                else "tons CO2e/acre"
-            )
-
             carbon_summary_df["CO2e"] = (
                 pd.to_numeric(carbon_summary_df["ABLD_C"], errors="coerce") * 3.667
             )
 
             if show_total_project_acreage:
-                carbon_summary_df["CO2e"] = carbon_summary_df["CO2e"] * st.session_state.get(
-                    "net_acres", 1
-                )
+                carbon_summary_df["CO2e"] = carbon_summary_df["CO2e"] * net_acres
 
             summary_base_year = int(
                 pd.to_numeric(carbon_summary_df["Year"], errors="coerce").min()
@@ -2052,19 +2132,20 @@ def run_chart():
                 carbon_summary_df,
                 base_year=summary_base_year,
             )
-            
+
             if not summary_df.empty:
-                st.markdown("**CO2e Accumulation Summary**")
-                cu_txt = '''
+                st.markdown(
+                    f"**CO2e Accumulation Summary — {accumulation_mode_label} ({co2e_unit_label})**"
+                )
+                cu_txt = """
                 CO₂e represents the carbon dioxide equivalent of the carbon sequestered by the project. The reported CO₂e values account for applicable deductions, including leakage (emissions that occur outside the project boundary as a result of project activities), buffer pool contributions for risk mitigation, and any other required adjustments under the relevant accounting framework. As a result, CO₂e reflects the net climate benefit attributable to the project after these considerations.
-                '''
+                """
                 st.markdown(cu_txt)
                 st.caption(
                     "Modeled CO2e accumulation is interpolated from aboveground live biomass carbon "
                     f"at 10-, 50-, and 100-year project horizons and shown in {co2e_unit_label}."
                 )
                 st.dataframe(summary_df, use_container_width=True, hide_index=True)
-                # st.divider()
 
         # restore backup and init state for CO2e estimates
         _restore_backup(_carbon_units_keys(), backup_name="_carbon_units_backup")
@@ -2084,6 +2165,7 @@ def run_chart():
         _backup_keys(_carbon_units_keys(), backup_name="_carbon_units_backup")
 
         carbon_units()
+
 
     # Row 3: Proforma inputs | Credits chart + summary
     with st.expander(label="Project Financials", expanded=True):
