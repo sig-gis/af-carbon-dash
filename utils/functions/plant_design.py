@@ -1994,6 +1994,13 @@ def run_chart():
     """
     # Row 1: Planting sliders | Carbon chart
     with st.expander(label="Planting Parameters", expanded=True):
+        st.markdown(
+        f"**Planting Parameters Summary**"
+                                )
+        p_txt ="""
+        Planting Parameters define the reforestation design and site assumptions used to model forest growth over time. These inputs include project acreage, species mix, planting density, survival rate, site index, and management treatments. The resulting forest-growth estimates provide the basis for calculating carbon accumulation and financial outcomes in later sections.
+        """
+        st.markdown(p_txt)
         col1, col2 = st.columns([1, 2], gap="large")
         with col1:
             planting_sliders()
@@ -2173,5 +2180,12 @@ def run_chart():
 
     # Row 3: Proforma inputs | Credits chart + summary
     with st.expander(label="Project Financials", expanded=True):
+        st.markdown(
+        f"**Project Financials Summary**"
+                        )
+        pf_txt ="""
+        Project Financials estimate the potential revenue, costs, and net financial performance of the project using the selected carbon estimates and financial assumptions. Revenue is based on projected credited CO₂e and assumed credit prices, while costs include items such as planting, monitoring, verification, validation, and registry fees. These results help evaluate project viability through metrics such as Total Net Revenue and Net Present Value.
+        """
+        st.markdown(pf_txt)
         proforma_params = credits_inputs(prefix="credits_")
         credits_results(proforma_params)
