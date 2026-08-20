@@ -1072,8 +1072,11 @@ def carbon_chart():
     # Summary output
     if "ABLD_C" in plot_df.columns:
         final_co2e = plot_df["ABLD_C"].iloc[-1] * 3.667
+        final_co2e_unit = "tons CO2e" if toggle_oc else "tons CO2e/acre"
+
         st.success(
-            f"Final CO2e Output (year {int(plot_df['Year'].max())}): {final_co2e:,.2f} tons CO2e"
+            f"Final CO2e Output (year {int(plot_df['Year'].max())}): "
+            f"{final_co2e:,.2f} {final_co2e_unit}"
         )
 
     if model_source == "coefficients":
@@ -2135,7 +2138,8 @@ def run_chart():
 
             if not summary_df.empty:
                 st.markdown(
-                    f"**CO2e Accumulation Summary — {accumulation_mode_label} ({co2e_unit_label})**"
+                    # f"**CO2e Accumulation Summary — {accumulation_mode_label} ({co2e_unit_label})**"
+                    f"**CO2e Accumulation Summary**"
                 )
                 cu_txt = """
                 CO₂e represents the carbon dioxide equivalent of the carbon sequestered by the project. The reported CO₂e values account for applicable deductions, including leakage (emissions that occur outside the project boundary as a result of project activities), buffer pool contributions for risk mitigation, and any other required adjustments under the relevant accounting framework. As a result, CO₂e reflects the net climate benefit attributable to the project after these considerations.
