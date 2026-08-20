@@ -1121,21 +1121,30 @@ if st.session_state.active_tab == "Site Selection Map":
     )
 
     with map_col:
-        st.subheader(
-            "Select FVS Variant",
-            anchor=None,
-            divider=False,
-            help=H("site.subheader_select_variant"),
-        )
+        # st.subheader(
+        #     "Select FVS Variant",
+        #     anchor=None,
+        #     divider=False,
+        #     help=H("site.subheader_select_variant"),
+        # )
 
-        m = build_map(
-            geojson_str,
-            points=st.session_state.points,
-            upload=uploaded_geojson_str,
-            center=tuple(st.session_state["map_view"]["center"]),
-            zoom=int(st.session_state["map_view"]["zoom"]),
-            tooltip_fields=tooltip_fields,
-        )
+        # m = build_map(
+        #     geojson_str,
+        #     points=st.session_state.points,
+        #     upload=uploaded_geojson_str,
+        #     center=tuple(st.session_state["map_view"]["center"]),
+        #     zoom=int(st.session_state["map_view"]["zoom"]),
+        #     tooltip_fields=tooltip_fields,
+        # )
+        with map_col:
+            m = build_map(
+                geojson_str,
+                points=st.session_state.points,
+                upload=uploaded_geojson_str,
+                center=tuple(st.session_state["map_view"]["center"]),
+                zoom=int(st.session_state["map_view"]["zoom"]),
+                tooltip_fields=tooltip_fields,
+            )
 
         highlight_fg = build_highlight_layer(st.session_state.get("clicked_feature"))
 
@@ -1148,7 +1157,18 @@ if st.session_state.active_tab == "Site Selection Map":
             feature_group_to_add=highlight_fg,
         )
 
+    # with controls_col:
+    #     show_clicked_variant(map_data)
+    #     display_selected_info()
+    #     variant_chooser()
     with controls_col:
+        st.subheader(
+            "Select FVS Variant",
+            anchor=None,
+            divider=False,
+            help=H("site.subheader_select_variant"),
+        )
+
         show_clicked_variant(map_data)
         display_selected_info()
         variant_chooser()
