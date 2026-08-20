@@ -789,6 +789,13 @@ if st.session_state.active_tab == "Site Selection Map":
     controls_col, map_col = st.columns([1, 2], gap="large")
 
     with controls_col:
+        st.subheader(
+                    "Select FVS Variant",
+                    anchor=None,
+                    divider=False,
+                    help=H("site.subheader_select_variant"),
+                )
+        
         with st.expander(
             label="Add Point by latitude/longitude or look up an address",
             expanded=False,
@@ -1162,13 +1169,6 @@ if st.session_state.active_tab == "Site Selection Map":
     #     display_selected_info()
     #     variant_chooser()
     with controls_col:
-        st.subheader(
-            "Select FVS Variant",
-            anchor=None,
-            divider=False,
-            help=H("site.subheader_select_variant"),
-        )
-
         show_clicked_variant(map_data)
         display_selected_info()
         variant_chooser()
