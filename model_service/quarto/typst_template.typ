@@ -473,7 +473,7 @@ supplement: "Figure",
 position: bottom,
 [
   #align(center)[
-  #text(weight: "bold", size: 11pt, fill: brand-color.primary)[Figure 4.  Carbon Units for the full project area by selected protocols.]
+  #text(weight: "bold", size: 11pt, fill: brand-color.primary)[Figure 4.  CO₂e for the full project area by selected protocols.]
 ]
 ]),
 kind: "quarto-float-fig",

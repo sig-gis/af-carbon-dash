@@ -7,7 +7,7 @@
   {
     "label": "2. Planting Design",
     "tab": "Planting Design",
-    "caption": "Estimate certified carbon units under different protocols.\n\n*1. Planting Parameters*: Design your reforestation plan and estimate FVS results in real time.\n*2. Carbon Estimates*: Estimate CO₂e (tons/acre) under different protocols.\n*3. Credits*: Customize financial factors to estimate net project revenue."
+    "caption": "Estimate CO₂e under different protocols.\n\n*1. Planting Parameters*: Design your reforestation plan and estimate FVS results in real time.\n*2. Carbon Estimates*: Estimate CO₂e (tons/acre) under different protocols.\n*3. Credits*: Customize financial factors to estimate net project revenue."
   },
   {
     "label": "2. Solver",

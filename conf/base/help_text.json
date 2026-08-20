@@ -81,8 +81,8 @@
     },
     "carbon.protocols_multiselect": {
       "streamlit_function": "multiselect",
-      "component": "Protocol selector for Carbon Units / Project Financials",
-      "help": "Select one or more protocols to estimate Carbon Units (CUs) and Project Financials."
+      "component": "Protocol selector for CO₂e / Project Financials",
+      "help": "Select one or more protocols to estimate CO₂e and Project Financials."
     },
     "credits.expander_subheader": {
       "streamlit_function": "expander",
@@ -126,9 +126,8 @@
     },
     "credits.inputs.price_per_ert_initial": {
       "streamlit_function": "number_input",
-      "component": "Initial price per credit (CU) input",
-      "help": "The assumed starting market price per carbon credit unit. This can be an ERT, VCU, or other unit depending on protocol. Price is dependent upon market dynamics at time of sale as well as project-specific quality metrics. The default price of $25/CU is a conservative but in-range estimate for high-quality (removals) carbon credits."
-    },
+      "component": "Initial price per CO₂e input",
+      "help": "The assumed starting market price per carbon credit. This can be an ERT, VCU, or other unit depending on protocol. Price is dependent upon market dynamics at time of sale as well as project-specific quality metrics. The default price of $25 per CO₂e is a conservative but in-range estimate for high-quality removals carbon credits."},
     "credits.inputs.credit_price_increase": {
       "streamlit_function": "number_input",
       "component": "Annual credit price increase (%) input",
