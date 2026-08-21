@@ -28,6 +28,7 @@ from model_service.model import (
     load_effective_preset_map,
     load_effective_species_map,
     predict_fvs_metrics,
+    recompute_annual_carbon_columns,
     run_scenario,
 )
 from model_service.schemas import (
@@ -258,11 +259,8 @@ def calculate_carbon(inputs: CarbonInputs):
     if models is not None:
         wide = predict_fvs_metrics(models, inputs.survival, inputs.si, species_tpa)
         if not wide.empty:
-            if "ABLD_C" in wide.columns:
-                wide["Annual_ABLD_C"] = (
-                    wide["ABLD_C"].diff().fillna(wide["ABLD_C"].iloc[0])
-                )
             wide = align_projection_years(wide)
+            wide = recompute_annual_carbon_columns(wide)
 
             # Prepend base year row
             # zero_row = {col: 0.0 for col in wide.columns}
@@ -284,6 +282,7 @@ def calculate_carbon(inputs: CarbonInputs):
         si=inputs.si,
     )
     results_df = align_projection_years(pd.DataFrame(results))
+    results_df = recompute_annual_carbon_columns(results_df)
     # results.insert(
     #     0,
     #     {

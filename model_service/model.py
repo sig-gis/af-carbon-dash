@@ -35,69 +35,112 @@ def align_projection_years(
     horizon_years: int = 100,
     step_years: int = 5,
 ) -> pd.DataFrame:
-    """Shift model-relative projection years onto a 100-year calendar grid.
+    """Assign ordered model outputs onto the current 100-year calendar grid.
 
-    The regression/model values are independent of calendar year, but model keys
-    may carry stale year labels (for example 2024..2124).  Downstream charts,
-    tables, carbon units, and proforma calculations all derive their timeline
-    from the ``Year`` column, so normalize that column once at the service
-    boundary.  The returned frame always covers ``start_year`` through
-    ``start_year + horizon_years`` on ``step_years`` intervals so displays do
-    not inherit stale or short model horizons.
+    Model output years are treated as ordering keys only, not as meaningful
+    calendar years.  Values are mapped by position onto
+    ``start_year, start_year + 5, ..., start_year + 100``.
+
+    Supported shapes:
+      * 21 five-year values including year 0 -> assign directly.
+      * 20 five-year values missing year 0 -> prepend a zero baseline.
+      * 101 annual values including year 0 -> select every 5th value.
+      * 96 annual values missing year 0 -> prepend zero and select every 5th.
     """
     if df.empty or year_col not in df.columns:
         return df
 
     aligned = df.copy()
-    years = pd.to_numeric(aligned[year_col], errors="coerce")
-    if years.dropna().empty:
+    source_years = pd.to_numeric(aligned[year_col], errors="coerce")
+    if source_years.dropna().empty:
         return aligned
 
     target_start = int(start_year if start_year is not None else current_projection_start_year())
-    source_start = int(years.min())
-    offset = target_start - source_start
-
-    aligned[year_col] = (years + offset).astype("Int64")
-    aligned = aligned.dropna(subset=[year_col]).sort_values(year_col).reset_index(drop=True)
-
     if horizon_years is None or step_years is None or step_years <= 0:
+        aligned[year_col] = source_years.astype("Int64")
         return aligned
 
-    target_years = np.arange(
+    target_years = list(range(
         target_start,
         target_start + int(horizon_years) + 1,
         int(step_years),
+    ))
+    target_count = len(target_years)
+
+    aligned = (
+        aligned.assign(_source_order_year=source_years)
+        .dropna(subset=["_source_order_year"])
+        .sort_values("_source_order_year")
+        .drop(columns=["_source_order_year"])
+        .reset_index(drop=True)
     )
 
-    # If the aligned years already match the target grid, avoid unnecessary dtype
-    # churn and return the shifted values directly.
-    existing_years = aligned[year_col].astype(int).to_numpy()
-    if np.array_equal(existing_years, target_years):
-        return aligned
+    source_count = len(aligned)
 
-    regridded = pd.DataFrame({year_col: target_years})
-    aligned_numeric_years = aligned[year_col].astype(float).to_numpy()
+    if source_count == target_count:
+        selected = aligned.copy()
+        selected[year_col] = target_years
+        return selected
 
-    for col in aligned.columns:
+    if source_count == target_count - 1:
+        selected = aligned.copy()
+        selected[year_col] = target_years[1:]
+        return pd.concat(
+            [_zero_projection_row(selected, target_years[0], year_col), selected],
+            ignore_index=True,
+        )
+
+    annual_with_baseline_count = int(horizon_years) + 1
+    annual_without_baseline_count = int(horizon_years) - int(step_years) + 1
+
+    if source_count == annual_with_baseline_count:
+        selected = aligned.iloc[:: int(step_years)].copy().reset_index(drop=True)
+        selected[year_col] = target_years
+        return selected
+
+    if source_count == annual_without_baseline_count:
+        selected = aligned.iloc[:: int(step_years)].copy().reset_index(drop=True)
+        selected[year_col] = target_years[1:]
+        return pd.concat(
+            [_zero_projection_row(selected, target_years[0], year_col), selected],
+            ignore_index=True,
+        )
+
+    logger.warning(
+        "align_projection_years: unexpected row count %s; assigning by position "
+        "onto the %s-point projection grid.",
+        source_count,
+        target_count,
+    )
+    selected = aligned.iloc[:target_count].copy().reset_index(drop=True)
+    selected[year_col] = target_years[: len(selected)]
+    return selected
+
+
+def _zero_projection_row(
+    template: pd.DataFrame,
+    year: int,
+    year_col: str = "Year",
+) -> pd.DataFrame:
+    """Return one zero-valued baseline row shaped like ``template``."""
+    zero_row = {}
+    for col in template.columns:
         if col == year_col:
-            continue
-
-        numeric = pd.to_numeric(aligned[col], errors="coerce")
-        if numeric.notna().any():
-            valid = numeric.notna().to_numpy()
-            regridded[col] = np.interp(
-                target_years.astype(float),
-                aligned_numeric_years[valid],
-                numeric.to_numpy(dtype=float)[valid],
-            )
+            zero_row[col] = int(year)
+        elif pd.api.types.is_numeric_dtype(template[col]):
+            zero_row[col] = 0.0
         else:
-            # Preserve non-numeric metadata columns, if any, without letting them
-            # control the projection timeline.
-            meta = aligned[[year_col, col]].drop_duplicates(subset=[year_col])
-            regridded = regridded.merge(meta, on=year_col, how="left")
-            regridded[col] = regridded[col].ffill().bfill()
+            zero_row[col] = template[col].dropna().iloc[0] if template[col].notna().any() else None
+    return pd.DataFrame([zero_row])
 
-    return regridded
+
+def recompute_annual_carbon_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Recompute annual carbon deltas after projection-year normalization."""
+    if df.empty or "ABLD_C" not in df.columns:
+        return df
+    out = df.sort_values("Year").reset_index(drop=True).copy()
+    out["Annual_ABLD_C"] = out["ABLD_C"].diff().fillna(out["ABLD_C"].iloc[0])
+    return out
 
 
 def _load_registry() -> list[dict]:
@@ -782,11 +825,8 @@ def _carbon_for_inputs_cached(
         #     wide = wide.sort_values("Year").reset_index(drop=True)
         #     return wide, "fvs"
         if not wide.empty:
-            if "ABLD_C" in wide.columns:
-                wide["Annual_ABLD_C"] = (
-                    wide["ABLD_C"].diff().fillna(wide["ABLD_C"].iloc[0])
-                )
             wide = align_projection_years(wide)
+            wide = recompute_annual_carbon_columns(wide)
             return wide.sort_values("Year").reset_index(drop=True), "fvs"
 
     coefficients = _load_base_json("carbon_model_coefficients.json")
@@ -802,6 +842,7 @@ def _carbon_for_inputs_cached(
     # rows.insert(0, {"Year": PROFORMA_YEAR_START, "ABLD_C": 0.0, "Annual_ABLD_C": 0.0})
     # return pd.DataFrame(rows), "coefficients"
     df_rows = align_projection_years(pd.DataFrame(rows))
+    df_rows = recompute_annual_carbon_columns(df_rows)
     return df_rows.sort_values("Year").reset_index(drop=True), "coefficients"
 
 def _carbon_for_inputs(
