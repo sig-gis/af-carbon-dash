@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from model_service.config_sync import sync_config_defaults
 from model_service.geo import get_filtered_geojson
 from model_service.model import (
+    align_projection_years,
     compute_carbon_scores,
     compute_carbon_units,
     compute_proforma,
@@ -261,6 +262,7 @@ def calculate_carbon(inputs: CarbonInputs):
                 wide["Annual_ABLD_C"] = (
                     wide["ABLD_C"].diff().fillna(wide["ABLD_C"].iloc[0])
                 )
+            wide = align_projection_years(wide)
 
             # Prepend base year row
             # zero_row = {col: 0.0 for col in wide.columns}
@@ -281,6 +283,7 @@ def calculate_carbon(inputs: CarbonInputs):
         survival=inputs.survival,
         si=inputs.si,
     )
+    results_df = align_projection_years(pd.DataFrame(results))
     # results.insert(
     #     0,
     #     {
@@ -291,7 +294,7 @@ def calculate_carbon(inputs: CarbonInputs):
     # )
 
     return {
-        "carbon_df": results,
+        "carbon_df": results_df.to_dict(orient="records"),
         "model_source": "coefficients",
     }
 

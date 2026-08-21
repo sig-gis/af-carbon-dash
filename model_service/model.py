@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+from datetime import date
 from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List
@@ -20,6 +21,40 @@ APP_ROOT = Path(__file__).resolve().parent.parent
 BASE_PATH = APP_ROOT / "conf" / "base"
 
 FVS_MODEL_CACHE_SIZE = 16
+
+
+def current_projection_start_year() -> int:
+    """Return the calendar year used as the first displayed projection year."""
+    return date.today().year
+
+
+def align_projection_years(
+    df: pd.DataFrame,
+    start_year: int | None = None,
+    year_col: str = "Year",
+) -> pd.DataFrame:
+    """Shift model-relative projection years onto the current calendar year.
+
+    The regression/model values are independent of calendar year, but model keys
+    may carry stale year labels (for example 2024..2124).  Downstream charts,
+    tables, carbon units, and proforma calculations all derive their timeline
+    from the ``Year`` column, so normalize that column once at the service
+    boundary while preserving year spacing and all modeled values.
+    """
+    if df.empty or year_col not in df.columns:
+        return df
+
+    aligned = df.copy()
+    years = pd.to_numeric(aligned[year_col], errors="coerce")
+    if years.dropna().empty:
+        return aligned
+
+    target_start = int(start_year if start_year is not None else current_projection_start_year())
+    source_start = int(years.min())
+    offset = target_start - source_start
+
+    aligned[year_col] = (years + offset).astype("Int64")
+    return aligned
 
 
 def _load_registry() -> list[dict]:
@@ -708,6 +743,7 @@ def _carbon_for_inputs_cached(
                 wide["Annual_ABLD_C"] = (
                     wide["ABLD_C"].diff().fillna(wide["ABLD_C"].iloc[0])
                 )
+            wide = align_projection_years(wide)
             return wide.sort_values("Year").reset_index(drop=True), "fvs"
 
     coefficients = _load_base_json("carbon_model_coefficients.json")
@@ -722,7 +758,8 @@ def _carbon_for_inputs_cached(
         rows = [{**r, "ABLD_C": 0.0, "Annual_ABLD_C": 0.0} for r in rows]
     # rows.insert(0, {"Year": PROFORMA_YEAR_START, "ABLD_C": 0.0, "Annual_ABLD_C": 0.0})
     # return pd.DataFrame(rows), "coefficients"
-    return pd.DataFrame(rows).sort_values("Year").reset_index(drop=True), "coefficients"
+    df_rows = align_projection_years(pd.DataFrame(rows))
+    return df_rows.sort_values("Year").reset_index(drop=True), "coefficients"
 
 def _carbon_for_inputs(
     variant: str,
