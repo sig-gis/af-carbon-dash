@@ -1140,6 +1140,10 @@ def carbon_units():
         st.error("No protocols selected or no data available to plot.")
         return
 
+    zero_cu_rows = pd.DataFrame(
+        [{"Year": carbon_baseline_year, "Protocol": protocol, "CU": 0.0} for protocol in protocols]
+    )
+    final_df = pd.concat([zero_cu_rows, final_df], ignore_index=True)
     final_df = final_df.sort_values(["Protocol", "Year"]).reset_index(drop=True)
 
     st.session_state.merged_df = final_df
@@ -1151,11 +1155,6 @@ def carbon_units():
     # final_df["CU"] is per-acre, matching Planting Parameters behavior.
     # Only multiply by net_acres when showing total project acreage.
     plot_df = final_df.copy()
-    zero_cu_rows = pd.DataFrame(
-        [{"Year": carbon_baseline_year, "Protocol": protocol, "CU": 0.0} for protocol in protocols]
-    )
-    plot_df = pd.concat([zero_cu_rows, plot_df], ignore_index=True)
-    plot_df = plot_df.sort_values(["Protocol", "Year"]).reset_index(drop=True)
 
     if toggle_ce:
         plot_df["CU"] = plot_df["CU"] * net_acres

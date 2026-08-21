@@ -32,14 +32,18 @@ def align_projection_years(
     df: pd.DataFrame,
     start_year: int | None = None,
     year_col: str = "Year",
+    horizon_years: int = 100,
+    step_years: int = 5,
 ) -> pd.DataFrame:
-    """Shift model-relative projection years onto the current calendar year.
+    """Shift model-relative projection years onto a 100-year calendar grid.
 
     The regression/model values are independent of calendar year, but model keys
     may carry stale year labels (for example 2024..2124).  Downstream charts,
     tables, carbon units, and proforma calculations all derive their timeline
     from the ``Year`` column, so normalize that column once at the service
-    boundary while preserving year spacing and all modeled values.
+    boundary.  The returned frame always covers ``start_year`` through
+    ``start_year + horizon_years`` on ``step_years`` intervals so displays do
+    not inherit stale or short model horizons.
     """
     if df.empty or year_col not in df.columns:
         return df
@@ -54,7 +58,46 @@ def align_projection_years(
     offset = target_start - source_start
 
     aligned[year_col] = (years + offset).astype("Int64")
-    return aligned
+    aligned = aligned.dropna(subset=[year_col]).sort_values(year_col).reset_index(drop=True)
+
+    if horizon_years is None or step_years is None or step_years <= 0:
+        return aligned
+
+    target_years = np.arange(
+        target_start,
+        target_start + int(horizon_years) + 1,
+        int(step_years),
+    )
+
+    # If the aligned years already match the target grid, avoid unnecessary dtype
+    # churn and return the shifted values directly.
+    existing_years = aligned[year_col].astype(int).to_numpy()
+    if np.array_equal(existing_years, target_years):
+        return aligned
+
+    regridded = pd.DataFrame({year_col: target_years})
+    aligned_numeric_years = aligned[year_col].astype(float).to_numpy()
+
+    for col in aligned.columns:
+        if col == year_col:
+            continue
+
+        numeric = pd.to_numeric(aligned[col], errors="coerce")
+        if numeric.notna().any():
+            valid = numeric.notna().to_numpy()
+            regridded[col] = np.interp(
+                target_years.astype(float),
+                aligned_numeric_years[valid],
+                numeric.to_numpy(dtype=float)[valid],
+            )
+        else:
+            # Preserve non-numeric metadata columns, if any, without letting them
+            # control the projection timeline.
+            meta = aligned[[year_col, col]].drop_duplicates(subset=[year_col])
+            regridded = regridded.merge(meta, on=year_col, how="left")
+            regridded[col] = regridded[col].ffill().bfill()
+
+    return regridded
 
 
 def _load_registry() -> list[dict]:
