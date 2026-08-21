@@ -325,8 +325,8 @@ def _dynamic_baseline_year(df: pd.DataFrame, year_col: str = "Year", step_years:
     years = pd.to_numeric(df[year_col], errors="coerce").dropna()
     if years.empty:
         raise ValueError("Cannot determine baseline year from empty/non-numeric Year values.")
-    return int(years.min()) - step_years
-
+    # return int(years.min()) - step_years
+    return int(years.min())
 
 def _prepend_dynamic_zero_row(
     df: pd.DataFrame,
