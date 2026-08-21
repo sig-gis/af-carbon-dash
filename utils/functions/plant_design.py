@@ -189,11 +189,20 @@ def _plot_fading_line_chart(
     show_future_hatch: bool = False,
 ):
     """Render a Plotly line chart with optional year-40+ hatch background."""
+    if data.empty or x_col not in data.columns or y_col not in data.columns:
+        st.info(f"No data available for {title}.")
+        return
+
+    x_values = pd.to_numeric(data[x_col], errors="coerce").dropna()
+    if x_values.empty:
+        st.info(f"No valid years available for {title}.")
+        return
+
     fig = go.Figure()
 
     # hatch_start_year = CHART_BASE_YEAR + HATCH_START_AGE
     # x_end = max(include_years) if include_years else CHART_BASE_YEAR
-    chart_start_year = min(include_years) if include_years else int(data[x_col].min())
+    chart_start_year = min(include_years) if include_years else int(x_values.min())
     hatch_start_year = chart_start_year + HATCH_START_AGE
     x_end = max(include_years) if include_years else chart_start_year
 
@@ -410,6 +419,8 @@ def _regrid_series_to_five_year_intervals(
     out = out[[year_col, value_col]].dropna().sort_values(year_col)
     if out.empty:
         return out, [start_year]
+
+    out = out.groupby(year_col, as_index=False)[value_col].first()
 
     x = out[year_col].astype(float).to_numpy()
     y = out[value_col].astype(float).to_numpy()
@@ -1103,11 +1114,11 @@ def carbon_units():
     # }
     
     carbon_rows_df = st.session_state.carbon_df[["Year", "ABLD_C"]].copy()
-    carbon_rows_df, carbon_baseline_year = _prepend_dynamic_zero_row(
-        carbon_rows_df,
-        value_col="ABLD_C",
-        year_col="Year",
-    )
+    carbon_years = pd.to_numeric(carbon_rows_df["Year"], errors="coerce").dropna()
+    if carbon_years.empty:
+        st.error("No valid carbon estimate years found.")
+        return
+    carbon_baseline_year = int(carbon_years.min())
 
     payload = {
         "carbon_rows": carbon_rows_df.to_dict(orient="records"),
@@ -1129,10 +1140,6 @@ def carbon_units():
         st.error("No protocols selected or no data available to plot.")
         return
 
-    zero_cu_rows = pd.DataFrame(
-        [{"Year": carbon_baseline_year, "Protocol": protocol, "CU": 0.0} for protocol in protocols]
-    )
-    final_df = pd.concat([zero_cu_rows, final_df], ignore_index=True)
     final_df = final_df.sort_values(["Protocol", "Year"]).reset_index(drop=True)
 
     st.session_state.merged_df = final_df
@@ -1144,6 +1151,12 @@ def carbon_units():
     # final_df["CU"] is per-acre, matching Planting Parameters behavior.
     # Only multiply by net_acres when showing total project acreage.
     plot_df = final_df.copy()
+    zero_cu_rows = pd.DataFrame(
+        [{"Year": carbon_baseline_year, "Protocol": protocol, "CU": 0.0} for protocol in protocols]
+    )
+    plot_df = pd.concat([zero_cu_rows, plot_df], ignore_index=True)
+    plot_df = plot_df.sort_values(["Protocol", "Year"]).reset_index(drop=True)
+
     if toggle_ce:
         plot_df["CU"] = plot_df["CU"] * net_acres
 
