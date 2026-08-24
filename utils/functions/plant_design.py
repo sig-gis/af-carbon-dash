@@ -1230,10 +1230,14 @@ def carbon_chart():
     # Summary output
     if "ABLD_C" in plot_df.columns:
         final_co2e_unit = "tons CO2e" if toggle_oc else "tons CO2e/acre"
-        selected_protocols = st.session_state.get("carbon_units_inputs", {}).get(
-            "protocols",
-            ["ACR", "CAR", "VERRA"],
+        selected_protocols = st.session_state.get(
+            "carbon_units_protocols",
+            st.session_state.get("carbon_units_inputs", {}).get(
+                "protocols",
+                ["ACR", "CAR", "VERRA"],
+            ),
         )
+        selected_protocols = list(selected_protocols or [])
         protocol_average_result = _protocol_adjusted_average_from_carbon_curve(
             st.session_state.get("carbon_df"),
             selected_protocols,
