@@ -1149,51 +1149,36 @@ def carbon_chart():
     if "ABLD_C" in plot_df.columns:
         final_co2e_unit = "tons CO2e" if toggle_oc else "tons CO2e/acre"
         selected_protocols = st.session_state.get("carbon_units_inputs", {}).get("protocols", [])
-        protocol_avg_df = _average_protocol_adjusted_cumulative_co2e(
-            st.session_state.get("merged_df"),
-            selected_protocols,
-            net_acres=net_acres,
-            show_total_project_acreage=toggle_oc,
-        )
         stored_protocol_avg_df = st.session_state.get("protocol_average_cumulative_co2e_df")
         stored_protocols = st.session_state.get("protocol_average_cumulative_co2e_protocols", [])
         stored_toggle_total = st.session_state.get("protocol_average_cumulative_co2e_toggle_total")
         stored_net_acres = st.session_state.get("protocol_average_cumulative_co2e_net_acres")
-        if (
+
+        has_matching_protocol_average = (
             stored_protocol_avg_df is not None
+            and not stored_protocol_avg_df.empty
             and list(stored_protocols) == list(selected_protocols)
             and stored_toggle_total == toggle_oc
             and stored_net_acres == net_acres
-        ):
-            protocol_avg_df = stored_protocol_avg_df
+        )
 
-        if not protocol_avg_df.empty:
+        if has_matching_protocol_average:
             horizon_result = _interpolated_protocol_average_horizon_value(
-                protocol_avg_df,
+                stored_protocol_avg_df,
                 st.session_state.get("protocol_average_cumulative_co2e_base_year"),
                 horizon=100,
             )
-            if horizon_result is None:
-                final_row = protocol_avg_df.iloc[-1]
-                final_year = int(final_row["Year"])
-                final_value = float(final_row["Cumulative_CU"])
-            else:
+            if horizon_result is not None:
                 final_year, final_value = horizon_result
-
-            st.success(
-                "Final CO2e Output - Average of Selected Protocols "
-                f"(year {final_year}): "
-                f"{final_value:,.2f} {final_co2e_unit}"
-            )
+                st.success(
+                    "Final CO2e Output - Average of Selected Protocols "
+                    f"(year {final_year}): "
+                    f"{final_value:,.2f} {final_co2e_unit}"
+                )
         else:
-            final_co2e = plot_df["ABLD_C"].iloc[-1] * 3.667
-            st.success(
-                f"Final CO2e Output (year {int(plot_df['Year'].max())}): "
-                f"{final_co2e:,.2f} {final_co2e_unit}"
-            )
-            st.caption(
-                "Select protocol(s) in Carbon Estimates to update this value to the "
-                "average protocol-adjusted CO2e output."
+            st.info(
+                "Protocol-adjusted Final CO2e Output will update after Carbon "
+                "Estimates runs for the selected protocols."
             )
 
     if model_source == "coefficients":
@@ -1303,6 +1288,19 @@ def carbon_units():
     st.session_state["protocol_average_cumulative_co2e_protocols"] = list(protocols)
     st.session_state["protocol_average_cumulative_co2e_toggle_total"] = toggle_ce
     st.session_state["protocol_average_cumulative_co2e_net_acres"] = net_acres
+
+    horizon_result = _interpolated_protocol_average_horizon_value(
+        protocol_average_summary_df,
+        chart_start_year,
+        horizon=100,
+    )
+    if horizon_result is not None:
+        final_year, final_value = horizon_result
+        st.success(
+            "Final CO2e Output - Average of Selected Protocols "
+            f"(year {final_year}): "
+            f"{final_value:,.2f} {co2e_unit_label}"
+        )
 
     if not summary_df.empty:
         st.markdown("**CO2e Accumulation Summary**")
