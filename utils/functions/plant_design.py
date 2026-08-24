@@ -1955,7 +1955,7 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
 
     # CSV download
     st.download_button(
-        label="â¬‡ï¸ Download Proforma table (CSV)",
+        label="Download Proforma table (CSV)",
         data=df_pf.to_csv(index=False).encode("utf-8"),
         file_name="credits_proforma.csv",
         mime="text/csv",
