@@ -499,6 +499,38 @@ def _average_protocol_adjusted_cumulative_co2e(
         .sort_values("Year")
     )
 
+
+def _interpolated_protocol_average_horizon_value(
+    df: pd.DataFrame | None,
+    base_year: int | None,
+    horizon: int = 100,
+    value_col: str = "Cumulative_CU",
+    year_col: str = "Year",
+) -> tuple[int, float] | None:
+    """Return the interpolated protocol-average cumulative value at a project horizon."""
+    if df is None or df.empty or value_col not in df.columns or year_col not in df.columns:
+        return None
+
+    curve = df[[year_col, value_col]].copy()
+    curve[year_col] = pd.to_numeric(curve[year_col], errors="coerce")
+    curve[value_col] = pd.to_numeric(curve[value_col], errors="coerce")
+    curve = curve.dropna(subset=[year_col, value_col]).sort_values(year_col)
+    if curve.empty:
+        return None
+
+    if base_year is None:
+        base_year = int(curve[year_col].min())
+
+    target_year = int(base_year + horizon)
+    value = float(
+        np.interp(
+            float(target_year),
+            curve[year_col].astype(float).to_numpy(),
+            curve[value_col].astype(float).to_numpy(),
+        )
+    )
+    return target_year, value
+
 def _protocol_color_scale(protocols: list[str]) -> alt.Scale:
     """Build a deterministic Altair color scale for selected protocols."""
     domain = [p for p in protocols if p in PROTOCOL_COLOR_MAP]
@@ -1123,13 +1155,35 @@ def carbon_chart():
             net_acres=net_acres,
             show_total_project_acreage=toggle_oc,
         )
+        stored_protocol_avg_df = st.session_state.get("protocol_average_cumulative_co2e_df")
+        stored_protocols = st.session_state.get("protocol_average_cumulative_co2e_protocols", [])
+        stored_toggle_total = st.session_state.get("protocol_average_cumulative_co2e_toggle_total")
+        stored_net_acres = st.session_state.get("protocol_average_cumulative_co2e_net_acres")
+        if (
+            stored_protocol_avg_df is not None
+            and list(stored_protocols) == list(selected_protocols)
+            and stored_toggle_total == toggle_oc
+            and stored_net_acres == net_acres
+        ):
+            protocol_avg_df = stored_protocol_avg_df
 
         if not protocol_avg_df.empty:
-            final_row = protocol_avg_df.iloc[-1]
+            horizon_result = _interpolated_protocol_average_horizon_value(
+                protocol_avg_df,
+                st.session_state.get("protocol_average_cumulative_co2e_base_year"),
+                horizon=100,
+            )
+            if horizon_result is None:
+                final_row = protocol_avg_df.iloc[-1]
+                final_year = int(final_row["Year"])
+                final_value = float(final_row["Cumulative_CU"])
+            else:
+                final_year, final_value = horizon_result
+
             st.success(
                 "Final CO2e Output - Average of Selected Protocols "
-                f"(year {int(final_row['Year'])}): "
-                f"{final_row['Cumulative_CU']:,.2f} {final_co2e_unit}"
+                f"(year {final_year}): "
+                f"{final_value:,.2f} {final_co2e_unit}"
             )
         else:
             final_co2e = plot_df["ABLD_C"].iloc[-1] * 3.667
@@ -1243,6 +1297,12 @@ def carbon_units():
         value_col="Cumulative_CU",
         base_year=chart_start_year,
     )
+
+    st.session_state["protocol_average_cumulative_co2e_df"] = protocol_average_summary_df
+    st.session_state["protocol_average_cumulative_co2e_base_year"] = chart_start_year
+    st.session_state["protocol_average_cumulative_co2e_protocols"] = list(protocols)
+    st.session_state["protocol_average_cumulative_co2e_toggle_total"] = toggle_ce
+    st.session_state["protocol_average_cumulative_co2e_net_acres"] = net_acres
 
     if not summary_df.empty:
         st.markdown("**CO2e Accumulation Summary**")
