@@ -1,4 +1,5 @@
 ﻿import json
+import hashlib
 import os
 from pathlib import Path
 from urllib.parse import urlparse
@@ -500,6 +501,25 @@ def _average_protocol_adjusted_cumulative_co2e(
     )
 
 
+def _carbon_curve_signature(df: pd.DataFrame | None) -> str | None:
+    """Return a stable fingerprint for the current modeled carbon curve."""
+    required_cols = {"Year", "ABLD_C"}
+    if df is None or df.empty or not required_cols.issubset(df.columns):
+        return None
+
+    curve = df[["Year", "ABLD_C"]].copy()
+    curve["Year"] = pd.to_numeric(curve["Year"], errors="coerce")
+    curve["ABLD_C"] = pd.to_numeric(curve["ABLD_C"], errors="coerce")
+    curve = curve.dropna(subset=["Year", "ABLD_C"]).sort_values("Year")
+    if curve.empty:
+        return None
+
+    curve["Year"] = curve["Year"].round(6)
+    curve["ABLD_C"] = curve["ABLD_C"].round(6)
+    payload = curve.to_csv(index=False).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
 def _interpolated_protocol_average_horizon_value(
     df: pd.DataFrame | None,
     base_year: int | None,
@@ -759,7 +779,7 @@ def planting_sliders():
     # Seed the keyed selectbox from it every run so an upstream change (the
     # Site Selection chooser) propagates here. A keyed widget's stored value
     # otherwise overrides the ``index=`` default whenever it is still a valid
-    # option (e.g. switching NC_1 <-> NC_2), silently pinning the variant â€” and
+    # option (e.g. switching NC_1 <-> NC_2), silently pinning the variant and
     # with it the species list and the variant actually run. ``on_change``
     # pushes user picks back into ``active_variant`` so this never clobbers a
     # fresh selection.
@@ -899,7 +919,7 @@ def carbon_chart():
     loccode = st.session_state.get("selected_varloc_code", "609")
 
     _PCT_LABELS = HELP.get("planting.pct_level", {}).get("labels") or {
-        "PCT0": "None â€” no pre-commercial thinning",
+        "PCT0": "None - no pre-commercial thinning",
         "PCT1": "Light thinning",
         "PCT2": "Moderate thinning",
     }
@@ -955,6 +975,7 @@ def carbon_chart():
     result = resp.json()
     df = pd.DataFrame(result["carbon_df"])
     st.session_state.carbon_df = df
+    st.session_state["carbon_curve_signature"] = _carbon_curve_signature(df)
     model_source = result.get("model_source", "coefficients")
 
     # Metric definitions: label, column, unit (per-acre), unit (project), scales_with_acres
@@ -1153,6 +1174,8 @@ def carbon_chart():
         stored_protocols = st.session_state.get("protocol_average_cumulative_co2e_protocols", [])
         stored_toggle_total = st.session_state.get("protocol_average_cumulative_co2e_toggle_total")
         stored_net_acres = st.session_state.get("protocol_average_cumulative_co2e_net_acres")
+        stored_carbon_signature = st.session_state.get("protocol_average_cumulative_co2e_carbon_signature")
+        current_carbon_signature = st.session_state.get("carbon_curve_signature")
 
         has_matching_protocol_average = (
             stored_protocol_avg_df is not None
@@ -1160,6 +1183,7 @@ def carbon_chart():
             and list(stored_protocols) == list(selected_protocols)
             and stored_toggle_total == toggle_oc
             and stored_net_acres == net_acres
+            and stored_carbon_signature == current_carbon_signature
         )
 
         if has_matching_protocol_average:
@@ -1288,6 +1312,9 @@ def carbon_units():
     st.session_state["protocol_average_cumulative_co2e_protocols"] = list(protocols)
     st.session_state["protocol_average_cumulative_co2e_toggle_total"] = toggle_ce
     st.session_state["protocol_average_cumulative_co2e_net_acres"] = net_acres
+    st.session_state["protocol_average_cumulative_co2e_carbon_signature"] = (
+        st.session_state.get("carbon_curve_signature")
+    )
 
     horizon_result = _interpolated_protocol_average_horizon_value(
         protocol_average_summary_df,
@@ -1331,7 +1358,7 @@ def carbon_units():
         data=plot_df,
         x_col="Year",
         y_col="CU",
-        title=f"Annual CO2e Estimates â€” {chart_title}",
+        title=f"Annual CO2e Estimates - {chart_title}",
         y_title=f"Annual CO2e ({co2e_unit_label})",
         include_years=include_years,
         series_col="Protocol",
@@ -1353,7 +1380,7 @@ def carbon_units():
 
     if not annual_table_df.empty:
         annual_table_df["Year"] = annual_table_df["Year"].astype(int)
-        st.markdown(f"**Annual CO2e Estimates â€” {chart_title}**")
+        st.markdown(f"**Annual CO2e Estimates - {chart_title}**")
         st.dataframe(
             annual_table_df.style.format(
                 {col: "{:,.2f}" for col in annual_table_df.columns if col != "Year"}
@@ -1371,7 +1398,7 @@ def carbon_units():
         data=plot_df,
         x_col="Year",
         y_col="Cumulative_CU",
-        title=f"Cumulative CO2e Estimates â€” {chart_title}",
+        title=f"Cumulative CO2e Estimates - {chart_title}",
         y_title=f"Cumulative CO2e ({co2e_unit_label})",
         include_years=include_years,
         series_col="Protocol",
@@ -1393,7 +1420,7 @@ def carbon_units():
 
     if not cumulative_table_df.empty:
         cumulative_table_df["Year"] = cumulative_table_df["Year"].astype(int)
-        st.markdown(f"**Cumulative CO2e Estimates â€” {chart_title}**")
+        st.markdown(f"**Cumulative CO2e Estimates - {chart_title}**")
         st.dataframe(
             cumulative_table_df.style.format(
                 {col: "{:,.2f}" for col in cumulative_table_df.columns if col != "Year"}
@@ -1650,7 +1677,7 @@ def credits_inputs(prefix: str = "credits_") -> dict:
     st.session_state[f"{prefix}discount_rate"] = first_row["discount_rate"]
     st.session_state[f"{prefix}planting_cost"] = first_row["planting_cost"]
 
-    # NPV year-horizon selector â€” applies to every protocol in this run.
+    # NPV year-horizon selector applies to every protocol in this run.
     npv_year = st.selectbox(
         "NPV Year Horizon",
         options=[10, 15, 20, 25, 30, 35, 40],
@@ -1833,7 +1860,7 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
         x_col="Year",
         y_col="Net_Revenue",
         title=chart_title
-        + f" Estimated Credits for {first_params['net_acres']:,} acres project",
+        + f" Net Revenue of Total Estimated Credits for {first_params['net_acres']:,} acres project",
         y_title=chart_title + " Net Revenue",
         include_years=include_years,
         series_col="Protocol",
@@ -1964,7 +1991,7 @@ def generate_report():
         },
     ]
 
-    # Species mix â€” built dynamically from variant species config
+    # Species mix built dynamically from variant species config
     species_mix = []
     species_mix.append(
         {"column1": "Species", "column2": "TPA#footnote[Trees per Acre]"}
