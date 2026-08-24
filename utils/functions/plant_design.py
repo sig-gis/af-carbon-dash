@@ -1,4 +1,4 @@
-import json
+﻿import json
 import os
 from pathlib import Path
 from urllib.parse import urlparse
@@ -466,6 +466,39 @@ def _co2e_accumulation_summary(
     )
 
 
+def _average_protocol_adjusted_cumulative_co2e(
+    df: pd.DataFrame | None,
+    protocols: list[str],
+    net_acres: float = 1,
+    show_total_project_acreage: bool = True,
+) -> pd.DataFrame:
+    """Return cumulative CO2e averaged by year across selected protocols."""
+    required_cols = {"Year", "Protocol", "CU"}
+    if df is None or df.empty or not required_cols.issubset(df.columns) or not protocols:
+        return pd.DataFrame()
+
+    avg_df = df[df["Protocol"].isin(protocols)].copy()
+    if avg_df.empty:
+        return pd.DataFrame()
+
+    avg_df["Year"] = pd.to_numeric(avg_df["Year"], errors="coerce")
+    avg_df["CU"] = pd.to_numeric(avg_df["CU"], errors="coerce")
+    avg_df = avg_df.dropna(subset=["Year", "Protocol", "CU"])
+    if avg_df.empty:
+        return pd.DataFrame()
+
+    if show_total_project_acreage:
+        avg_df["CU"] = avg_df["CU"] * net_acres
+
+    avg_df = avg_df.sort_values(["Protocol", "Year"])
+    avg_df["Cumulative_CU"] = avg_df.groupby("Protocol")["CU"].cumsum()
+
+    return (
+        avg_df.groupby("Year", as_index=False)["Cumulative_CU"]
+        .mean()
+        .sort_values("Year")
+    )
+
 def _protocol_color_scale(protocols: list[str]) -> alt.Scale:
     """Build a deterministic Altair color scale for selected protocols."""
     domain = [p for p in protocols if p in PROTOCOL_COLOR_MAP]
@@ -694,7 +727,7 @@ def planting_sliders():
     # Seed the keyed selectbox from it every run so an upstream change (the
     # Site Selection chooser) propagates here. A keyed widget's stored value
     # otherwise overrides the ``index=`` default whenever it is still a valid
-    # option (e.g. switching NC_1 <-> NC_2), silently pinning the variant — and
+    # option (e.g. switching NC_1 <-> NC_2), silently pinning the variant â€” and
     # with it the species list and the variant actually run. ``on_change``
     # pushes user picks back into ``active_variant`` so this never clobbers a
     # fresh selection.
@@ -834,7 +867,7 @@ def carbon_chart():
     loccode = st.session_state.get("selected_varloc_code", "609")
 
     _PCT_LABELS = HELP.get("planting.pct_level", {}).get("labels") or {
-        "PCT0": "None — no pre-commercial thinning",
+        "PCT0": "None â€” no pre-commercial thinning",
         "PCT1": "Light thinning",
         "PCT2": "Moderate thinning",
     }
@@ -1082,13 +1115,32 @@ def carbon_chart():
 
     # Summary output
     if "ABLD_C" in plot_df.columns:
-        final_co2e = plot_df["ABLD_C"].iloc[-1] * 3.667
         final_co2e_unit = "tons CO2e" if toggle_oc else "tons CO2e/acre"
-
-        st.success(
-            f"Final CO2e Output (year {int(plot_df['Year'].max())}): "
-            f"{final_co2e:,.2f} {final_co2e_unit}"
+        selected_protocols = st.session_state.get("carbon_units_inputs", {}).get("protocols", [])
+        protocol_avg_df = _average_protocol_adjusted_cumulative_co2e(
+            st.session_state.get("merged_df"),
+            selected_protocols,
+            net_acres=net_acres,
+            show_total_project_acreage=toggle_oc,
         )
+
+        if not protocol_avg_df.empty:
+            final_row = protocol_avg_df.iloc[-1]
+            st.success(
+                "Final CO2e Output - Average of Selected Protocols "
+                f"(year {int(final_row['Year'])}): "
+                f"{final_row['Cumulative_CU']:,.2f} {final_co2e_unit}"
+            )
+        else:
+            final_co2e = plot_df["ABLD_C"].iloc[-1] * 3.667
+            st.success(
+                f"Final CO2e Output (year {int(plot_df['Year'].max())}): "
+                f"{final_co2e:,.2f} {final_co2e_unit}"
+            )
+            st.caption(
+                "Select protocol(s) in Carbon Estimates to update this value to the "
+                "average protocol-adjusted CO2e output."
+            )
 
     if model_source == "coefficients":
         st.caption(
@@ -1180,6 +1232,31 @@ def carbon_units():
 
     chart_start_year = int(plot_df["Year"].min())
 
+    protocol_average_summary_df = _average_protocol_adjusted_cumulative_co2e(
+        final_df,
+        protocols,
+        net_acres=net_acres,
+        show_total_project_acreage=toggle_ce,
+    )
+    summary_df = _co2e_accumulation_summary(
+        protocol_average_summary_df,
+        value_col="Cumulative_CU",
+        base_year=chart_start_year,
+    )
+
+    if not summary_df.empty:
+        st.markdown("**CO2e Accumulation Summary**")
+        cu_txt = """
+        CO2e represents the carbon dioxide equivalent of the carbon sequestered by the project. The reported CO2e values account for applicable deductions, including leakage (emissions that occur outside the project boundary as a result of project activities), buffer pool contributions for risk mitigation, and any other required adjustments under the relevant accounting framework. As a result, CO2e reflects the net climate benefit attributable to the project after these considerations.
+        """
+        st.markdown(cu_txt)
+        st.caption(
+            "Modeled CO2e accumulation is averaged across the selected protocols, "
+            "interpolated at 10-, 50-, and 100-year project horizons, "
+            f"and shown in {co2e_unit_label}."
+        )
+        st.dataframe(summary_df, use_container_width=True, hide_index=True)
+
     # Filter to 5-year intervals for chart/table display
     # plot_df, include_years = _filter_to_five_year_intervals(
     #     plot_df, year_col="Year", start_year=CHART_BASE_YEAR
@@ -1196,7 +1273,7 @@ def carbon_units():
         data=plot_df,
         x_col="Year",
         y_col="CU",
-        title=f"Annual CO2e Estimates — {chart_title}",
+        title=f"Annual CO2e Estimates â€” {chart_title}",
         y_title=f"Annual CO2e ({co2e_unit_label})",
         include_years=include_years,
         series_col="Protocol",
@@ -1218,7 +1295,7 @@ def carbon_units():
 
     if not annual_table_df.empty:
         annual_table_df["Year"] = annual_table_df["Year"].astype(int)
-        st.markdown(f"**Annual CO2e Estimates — {chart_title}**")
+        st.markdown(f"**Annual CO2e Estimates â€” {chart_title}**")
         st.dataframe(
             annual_table_df.style.format(
                 {col: "{:,.2f}" for col in annual_table_df.columns if col != "Year"}
@@ -1236,7 +1313,7 @@ def carbon_units():
         data=plot_df,
         x_col="Year",
         y_col="Cumulative_CU",
-        title=f"Cumulative CO2e Estimates — {chart_title}",
+        title=f"Cumulative CO2e Estimates â€” {chart_title}",
         y_title=f"Cumulative CO2e ({co2e_unit_label})",
         include_years=include_years,
         series_col="Protocol",
@@ -1258,7 +1335,7 @@ def carbon_units():
 
     if not cumulative_table_df.empty:
         cumulative_table_df["Year"] = cumulative_table_df["Year"].astype(int)
-        st.markdown(f"**Cumulative CO2e Estimates — {chart_title}**")
+        st.markdown(f"**Cumulative CO2e Estimates â€” {chart_title}**")
         st.dataframe(
             cumulative_table_df.style.format(
                 {col: "{:,.2f}" for col in cumulative_table_df.columns if col != "Year"}
@@ -1515,7 +1592,7 @@ def credits_inputs(prefix: str = "credits_") -> dict:
     st.session_state[f"{prefix}discount_rate"] = first_row["discount_rate"]
     st.session_state[f"{prefix}planting_cost"] = first_row["planting_cost"]
 
-    # NPV year-horizon selector — applies to every protocol in this run.
+    # NPV year-horizon selector â€” applies to every protocol in this run.
     npv_year = st.selectbox(
         "NPV Year Horizon",
         options=[10, 15, 20, 25, 30, 35, 40],
@@ -1736,7 +1813,7 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
 
     # CSV download
     st.download_button(
-        label="⬇️ Download Proforma table (CSV)",
+        label="â¬‡ï¸ Download Proforma table (CSV)",
         data=df_pf.to_csv(index=False).encode("utf-8"),
         file_name="credits_proforma.csv",
         mime="text/csv",
@@ -1829,7 +1906,7 @@ def generate_report():
         },
     ]
 
-    # Species mix — built dynamically from variant species config
+    # Species mix â€” built dynamically from variant species config
     species_mix = []
     species_mix.append(
         {"column1": "Species", "column2": "TPA#footnote[Trees per Acre]"}
@@ -2043,7 +2120,7 @@ def run_chart():
     #     #     if not summary_df.empty:
     #     #         st.markdown("**CO2e Accumulation Summary**")
     #     #         cu_txt = '''
-    #     #         CO₂e represents the carbon dioxide equivalent of the carbon sequestered by the project. The reported CO₂e values account for applicable deductions, including leakage (emissions that occur outside the project boundary as a result of project activities), buffer pool contributions for risk mitigation, and any other required adjustments under the relevant accounting framework. As a result, CO₂e reflects the net climate benefit attributable to the project after these considerations.
+    #     #         COâ‚‚e represents the carbon dioxide equivalent of the carbon sequestered by the project. The reported COâ‚‚e values account for applicable deductions, including leakage (emissions that occur outside the project boundary as a result of project activities), buffer pool contributions for risk mitigation, and any other required adjustments under the relevant accounting framework. As a result, COâ‚‚e reflects the net climate benefit attributable to the project after these considerations.
     #     #         '''
     #     #         st.markdown(cu_txt)
     #     #         st.caption(
@@ -2082,7 +2159,7 @@ def run_chart():
     #         if not summary_df.empty:
     #             st.markdown("**CO2e Accumulation Summary**")
     #             cu_txt = '''
-    #             CO₂e represents the carbon dioxide equivalent of the carbon sequestered by the project. The reported CO₂e values account for applicable deductions, including leakage (emissions that occur outside the project boundary as a result of project activities), buffer pool contributions for risk mitigation, and any other required adjustments under the relevant accounting framework. As a result, CO₂e reflects the net climate benefit attributable to the project after these considerations.
+    #             COâ‚‚e represents the carbon dioxide equivalent of the carbon sequestered by the project. The reported COâ‚‚e values account for applicable deductions, including leakage (emissions that occur outside the project boundary as a result of project activities), buffer pool contributions for risk mitigation, and any other required adjustments under the relevant accounting framework. As a result, COâ‚‚e reflects the net climate benefit attributable to the project after these considerations.
     #             '''
     #             st.markdown(cu_txt)
     #             st.caption(
@@ -2138,38 +2215,6 @@ def run_chart():
             else "tons CO2e/acre"
         )
 
-        carbon_summary_df = st.session_state.carbon_df.copy()
-        if "ABLD_C" in carbon_summary_df.columns:
-            carbon_summary_df["CO2e"] = (
-                pd.to_numeric(carbon_summary_df["ABLD_C"], errors="coerce") * 3.667
-            )
-
-            if show_total_project_acreage:
-                carbon_summary_df["CO2e"] = carbon_summary_df["CO2e"] * net_acres
-
-            summary_base_year = int(
-                pd.to_numeric(carbon_summary_df["Year"], errors="coerce").min()
-            )
-            summary_df = _co2e_accumulation_summary(
-                carbon_summary_df,
-                base_year=summary_base_year,
-            )
-
-            if not summary_df.empty:
-                st.markdown(
-                    # f"**CO2e Accumulation Summary — {accumulation_mode_label} ({co2e_unit_label})**"
-                    f"**CO2e Accumulation Summary**"
-                )
-                cu_txt = """
-                CO₂e represents the carbon dioxide equivalent of the carbon sequestered by the project. The reported CO₂e values account for applicable deductions, including leakage (emissions that occur outside the project boundary as a result of project activities), buffer pool contributions for risk mitigation, and any other required adjustments under the relevant accounting framework. As a result, CO₂e reflects the net climate benefit attributable to the project after these considerations.
-                """
-                st.markdown(cu_txt)
-                st.caption(
-                    "Modeled CO2e accumulation is interpolated from aboveground live biomass carbon "
-                    f"at 10-, 50-, and 100-year project horizons and shown in {co2e_unit_label}."
-                )
-                st.dataframe(summary_df, use_container_width=True, hide_index=True)
-
         # restore backup and init state for CO2e estimates
         _restore_backup(_carbon_units_keys(), backup_name="_carbon_units_backup")
         _init_carbon_units_state()
@@ -2196,7 +2241,7 @@ def run_chart():
         f"**Project Financials Summary**"
                         )
         pf_txt ="""
-        Project Financials estimate the potential revenue, costs, and net financial performance of the project using the selected carbon estimates and financial assumptions. Revenue is based on projected credited CO₂e and assumed credit prices, while costs include items such as planting, monitoring, verification, validation, and registry fees. These results help evaluate project viability through metrics such as Total Net Revenue and Net Present Value.
+        Project Financials estimate the potential revenue, costs, and net financial performance of the project using the selected carbon estimates and financial assumptions. Revenue is based on projected credited COâ‚‚e and assumed credit prices, while costs include items such as planting, monitoring, verification, validation, and registry fees. These results help evaluate project viability through metrics such as Total Net Revenue and Net Present Value.
         """
         st.markdown(pf_txt)
         proforma_params = credits_inputs(prefix="credits_")
