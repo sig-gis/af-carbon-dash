@@ -290,7 +290,17 @@ def build_map(geojson_str, points=None, upload=None, center=(37.8, -96.9), zoom=
         else:
             last_center = (37.8, -96.9)
 
-    m = folium.Map(location=last_center, zoom_start=last_zoom, tiles="CartoDB positron")
+    m = folium.Map(location=last_center, zoom_start=last_zoom, tiles=None)
+    folium.TileLayer(
+        tiles="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+        attr=(
+            '&copy; <a href="https://www.openstreetmap.org/copyright">'
+            'OpenStreetMap</a> contributors &copy; '
+            '<a href="https://carto.com/attributions">CARTO</a>'
+        ),
+        name="CartoDB Positron",
+        control=False,
+    ).add_to(m)
     if fit_bounds:
         m.fit_bounds(fit_bounds)
 

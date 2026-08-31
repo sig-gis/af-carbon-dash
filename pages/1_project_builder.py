@@ -1143,15 +1143,14 @@ if st.session_state.active_tab == "Site Selection Map":
         #     zoom=int(st.session_state["map_view"]["zoom"]),
         #     tooltip_fields=tooltip_fields,
         # )
-        with map_col:
-            m = build_map(
-                geojson_str,
-                points=st.session_state.points,
-                upload=uploaded_geojson_str,
-                center=tuple(st.session_state["map_view"]["center"]),
-                zoom=int(st.session_state["map_view"]["zoom"]),
-                tooltip_fields=tooltip_fields,
-            )
+        m = build_map(
+            geojson_str,
+            points=st.session_state.points,
+            upload=uploaded_geojson_str,
+            center=tuple(st.session_state["map_view"]["center"]),
+            zoom=int(st.session_state["map_view"]["zoom"]),
+            tooltip_fields=tooltip_fields,
+        )
 
         highlight_fg = build_highlight_layer(st.session_state.get("clicked_feature"))
 
