@@ -1100,6 +1100,8 @@ if st.session_state.active_tab == "Site Selection Map":
                 st.session_state.upload_file
             )
 
+            st.session_state["uploaded_geojson_str"] = uploaded_geojson_str
+            st.session_state["uploaded_tooltip_fields"] = uploaded_tooltip_fields
             st.session_state["last_added_type"] = "upload"
             st.session_state["last_upload"] = uploaded_geojson_str
 
@@ -1119,6 +1121,9 @@ if st.session_state.active_tab == "Site Selection Map":
                     st.warning(
                         "Uploaded geometry does not intersect a supported FVS variant."
                     )
+
+        uploaded_geojson_str = st.session_state.get("uploaded_geojson_str")
+        uploaded_tooltip_fields = st.session_state.get("uploaded_tooltip_fields")
 
     _process_pending_click(geojson_str)
 
