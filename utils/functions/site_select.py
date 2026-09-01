@@ -583,65 +583,38 @@ def auto_select_variant_from_upload(upload_geojson, geojson_str):
     Resolve and set the selected variant/session state from an uploaded
     shapefile/GeoJSON.
 
-    Uses the uploaded geometry's representative point first, then falls back
-    to intersecting the uploaded geometry against supported FVS polygons.
+    Intersects the full uploaded geometry against supported FVS polygons first,
+    then falls back to representative points for each uploaded feature.
     Returns the selected feature's properties if found, else None.
     """
     if not upload_geojson or not geojson_str:
         return None
 
     try:
-        upload_json = (
-            json.loads(upload_geojson)
-            if isinstance(upload_geojson, str)
-            else upload_geojson
-        )
+        candidates = variants_at_geometry(upload_geojson, geojson_str)
 
-        uploaded_geoms = [
-            shape(feat["geometry"])
-            for feat in upload_json.get("features", [])
-            if feat.get("geometry")
-        ]
-
-        if not uploaded_geoms:
-            return None
-
-        # First try: use a representative point from the uploaded geometry.
-        # This point is guaranteed to fall inside the geometry.
-        point = uploaded_geoms[0].representative_point()
-        candidates = variants_at_point(point, geojson_str)
-
-        # Fallback: if the representative point does not hit a supported FVS
-        # polygon, intersect the whole uploaded geometry with the FVS polygons.
+        # Fallback: try a representative point from every uploaded feature. This
+        # keeps support for cases where geometry intersection is sensitive to
+        # topology/precision while avoiding the old behavior that only tested the
+        # first uploaded feature's representative point.
         if not candidates:
-            fvs_features = json.loads(geojson_str).get("features", [])
-            registry = _fetch_registry()
-            all_candidates = []
+            upload_json = (
+                json.loads(upload_geojson)
+                if isinstance(upload_geojson, str)
+                else upload_geojson
+            )
 
-            for feat in fvs_features:
-                geom_json = feat.get("geometry")
-                if not geom_json:
-                    continue
+            uploaded_geoms = [
+                shape(feat["geometry"])
+                for feat in upload_json.get("features", [])
+                if feat.get("geometry")
+            ]
 
-                try:
-                    fvs_geom = shape(geom_json)
-                except Exception:
-                    continue
-
-                if any(
-                    fvs_geom.intersects(uploaded_geom)
-                    for uploaded_geom in uploaded_geoms
-                ):
-                    all_candidates.extend(
-                        _candidates_from_feature(feat, registry)
-                    )
-
-            # Deduplicate by variant + loccode.
-            deduped = {}
-            for c in all_candidates:
-                deduped[(c["variant"], c["loccode"])] = c
-
-            candidates = [deduped[k] for k in sorted(deduped.keys())]
+            for uploaded_geom in uploaded_geoms:
+                point = uploaded_geom.representative_point()
+                candidates = variants_at_point(point, geojson_str)
+                if candidates:
+                    break
 
         if not _select_candidates(candidates):
             return None

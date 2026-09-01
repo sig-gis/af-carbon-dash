@@ -1109,7 +1109,7 @@ if st.session_state.active_tab == "Site Selection Map":
                     geojson_str,
                 )
 
-                st.session_state["upload_auto_selected"] = True
+                st.session_state["upload_auto_selected"] = bool(matched)
 
                 if matched:
                     st.success(
