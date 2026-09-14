@@ -517,6 +517,7 @@ def variants_at_geometry(uploaded_geojson_str, geojson_str) -> list[dict]:
 
 def _apply_candidate(c: dict):
     """Write a chosen variant candidate into session state (variant + location)."""
+    st.session_state.pop("site_variant_selection_required", None)
     st.session_state["active_variant"] = c["variant"]
     st.session_state["selected_variant"] = c["base"]
     st.session_state["selected_varloc_code"] = c["loccode"]
@@ -524,6 +525,20 @@ def _apply_candidate(c: dict):
     st.session_state["selected_varloc_name"] = c.get("locname") or ""
     st.session_state["clicked_feature"] = c["feature"]
     st.session_state["clicked_props"] = c["feature"].get("properties", {}) or {}
+
+
+def _clear_selected_candidate():
+    """Remove any previously applied variant/location selection from session state."""
+    for key in [
+        "active_variant",
+        "selected_variant",
+        "selected_varloc_code",
+        "FVSLocCode",
+        "selected_varloc_name",
+        "clicked_feature",
+        "clicked_props",
+    ]:
+        st.session_state.pop(key, None)
 
 
 def _select_candidates(candidates: list[dict], *, auto_pick_first: bool = True) -> bool:
@@ -540,6 +555,9 @@ def _select_candidates(candidates: list[dict], *, auto_pick_first: bool = True) 
         return False
     if auto_pick_first:
         _apply_candidate(candidates[0])
+    else:
+        st.session_state["site_variant_selection_required"] = True
+        _clear_selected_candidate()
     return True
 
 
@@ -780,6 +798,26 @@ def variant_chooser():
         return
 
     labels = [_candidate_label(c) for c in candidates]
+    selection_required = st.session_state.get("site_variant_selection_required", False)
+
+    if selection_required:
+        options = [None, *range(len(candidates))]
+        idx = st.selectbox(
+            "Multiple FVS variants cover this location — choose one:",
+            options=options,
+            index=0,
+            format_func=lambda i: "Select a variant/location..." if i is None else labels[i],
+            key="site_variant_choice",
+            help=H("site.variant_chooser"),
+        )
+        if idx is None:
+            return
+
+        chosen = candidates[idx]
+        _apply_candidate(chosen)
+        st.rerun()
+        return
+
     active = st.session_state.get("active_variant")
     default_idx = next(
         (i for i, c in enumerate(candidates) if c["variant"] == active), 0
