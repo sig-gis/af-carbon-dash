@@ -7,7 +7,7 @@
     "validation_cost": 45000,
     "verification_cost": 25000,
     "issuance_fee_per_ert": 0.15,
-    "anticipated_inflation": 0,
+    "anticipated_inflation": 2.0,
     "discount_rate": 6.0,
     "planting_cost": 1000,
     "protocol_overrides": {

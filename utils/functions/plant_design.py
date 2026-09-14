@@ -1256,11 +1256,11 @@ def carbon_chart():
             st.session_state["protocol_average_cumulative_co2e_carbon_signature"] = (
                 st.session_state.get("carbon_curve_signature")
             )
-            st.success(
-                "Final CO2e Output - Average of Selected Protocols "
-                f"(year {final_year}): "
-                f"{final_value:,.2f} {final_co2e_unit}"
-            )
+            # st.success(
+            #     "Final CO2e Output - Average of Selected Protocols "
+            #     f"(year {final_year}): "
+            #     f"{final_value:,.2f} {final_co2e_unit}"
+            # )
 
     if model_source == "coefficients":
         st.caption(
