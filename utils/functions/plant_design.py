@@ -1043,8 +1043,8 @@ def carbon_chart():
     METRIC_DEFS = {
         "CO2e": {
             "label": "CO2e",
-            "unit": "tons CO2e/acre",
-            "unit_project": "tons CO2e",
+            "unit": "tons",
+            "unit_project": "tons",
             "scales": True,
         },
         "BA": {
@@ -1085,8 +1085,8 @@ def carbon_chart():
         },
         "Tpa": {
             "label": "Trees per acre",
-            "unit": "trees/acre",
-            "unit_project": "trees/acre",
+            "unit": "",
+            "unit_project": "",
             "scales": False,
         },
     }
@@ -1169,7 +1169,7 @@ def carbon_chart():
                         # scale=alt.Scale(domain=[CHART_BASE_YEAR, max(inc)]),
                         scale=alt.Scale(domain=[chart_start_year, max(inc)]),
                     ),
-                    y=alt.Y(f"{col}:Q", title=f"{label} ({unit})"),
+                    y=alt.Y(f"{col}:Q", title=label if not unit else f"{label} ({unit})"),
                     tooltip=["Year", col],
                 )
                 .properties(title=label, height=350)
@@ -1229,7 +1229,7 @@ def carbon_chart():
 
     # Summary output
     if "ABLD_C" in plot_df.columns:
-        final_co2e_unit = "tons CO2e" if toggle_oc else "tons CO2e/acre"
+        final_co2e_unit = "tons"
         selected_protocols = st.session_state.get(
             "carbon_units_protocols",
             st.session_state.get("carbon_units_inputs", {}).get(
@@ -1332,7 +1332,7 @@ def carbon_units():
         plot_df["CU"] = plot_df["CU"] * net_acres
 
     accumulation_mode_label = "Total Project" if toggle_ce else "Per Acre"
-    co2e_unit_label = "tons CO2e" if toggle_ce else "tons CO2e/acre"
+    co2e_unit_label = "tons"
     chart_title = f"{accumulation_mode_label} ({co2e_unit_label})"
 
 
@@ -2351,11 +2351,7 @@ def run_chart():
             if show_total_project_acreage
             else "Per Acre"
         )
-        co2e_unit_label = (
-            "tons CO2e"
-            if show_total_project_acreage
-            else "tons CO2e/acre"
-        )
+        co2e_unit_label = "tons"
 
         # restore backup and init state for CO2e estimates
         _restore_backup(_carbon_units_keys(), backup_name="_carbon_units_backup")
