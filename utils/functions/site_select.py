@@ -526,14 +526,20 @@ def _apply_candidate(c: dict):
     st.session_state["clicked_props"] = c["feature"].get("properties", {}) or {}
 
 
-def _select_candidates(candidates: list[dict]) -> bool:
-    """Store candidates and auto-pick the first. Returns True if any were found."""
+def _select_candidates(candidates: list[dict], *, auto_pick_first: bool = True) -> bool:
+    """Store candidates and optionally auto-pick the first.
+
+    Returns True if any candidates were found. When ``auto_pick_first`` is False,
+    the caller is responsible for requiring an explicit user selection before any
+    variant/location session state is applied.
+    """
     st.session_state["variant_candidates"] = candidates
     # New selection: reset the chooser widget so it re-defaults to the first option.
     st.session_state.pop("site_variant_choice", None)
     if not candidates:
         return False
-    _apply_candidate(candidates[0])
+    if auto_pick_first:
+        _apply_candidate(candidates[0])
     return True
 
 
@@ -585,7 +591,10 @@ def auto_select_variant_from_upload(upload_geojson, geojson_str):
 
     Intersects the full uploaded geometry against supported FVS polygons first,
     then falls back to representative points for each uploaded feature.
-    Returns the selected feature's properties if found, else None.
+    Returns the selected feature's properties only when exactly one boundary is
+    matched and selected. If the upload spans multiple location boundaries, the
+    candidates are kept for the chooser, but no variant is selected until the
+    user explicitly chooses one.
     """
     if not upload_geojson or not geojson_str:
         return None
@@ -616,10 +625,13 @@ def auto_select_variant_from_upload(upload_geojson, geojson_str):
                 if candidates:
                     break
 
-        if not _select_candidates(candidates):
+        if not _select_candidates(candidates, auto_pick_first=len(candidates) == 1):
             return None
 
         st.session_state["last_added_type"] = "upload"
+        if len(candidates) > 1:
+            return None
+
         return st.session_state["clicked_props"]
 
     except Exception as e:

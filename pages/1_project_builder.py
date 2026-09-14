@@ -1111,11 +1111,16 @@ if st.session_state.active_tab == "Site Selection Map":
                     geojson_str,
                 )
 
-                st.session_state["upload_auto_selected"] = bool(matched)
+                st.session_state["upload_auto_selected"] = True
+                upload_candidates = st.session_state.get("variant_candidates", [])
 
                 if matched:
                     st.success(
                         "Uploaded geometry matched a supported FVS variant. Variant auto-selected."
+                    )
+                elif upload_candidates:
+                    st.warning(
+                        "Uploaded geometry spans multiple supported FVS variant locations. Please select the correct variant before continuing."
                     )
                 else:
                     st.warning(
