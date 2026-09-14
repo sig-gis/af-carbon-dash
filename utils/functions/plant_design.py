@@ -903,7 +903,7 @@ def planting_sliders():
     )
 
     st.number_input(
-        "Net Acres:",
+        "Planted Acres:",
         min_value=1,
         step=100,
         key="net_acres",

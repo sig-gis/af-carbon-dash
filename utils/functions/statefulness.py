@@ -122,7 +122,7 @@ def _apply_planting_prefill(variant: str, sp_keys: list[str]):
 
 def _init_carbon_units_state():
     """Initialize Carbon Units inputs ONLY if missing."""
-    default_protocols = ["ACR", "CAR", "VERRA"]
+    default_protocols = ["ACR", "CAR", "VERRA", "GS", "ISO"]
 
     if "carbon_units_inputs" not in st.session_state:
         st.session_state["carbon_units_inputs"] = {"protocols": default_protocols}
