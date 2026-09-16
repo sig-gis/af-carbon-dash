@@ -884,11 +884,11 @@ if st.session_state.active_tab == "Site Selection Map":
             else:
                 st.error("Enter at least one field for address, city, or state.")
 
-        with st.expander(label="Upload GeoJSON/Shapefile", expanded=False):
+        with st.expander(label="Upload KML/GeoJSON/Shapefile", expanded=False):
             uploaded_files = st.file_uploader(
-                "Upload GeoJSON (.geojson) or all shapefile components seperatly (.shp, .shx, .dbf, .prj) or zipped (.zip)",
+                "Upload KML (.kml), GeoJSON (.geojson/.json), all shapefile components separately (.shp, .shx, .dbf, .prj), or zipped (.zip)",
                 accept_multiple_files=True,
-                type=["geojson", "shp", "shx", "dbf", "prj", "cpg", "zip"],
+                type=["kml", "geojson", "json", "shp", "shx", "dbf", "prj", "cpg", "zip"],
             )
 
             upload_button = st.button("Upload file to map", use_container_width=True)
@@ -896,7 +896,7 @@ if st.session_state.active_tab == "Site Selection Map":
 
             st.markdown("---")
             st.caption(
-                "Large zipped shapefile upload: use this when Cloud Run rejects the normal upload. "
+                "Large zipped KML, GeoJSON, or shapefile upload: use this when Cloud Run rejects the normal upload. "
                 "The browser uploads the ZIP directly to temporary Google Cloud Storage."
             )
 
@@ -923,7 +923,7 @@ if st.session_state.active_tab == "Site Selection Map":
                 components.html(
                     f"""
                     <div style="font-family: sans-serif; border: 1px solid #ddd; border-radius: 6px; padding: 12px; max-width: 660px;">
-                      <label style="display:block; font-weight:600; margin-bottom:8px;">Choose zipped shapefile for direct GCS upload</label>
+                      <label style="display:block; font-weight:600; margin-bottom:8px;">Choose ZIP containing KML, GeoJSON, or shapefile components for direct GCS upload</label>
                       <input id="gcs-file" type="file" accept=".zip" />
                       <button id="gcs-upload" style="margin-left:8px; padding:4px 10px;">Upload to GCS</button>
                       <div id="gcs-status" style="margin-top:10px; color:#555;">Waiting for file...</div>
@@ -997,18 +997,19 @@ if st.session_state.active_tab == "Site Selection Map":
                     with zipfile.ZipFile(zip_path, "r") as zip_ref:
                         zip_ref.extractall(tmpdir)
 
-                    extracted_files = os.listdir(tmpdir)
-                    print("Extracted files:", extracted_files)
-
                     extracted_full_paths = [
-                        os.path.join(tmpdir, f) for f in extracted_files
+                        str(path) for path in Path(tmpdir).rglob("*") if path.is_file()
                     ]
 
+                    kml_target = next(
+                        (f for f in extracted_full_paths if f.lower().endswith(".kml")),
+                        None,
+                    )
                     geojson_target = next(
                         (
                             f
                             for f in extracted_full_paths
-                            if f.lower().endswith(".geojson")
+                            if f.lower().endswith((".geojson", ".json"))
                         ),
                         None,
                     )
@@ -1017,12 +1018,14 @@ if st.session_state.active_tab == "Site Selection Map":
                         None,
                     )
 
-                    if geojson_target:
+                    if kml_target:
+                        st.session_state.upload_file = [kml_target]
+                    elif geojson_target:
                         st.session_state.upload_file = [geojson_target]
                     elif shp_target:
                         st.session_state.upload_file = extracted_full_paths
                     else:
-                        st.error("No .shp or .geojson file found inside ZIP.")
+                        st.error("No .kml, .geojson, .json, or .shp file found inside ZIP.")
                 else:
                     st.write("Not a ZIP file or multiple files uploaded.")
                     st.session_state.upload_file = uploaded_files
@@ -1053,11 +1056,15 @@ if st.session_state.active_tab == "Site Selection Map":
                         str(path) for path in Path(tmpdir).rglob("*") if path.is_file()
                     ]
 
+                    kml_target = next(
+                        (f for f in extracted_full_paths if f.lower().endswith(".kml")),
+                        None,
+                    )
                     geojson_target = next(
                         (
                             f
                             for f in extracted_full_paths
-                            if f.lower().endswith(".geojson")
+                            if f.lower().endswith((".geojson", ".json"))
                         ),
                         None,
                     )
@@ -1066,7 +1073,18 @@ if st.session_state.active_tab == "Site Selection Map":
                         None,
                     )
 
-                    if geojson_target:
+                    if kml_target:
+                        st.session_state.upload_file = [kml_target]
+                        st.success("Large ZIP downloaded and prepared for map processing.")
+                        try:
+                            delete_gcs_object(gcs_uri)
+                            st.session_state.pop("large_upload_signed_url", None)
+                            st.session_state.pop("large_upload_gcs_uri", None)
+                        except Exception as cleanup_error:
+                            st.warning(
+                                f"Upload was processed, but temporary GCS cleanup failed: {cleanup_error}"
+                            )
+                    elif geojson_target:
                         st.session_state.upload_file = [geojson_target]
                         st.success("Large ZIP downloaded and prepared for map processing.")
                         try:
@@ -1089,7 +1107,7 @@ if st.session_state.active_tab == "Site Selection Map":
                                 f"Upload was processed, but temporary GCS cleanup failed: {cleanup_error}"
                             )
                     else:
-                        st.error("No .shp or .geojson file found inside uploaded ZIP.")
+                        st.error("No .kml, .geojson, .json, or .shp file found inside uploaded ZIP.")
                 except Exception as e:
                     st.error(f"Could not process large GCS upload: {e}")
 

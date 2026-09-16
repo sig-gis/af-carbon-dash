@@ -119,49 +119,67 @@ def load_geojson_fragment(simplified_geojson_path, shapefile_path, tolerance_deg
 @st.cache_data
 def load_geojson_or_shapefile(uploaded_files, tolerance_deg=0.001,
                               skip_keys={"Shape_Area", "Shape_Leng"}, max_tooltip_fields=3):
-    """Load either a GeoJSON, shapefile, or zipped folder containing either file type.
+    """Load KML, GeoJSON, shapefile components, or extracted files from a ZIP.
+
        Automatically checks CRS and reprojects to EPSG:4326 if needed.
     """
+
+    def _name_for(uploaded) -> str:
+        if isinstance(uploaded, str):
+            return uploaded
+        return getattr(uploaded, "name", "")
+
+    def _read_vector_file(path: str, label: str):
+        if path.lower().endswith(".kml"):
+            return gpd.read_file(path, engine="pyogrio"), "KML"
+        if path.lower().endswith((".geojson", ".json")):
+            return gpd.read_file(path), "GeoJSON"
+        return gpd.read_file(path), label
+
+    def _prepare_gdf(gdf, source_label: str):
+        if gdf.crs is None:
+            st.warning(f"{source_label} has no CRS defined. Assuming EPSG:4326.")
+            gdf = gdf.set_crs("EPSG:4326")
+        elif gdf.crs.to_string() == "EPSG:4326":
+            st.success(f"{source_label} CRS is already EPSG:4326.")
+        else:
+            st.info(f"Reprojecting {source_label} from {gdf.crs} to EPSG:4326...")
+            gdf = gdf.to_crs("EPSG:4326")
+            st.success(f"{source_label} successfully reprojected to EPSG:4326.")
+
+        gdf["geometry"] = gdf.geometry.simplify(tolerance_deg, preserve_topology=True)
+        keep = [c for c in ["FVSVariant", "FVSVarName", "FVSLocName"] if c in gdf.columns]
+        gdf = gdf[keep + ["geometry"]] if keep else gdf[["geometry"]]
+        return gdf
 
     # Normalize input: if single file, wrap in list
     if isinstance(uploaded_files, (str, bytes)):
         uploaded_files = [uploaded_files]
 
-    # Try to detect a GeoJSON file
-    geojson_file = next(
+    # Try to detect a directly readable vector file before shapefile components.
+    vector_file = next(
         (f for f in uploaded_files
-         if (hasattr(f, "name") and f.name.lower().endswith(".geojson"))
-         or (isinstance(f, str) and f.lower().endswith(".geojson"))),
+         if _name_for(f).lower().endswith((".kml", ".geojson", ".json"))),
         None
     )
 
-    #  GEOJSON
-    if geojson_file:
-        if isinstance(geojson_file, str):
-            with open(geojson_file, "r", encoding="utf-8") as f:
-                geojson_str = f.read()
+    # KML / GEOJSON / JSON
+    if vector_file:
+        if isinstance(vector_file, str):
+            vector_path = vector_file
         else:
-            geojson_str = geojson_file.getvalue().decode("utf-8")
+            suffix = Path(vector_file.name).suffix.lower()
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+            try:
+                tmp.write(vector_file.getbuffer())
+                vector_path = tmp.name
+            finally:
+                tmp.close()
 
-        gdf = gpd.read_file(io.StringIO(geojson_str))
-
-        # CRS handling
-        if gdf.crs is None:
-            st.warning("GeoJSON has no CRS defined. Assuming EPSG:4326.")
-            gdf = gdf.set_crs("EPSG:4326")
-
-        else:
-            if gdf.crs.to_string() == "EPSG:4326":
-                st.success("GeoJSON CRS is already EPSG:4326.")
-            else:
-                st.info(f"Reprojecting GeoJSON from {gdf.crs} to EPSG:4326...")
-                gdf = gdf.to_crs("EPSG:4326")
-                st.success("GeoJSON successfully reprojected to EPSG:4326.")
-
-        gdf["geometry"] = gdf.geometry.simplify(tolerance_deg, preserve_topology=True)
+        gdf, source_label = _read_vector_file(vector_path, "Vector file")
+        gdf = _prepare_gdf(gdf, source_label)
         geojson_str = gdf.to_json(na="drop")
-
-        st.success("GeoJSON file loaded successfully!")
+        st.success(f"{source_label} file loaded successfully!")
 
     # SHAPEFILE
     else:
@@ -175,36 +193,20 @@ def load_geojson_or_shapefile(uploaded_files, tolerance_deg=0.001,
                     with open(os.path.join(tmpdir, f.name), "wb") as out:
                         out.write(f.getbuffer())
 
-            shp_files = [os.path.join(tmpdir, f) for f in os.listdir(tmpdir) if f.lower().endswith(".shp")]
+            shp_files = [
+                str(path)
+                for path in Path(tmpdir).rglob("*")
+                if path.is_file() and path.name.lower().endswith(".shp")
+            ]
             if not shp_files:
-                st.error("No .shp file found among uploaded files.")
+                st.error("No .kml, .geojson, .json, or .shp file found among uploaded files.")
                 return None, None
 
             shp_path = shp_files[0]
-            gdf = gpd.read_file(shp_path)
-
-            # CRS handling
-            if gdf.crs is None:
-                st.warning("Shapefile has no CRS defined. Assuming EPSG:4326.")
-                gdf = gdf.set_crs("EPSG:4326")
-
-            else:
-                if gdf.crs.to_string() == "EPSG:4326":
-                    st.success("Shapefile CRS is already EPSG:4326.")
-                else:
-                    st.info(f"Reprojecting shapefile from {gdf.crs} to EPSG:4326...")
-                    gdf = gdf.to_crs("EPSG:4326")
-                    st.success("Shapefile successfully reprojected to EPSG:4326.")
-
-            gdf["geometry"] = gdf.geometry.simplify(tolerance_deg, preserve_topology=True)
-
-            # Keep selected fields
-            keep = [c for c in ["FVSVariant", "FVSVarName", "FVSLocName"] if c in gdf.columns]
-            gdf = gdf[keep + ["geometry"]] if keep else gdf[["geometry"]]
-
+            gdf, source_label = _read_vector_file(shp_path, "Shapefile")
+            gdf = _prepare_gdf(gdf, source_label)
             geojson_str = gdf.to_json(na="drop")
-
-            st.success("Shapefile loaded successfully!")
+            st.success(f"{source_label} loaded successfully!")
 
     # Extract tooltip fields
     try:
