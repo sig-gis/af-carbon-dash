@@ -179,9 +179,9 @@
       "help": "Upfront cost of purchasing seedlings used for planting."
     },
     "toggle.inputs.acres": {
-      "streamlit_function": "toggle",
-      "component": "Toggle for either calculating per project or per acre.",
-      "help": "On: Per Project (Default), Off: Per Acre"
+      "streamlit_function": "radio",
+      "component": "Radio selector for displaying total project or per-acre values.",
+      "help": "Choose Total Project to scale values by project acreage, or Per Acre to show per-acre values."
     },
     "number.inputs.acres": {
       "streamlit_function": "number_input",

@@ -1097,9 +1097,16 @@ def carbon_chart():
 
     available = {col: METRIC_DEFS[col] for col in METRIC_DEFS if col in df.columns}
 
-    toggle_oc = st.toggle(
-        "Show Total Project Acreage", True, "toggle_oc", H("toggle.inputs.acres")
+    acreage_mode_oc = st.radio(
+        "Acreage Display",
+        ["Total Project", "Per Acre"],
+        index=0,
+        horizontal=True,
+        key="acreage_mode_oc",
+        help=H("toggle.inputs.acres"),
     )
+    toggle_oc = acreage_mode_oc == "Total Project"
+    st.session_state["toggle_oc"] = toggle_oc
     net_acres = st.session_state["net_acres"]
 
     plot_df = df.copy()
@@ -1899,9 +1906,16 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
 
     plot_df = df_chart.copy()
 
-    toggle_nr = st.toggle(
-        "Show Total Project Acreage", True, "toggle_nr", H("toggle.inputs.acres")
+    acreage_mode_nr = st.radio(
+        "Acreage Display",
+        ["Total Project", "Per Acre"],
+        index=0,
+        horizontal=True,
+        key="acreage_mode_nr",
+        help=H("toggle.inputs.acres"),
     )
+    toggle_nr = acreage_mode_nr == "Total Project"
+    st.session_state["toggle_nr"] = toggle_nr
 
     if toggle_nr:
         plot_df["Net_Revenue"] = plot_df["Net_Revenue"].round(-1)
@@ -2336,12 +2350,16 @@ def run_chart():
             st.error("No carbon data found. Adjust sliders above first.")
             st.stop()
 
-        toggle_ce = st.toggle(
-            "Show Total Project Acreage",
-            True,
-            "toggle_ce",
-            H("toggle.inputs.acres"),
+        acreage_mode_ce = st.radio(
+            "Acreage Display",
+            ["Total Project", "Per Acre"],
+            index=0,
+            horizontal=True,
+            key="acreage_mode_ce",
+            help=H("toggle.inputs.acres"),
         )
+        toggle_ce = acreage_mode_ce == "Total Project"
+        st.session_state["toggle_ce"] = toggle_ce
 
         show_total_project_acreage = toggle_ce
         net_acres = st.session_state.get("net_acres", 1)
