@@ -930,9 +930,16 @@ def planting_sliders():
     st.markdown(
         "Species Mix (TPA)",
         unsafe_allow_html=False,
-        help=H("planting.species_mix_header"),
+        # help=H("planting.species_mix_header"),
         width="stretch",
     )
+
+    st.markdown(
+            "Set trees per acre (TPA) for each species.",
+            unsafe_allow_html=False,
+            width="stretch",
+        )
+
     tpa_cap = preset.get("_tpa_cap", 435)
     for i, spk in enumerate(sp_keys):
         st.slider(_species_label(variant, i), 0, tpa_cap, key=spk)
