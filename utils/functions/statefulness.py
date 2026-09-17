@@ -14,10 +14,10 @@ def _species_codes(variant: str) -> list[str]:
     return vs.get(variant, [])
 
 
-def _max_species() -> int:
-    """Return the configured maximum number of species slots."""
-    vs = load_variant_species()
-    return vs.get("_max_species", 4)
+# def _max_species() -> int:
+#     """Return the configured maximum number of species slots."""
+#     vs = load_variant_species()
+#     return vs.get("_max_species", 4)
 
 
 def _species_keys(variant: str) -> list[str]:

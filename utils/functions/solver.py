@@ -26,7 +26,12 @@ import streamlit as st
 from model_service.main import _load_proforma_defaults, load_variant_presets
 from utils.config import get_api_base_url, normalize_params
 from utils.functions.helper import H
-from utils.functions.plant_design import PROTOCOL_ORDER, _resolve_sub_variants
+from utils.functions.plant_design import (
+    PROTOCOL_ORDER,
+    _format_nearest_hundred,
+    _round_to_nearest_hundred,
+    _resolve_sub_variants,
+)
 from utils.functions.slider_bounds import clamp, slider_bounds
 from utils.functions.statefulness import (
     _backup_keys,
@@ -582,12 +587,12 @@ def _render_headline(inputs: dict):
         return
 
     m1, m2, m3 = st.columns(3)
-    m1.metric("Breakeven Net Acres", f"{acres:,.0f}")
-    m2.metric(f"NPV @ yr {inputs['npv_year']}", f"$ {summary.get('npv_yr', 0):,.0f}")
-    m3.metric("Total Net Revenue", f"$ {summary.get('total_net', 0):,.0f}")
+    m1.metric("Breakeven Net Acres", _format_nearest_hundred(acres))
+    m2.metric(f"NPV @ yr {inputs['npv_year']}", _format_nearest_hundred(summary.get('npv_yr', 0), prefix="$ "))
+    m3.metric("Total Net Revenue", _format_nearest_hundred(summary.get('total_net', 0), prefix="$ "))
     st.caption(
         f"Acreage at which {inputs['protocol']} NPV reaches "
-        f"$ {inputs['target_npv']:,.0f} at the {inputs['npv_year']}-year horizon."
+        f"{_format_nearest_hundred(inputs['target_npv'], prefix='$ ')} at the {inputs['npv_year']}-year horizon."
     )
     _apply_button(
         "solver_apply_acres",
@@ -654,6 +659,8 @@ def _render_grid(inputs: dict):
         row["Breakeven Acres"] = _breakeven_acres(result)
         rows.append(row)
     df = pd.DataFrame(rows)
+    if "Breakeven Acres" in df.columns:
+        df["Breakeven Acres Rounded"] = df["Breakeven Acres"].apply(_round_to_nearest_hundred)
 
     if errors:
         st.caption(
@@ -677,11 +684,12 @@ def _render_grid(inputs: dict):
             )
         )
         text = heat.mark_text(baseline="middle").encode(
-            text=alt.Text("Breakeven Acres:Q", format=",.0f"),
+            text=alt.Text("Breakeven Acres Rounded:Q", format=",.0f"),
         )
         st.altair_chart(heat + text, use_container_width=True, key="solver_acreage_heatmap")
+    display_df = df.drop(columns=["Breakeven Acres Rounded"], errors="ignore")
     st.dataframe(
-        df.style.format({"Breakeven Acres": "{:,.0f}"}, na_rep="-"),
+        display_df.style.format({"Breakeven Acres": lambda x: _format_nearest_hundred(x)}, na_rep="-"),
         use_container_width=True,
         hide_index=True,
     )
@@ -712,6 +720,8 @@ def _tpa_breakeven_curve_chart(res: dict, inputs: dict, x_label: str):
     if not curve:
         return None
     df = pd.DataFrame([{"x": p["x"], "npv": p["npv"]} for p in curve])
+    df["x Rounded"] = df["x"].apply(_round_to_nearest_hundred)
+    df["npv Rounded"] = df["npv"].apply(_round_to_nearest_hundred)
     line = (
         alt.Chart(df)
         .mark_line(point=True)
@@ -719,8 +729,8 @@ def _tpa_breakeven_curve_chart(res: dict, inputs: dict, x_label: str):
             x=alt.X("x:Q", title=x_label),
             y=alt.Y("npv:Q", title=f"Total NPV @ yr {inputs['npv_year']} ($)"),
             tooltip=[
-                alt.Tooltip("x:Q", title=x_label, format=",.2f"),
-                alt.Tooltip("npv:Q", title="NPV", format="$,.0f"),
+                alt.Tooltip("x Rounded:Q", title=x_label, format=",.0f"),
+                alt.Tooltip("npv Rounded:Q", title="NPV", format="$,.0f"),
             ],
         )
     )
@@ -759,7 +769,7 @@ def _render_tpa_per_species(resp: dict):
         rows.append({"Species": code, "Breakeven (TPA)": breakeven, "Note": note})
     df = pd.DataFrame(rows)
     st.dataframe(
-        df.style.format({"Breakeven (TPA)": "{:,.0f}"}, na_rep="-"),
+        df.style.format({"Breakeven (TPA)": lambda x: _format_nearest_hundred(x)}, na_rep="-"),
         use_container_width=True,
         hide_index=True,
     )
@@ -829,7 +839,7 @@ def _render_tpa_breakeven(inputs: dict):
 
     st.caption(
         f"Breakeven density: where {inputs['protocol']} NPV reaches "
-        f"$ {inputs['target_npv']:,.0f} at year {inputs['npv_year']}, "
+        f"{_format_nearest_hundred(inputs['target_npv'], prefix='$ ')} at year {inputs['npv_year']}, "
         f"swept up to the {int(cap)} TPA cap. NPV rises with density, so this is "
         "the minimum to break even."
     )
@@ -856,11 +866,11 @@ def _render_tpa_breakeven(inputs: dict):
         )
     elif is_scalar:
         total_base = sum(inputs["species_tpa"])
-        st.metric("Breakeven density", f"{rng['lo'] * total_base:,.0f} total TPA")
+        st.metric("Breakeven density", _format_nearest_hundred(rng['lo'] * total_base, suffix=" total TPA"))
         st.caption(f"= {rng['lo']:.2f}× your current mix.")
         breakdown = _scalar_breakdown_df(inputs["variant"], inputs["species_tpa"], rng["lo"])
         st.dataframe(
-            breakdown.style.format({"Breakeven (TPA)": "{:,.0f}"}),
+            breakdown.style.format({"Breakeven (TPA)": lambda x: _format_nearest_hundred(x)}),
             use_container_width=True,
             hide_index=True,
         )
@@ -874,7 +884,7 @@ def _render_tpa_breakeven(inputs: dict):
     elif rng.get("lo_clipped"):
         st.success(f"{code} is non-binding; profitable across its full range up to the cap.")
     else:
-        st.metric(f"{code} breakeven", f"{rng['lo']:,.0f} TPA")
+        st.metric(f"{code} breakeven", _format_nearest_hundred(rng['lo'], suffix=" TPA"))
         solved_mix = list(inputs["species_tpa"])
         solved_mix[species_sel] = round(rng["lo"])
         _apply_button(

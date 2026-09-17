@@ -1,4 +1,4 @@
-﻿import json
+import json
 import hashlib
 import os
 from pathlib import Path
@@ -101,6 +101,21 @@ PROTOCOL_COLOR_MAP = {
 }
 
 
+def _round_to_nearest_hundred(value):
+    """Round numeric display values to the nearest hundreds place."""
+    if value is None or pd.isna(value):
+        return value
+    return round(float(value), -2)
+
+
+def _format_nearest_hundred(value, prefix: str = "", suffix: str = "") -> str:
+    """Format numeric display values rounded to the nearest hundreds place."""
+    rounded = _round_to_nearest_hundred(value)
+    if rounded is None or pd.isna(rounded):
+        return "-"
+    return f"{prefix}{rounded:,.0f}{suffix}"
+
+
 def _rgba_with_alpha(color: str, alpha: float) -> str:
     """Convert a matplotlib/hex color into an rgba(...) string with custom alpha."""
     r, g, b, _ = mcolors.to_rgba(color)
@@ -123,6 +138,7 @@ def _add_fading_line_series(
 
     x = series_df[x_col].astype(float).to_numpy()
     y = series_df[y_col].astype(float).to_numpy()
+    rounded_y = np.array([_round_to_nearest_hundred(v) for v in y], dtype=float)
 
     if len(x) == 1:
         marker_color = _rgba_with_alpha(color, 1.0)
@@ -132,10 +148,11 @@ def _add_fading_line_series(
                 y=y,
                 mode="markers",
                 marker=dict(color=[marker_color], size=7),
+                customdata=rounded_y,
                 name=label,
                 legendgroup=label,
                 showlegend=showlegend,
-                hovertemplate=f"Year: %{{x:.0f}}<br>{y_col}: %{{y:,.2f}}"
+                hovertemplate=f"Year: %{{x:.0f}}<br>{y_col}: %{{customdata:,.0f}}"
                 + (f"<br>Series: {label}" if label else "")
                 + "<extra></extra>",
             )
@@ -169,10 +186,11 @@ def _add_fading_line_series(
             y=y,
             mode="markers",
             marker=dict(color=marker_colors, size=7),
+            customdata=rounded_y,
             name=label,
             legendgroup=label,
             showlegend=False,
-            hovertemplate=f"Year: %{{x:.0f}}<br>{y_col}: %{{y:,.2f}}"
+            hovertemplate=f"Year: %{{x:.0f}}<br>{y_col}: %{{customdata:,.0f}}"
             + (f"<br>Series: {label}" if label else "")
             + "<extra></extra>",
         )
@@ -462,7 +480,7 @@ def _co2e_accumulation_summary(
 
     return pd.DataFrame(
         [
-            {f"Year {horizon}": f"{value:,.2f}" for horizon, value in zip(horizons, values)}
+            {f"Year {horizon}": _format_nearest_hundred(value) for horizon, value in zip(horizons, values)}
         ]
     )
 
@@ -612,84 +630,84 @@ def _protocol_adjusted_average_from_carbon_curve(
     final_year, final_value = horizon_result
     return final_year, final_value, protocol_average_df, carbon_baseline_year
 
-def _protocol_color_scale(protocols: list[str]) -> alt.Scale:
-    """Build a deterministic Altair color scale for selected protocols."""
-    domain = [p for p in protocols if p in PROTOCOL_COLOR_MAP]
-    # Fallback color for any unknown protocol names
-    unknown = [p for p in protocols if p not in PROTOCOL_COLOR_MAP]
-    domain.extend(unknown)
+# def _protocol_color_scale(protocols: list[str]) -> alt.Scale:
+#     """Build a deterministic Altair color scale for selected protocols."""
+#     domain = [p for p in protocols if p in PROTOCOL_COLOR_MAP]
+#     # Fallback color for any unknown protocol names
+#     unknown = [p for p in protocols if p not in PROTOCOL_COLOR_MAP]
+#     domain.extend(unknown)
 
-    color_range = [PROTOCOL_COLOR_MAP[p] for p in domain if p in PROTOCOL_COLOR_MAP]
-    color_range.extend(["#7f7f7f"] * len(unknown))
+#     color_range = [PROTOCOL_COLOR_MAP[p] for p in domain if p in PROTOCOL_COLOR_MAP]
+#     color_range.extend(["#7f7f7f"] * len(unknown))
 
-    return alt.Scale(domain=domain, range=color_range)
-
-
-def _protocol_dash_scale(protocols: list[str]) -> alt.Scale:
-    """Stable protocol dash mapping while preserving existing colors."""
-    domain = [p for p in protocols if p in PROTOCOL_COLOR_MAP]
-    unknown = [p for p in protocols if p not in PROTOCOL_COLOR_MAP]
-    domain.extend(unknown)
-
-    # ACR/CAR/VERRA get dashed styles; others remain solid.
-    dash_map = {
-        "ACR": [6, 4],
-        "CAR": [10, 4],
-        "VERRA": [2, 3],
-    }
-    dash_range = [dash_map.get(p, [1, 0]) for p in domain]
-    return alt.Scale(domain=domain, range=dash_range)
+#     return alt.Scale(domain=domain, range=color_range)
 
 
-def _build_future_hatch_layers(
-    df: pd.DataFrame,
-    y_col: str,
-    include_years: list[int],
-) -> alt.LayerChart | None:
-    """Create subtle future-period hatch-like background (year 40 onward)."""
-    if df.empty or y_col not in df.columns or not include_years:
-        return None
+# def _protocol_dash_scale(protocols: list[str]) -> alt.Scale:
+#     """Stable protocol dash mapping while preserving existing colors."""
+#     domain = [p for p in protocols if p in PROTOCOL_COLOR_MAP]
+#     unknown = [p for p in protocols if p not in PROTOCOL_COLOR_MAP]
+#     domain.extend(unknown)
 
-    hatch_start = CHART_BASE_YEAR + HATCH_START_AGE
-    x_end = max(include_years)
-    if x_end <= hatch_start:
-        return None
+#     # ACR/CAR/VERRA get dashed styles; others remain solid.
+#     dash_map = {
+#         "ACR": [6, 4],
+#         "CAR": [10, 4],
+#         "VERRA": [2, 3],
+#     }
+#     dash_range = [dash_map.get(p, [1, 0]) for p in domain]
+#     return alt.Scale(domain=domain, range=dash_range)
 
-    y_series = pd.to_numeric(df[y_col], errors="coerce").dropna()
-    if y_series.empty:
-        return None
-    y_min = float(y_series.min())
-    y_max = float(y_series.max())
-    if y_min == y_max:
-        pad = max(abs(y_min) * 0.05, 1.0)
-        y_min -= pad
-        y_max += pad
 
-    rect_df = pd.DataFrame([{"x0": hatch_start, "x1": x_end, "y0": y_min, "y1": y_max}])
-    rect = (
-        alt.Chart(rect_df)
-        .mark_rect(color="#777777", opacity=0.08)
-        .encode(
-            x="x0:Q",
-            x2="x1:Q",
-            y="y0:Q",
-            y2="y1:Q",
-        )
-    )
+# def _build_future_hatch_layers(
+#     df: pd.DataFrame,
+#     y_col: str,
+#     include_years: list[int],
+# ) -> alt.LayerChart | None:
+#     """Create subtle future-period hatch-like background (year 40 onward)."""
+#     if df.empty or y_col not in df.columns or not include_years:
+#         return None
 
-    stripe_years = np.arange(hatch_start, x_end + 0.1, 2.0)
-    stripe_df = pd.DataFrame({"x": stripe_years, "y0": y_min, "y1": y_max})
-    stripes = (
-        alt.Chart(stripe_df)
-        .mark_rule(color="#666666", opacity=0.18, strokeDash=[2, 3])
-        .encode(
-            x="x:Q",
-            y="y0:Q",
-            y2="y1:Q",
-        )
-    )
+#     hatch_start = CHART_BASE_YEAR + HATCH_START_AGE
+#     x_end = max(include_years)
+#     if x_end <= hatch_start:
+#         return None
 
-    return rect + stripes
+#     y_series = pd.to_numeric(df[y_col], errors="coerce").dropna()
+#     if y_series.empty:
+#         return None
+#     y_min = float(y_series.min())
+#     y_max = float(y_series.max())
+#     if y_min == y_max:
+#         pad = max(abs(y_min) * 0.05, 1.0)
+#         y_min -= pad
+#         y_max += pad
+
+#     rect_df = pd.DataFrame([{"x0": hatch_start, "x1": x_end, "y0": y_min, "y1": y_max}])
+#     rect = (
+#         alt.Chart(rect_df)
+#         .mark_rect(color="#777777", opacity=0.08)
+#         .encode(
+#             x="x0:Q",
+#             x2="x1:Q",
+#             y="y0:Q",
+#             y2="y1:Q",
+#         )
+#     )
+
+#     stripe_years = np.arange(hatch_start, x_end + 0.1, 2.0)
+#     stripe_df = pd.DataFrame({"x": stripe_years, "y0": y_min, "y1": y_max})
+#     stripes = (
+#         alt.Chart(stripe_df)
+#         .mark_rule(color="#666666", opacity=0.18, strokeDash=[2, 3])
+#         .encode(
+#             x="x:Q",
+#             y="y0:Q",
+#             y2="y1:Q",
+#         )
+#     )
+
+#     return rect + stripes
 
 # def _prepend_zero_year_row(
 #     df: pd.DataFrame,
@@ -729,23 +747,23 @@ def _build_future_hatch_layers(
 #     return out.sort_values([group_col, year_col]).reset_index(drop=True)
 
 
-def _credits_keys(prefix: str = "credits_") -> list[str]:
-    """
-    Return all proforma input keys (prefixed) that should persist for the Credits section.
-    Uses the JSON defaults as the source for which keys exist.
-    """
-    defaults = _proforma_base_defaults()
-    return [prefix + k for k in defaults.keys()]
+# def _credits_keys(prefix: str = "credits_") -> list[str]:
+#     """
+#     Return all proforma input keys (prefixed) that should persist for the Credits section.
+#     Uses the JSON defaults as the source for which keys exist.
+#     """
+#     defaults = _proforma_base_defaults()
+#     return [prefix + k for k in defaults.keys()]
 
 
-def _seed_defaults(prefix: str = "credits_"):
-    """
-    Seed Streamlit session state with default financial and credit parameters
-    based on proforma defaults. Only sets missing keys.
-    """
-    defaults = _proforma_base_defaults()
-    for k, v in defaults.items():
-        st.session_state.setdefault(prefix + k, v)
+# def _seed_defaults(prefix: str = "credits_"):
+#     """
+#     Seed Streamlit session state with default financial and credit parameters
+#     based on proforma defaults. Only sets missing keys.
+#     """
+#     defaults = _proforma_base_defaults()
+#     for k, v in defaults.items():
+#         st.session_state.setdefault(prefix + k, v)
 
 
 def _proforma_base_defaults() -> dict:
@@ -1397,7 +1415,7 @@ def carbon_units():
         st.success(
             "Final CO2e Output - Average of Selected Protocols "
             f"(year {final_year}): "
-            f"{final_value:,.2f} {co2e_unit_label}"
+            + _format_nearest_hundred(final_value, suffix=f" {co2e_unit_label}")
         )
 
     if not summary_df.empty:
@@ -1454,7 +1472,7 @@ def carbon_units():
         st.markdown(f"**Annual CO2e Estimates - {chart_title}**")
         st.dataframe(
             annual_table_df.style.format(
-                {col: "{:,.2f}" for col in annual_table_df.columns if col != "Year"}
+                {col: lambda x: _format_nearest_hundred(x) for col in annual_table_df.columns if col != "Year"}
             ),
             use_container_width=True,
             hide_index=True,
@@ -1494,7 +1512,7 @@ def carbon_units():
         st.markdown(f"**Cumulative CO2e Estimates - {chart_title}**")
         st.dataframe(
             cumulative_table_df.style.format(
-                {col: "{:,.2f}" for col in cumulative_table_df.columns if col != "Year"}
+                {col: lambda x: _format_nearest_hundred(x) for col in cumulative_table_df.columns if col != "Year"}
             ),
             use_container_width=True,
             hide_index=True,
@@ -1952,12 +1970,12 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
 
     summaries_df_display["Total Net Revenue, $"] = summaries_df_display[
         "total_net"
-    ].map(lambda x: "${:,.0f}".format(round(x, -1)))
+    ].map(lambda x: _format_nearest_hundred(x, prefix="$"))
     summaries_df_display[npv_col] = summaries_df_display["npv_yr"].map(
-        lambda x: "${:,.0f}".format(round(x, -1))
+        lambda x: _format_nearest_hundred(x, prefix="$")
     )
     summaries_df_display[npv_per_acre_col] = summaries_df_display["npv_per_acre"].map(
-        lambda x: "${:,.0f}".format(round(x, -1))
+        lambda x: _format_nearest_hundred(x, prefix="$")
     )
 
     # Keep only the columns to show

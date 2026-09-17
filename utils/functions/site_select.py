@@ -385,19 +385,19 @@ def build_map(geojson_str, points=None, upload=None, center=(37.8, -96.9), zoom=
     folium.LayerControl(collapsed=True).add_to(m)
     return m
 
-@st.fragment
-def get_tooltip_fields(geojson_str, skip_keys={"Shape_Area", "Shape_Leng"}, max_fields=4):
-    """
-    Extract tooltip fields from a GeoJSON string, filtering out unwanted keys
-    and limiting the number of fields displayed.
-    """
-    try:
-        feat0_props = json.loads(geojson_str)["features"][0]["properties"]
-        # Filter out unwanted keys
-        tooltip_fields = [k for k in feat0_props.keys() if k not in skip_keys][:max_fields]
-    except Exception:
-        tooltip_fields = None
-    return tooltip_fields
+# @st.fragment
+# def get_tooltip_fields(geojson_str, skip_keys={"Shape_Area", "Shape_Leng"}, max_fields=4):
+#     """
+#     Extract tooltip fields from a GeoJSON string, filtering out unwanted keys
+#     and limiting the number of fields displayed.
+#     """
+#     try:
+#         feat0_props = json.loads(geojson_str)["features"][0]["properties"]
+#         # Filter out unwanted keys
+#         tooltip_fields = [k for k in feat0_props.keys() if k not in skip_keys][:max_fields]
+#     except Exception:
+#         tooltip_fields = None
+#     return tooltip_fields
 
 def _loccode_str(v):
     try:
@@ -575,33 +575,33 @@ def auto_select_variant_from_point(point, geojson_str):
     return st.session_state["clicked_props"]
 
 
-def auto_select_variant_from_latlon(lat, lon, geojson_str):
-    """
-    Resolve and set the selected variant/session state from user-entered
-    latitude/longitude values.
+# def auto_select_variant_from_latlon(lat, lon, geojson_str):
+#     """
+#     Resolve and set the selected variant/session state from user-entered
+#     latitude/longitude values.
 
-    Shapely Point expects x/y order, so this creates Point(lon, lat).
-    Returns the selected feature's properties if found, else None.
-    """
-    if lat is None or lon is None or not geojson_str:
-        return None
+#     Shapely Point expects x/y order, so this creates Point(lon, lat).
+#     Returns the selected feature's properties if found, else None.
+#     """
+#     if lat is None or lon is None or not geojson_str:
+#         return None
 
-    try:
-        lat = float(lat)
-        lon = float(lon)
-    except (TypeError, ValueError):
-        st.warning("Latitude and longitude must be valid numbers.")
-        return None
+#     try:
+#         lat = float(lat)
+#         lon = float(lon)
+#     except (TypeError, ValueError):
+#         st.warning("Latitude and longitude must be valid numbers.")
+#         return None
 
-    point = Point(lon, lat)
-    selected_props = auto_select_variant_from_point(point, geojson_str)
+#     point = Point(lon, lat)
+#     selected_props = auto_select_variant_from_point(point, geojson_str)
 
-    if selected_props:
-        st.session_state["points"] = [point]
-        st.session_state["last_added_type"] = "point"
-        return selected_props
+#     if selected_props:
+#         st.session_state["points"] = [point]
+#         st.session_state["last_added_type"] = "point"
+#         return selected_props
 
-    return None
+#     return None
 
 
 def auto_select_variant_from_upload(upload_geojson, geojson_str):
@@ -844,15 +844,15 @@ def variant_chooser():
         st.rerun()
 
 
-@st.fragment
-def submit_map(map_data):
-    """
-    Update session state with the variant selected from the map and store its
-    FVS variant code.
-    """
-    if map_data and map_data.get("last_active_drawing"):
-        clicked = map_data["last_active_drawing"].get("properties", {})
-        if clicked:
-            st.session_state["selected_variant"] = clicked.get("FVSVariant", "PN")
-            st.session_state["selected_varloc_name"] = clicked.get("FVSLocName", "Olympic National Forest")
-            st.session_state["selected_varloc_code"] = _loccode_str(clicked.get("FVSLocCode")) or "609"
+# @st.fragment
+# def submit_map(map_data):
+#     """
+#     Update session state with the variant selected from the map and store its
+#     FVS variant code.
+#     """
+#     if map_data and map_data.get("last_active_drawing"):
+#         clicked = map_data["last_active_drawing"].get("properties", {})
+#         if clicked:
+#             st.session_state["selected_variant"] = clicked.get("FVSVariant", "PN")
+#             st.session_state["selected_varloc_name"] = clicked.get("FVSLocName", "Olympic National Forest")
+#             st.session_state["selected_varloc_code"] = _loccode_str(clicked.get("FVSLocCode")) or "609"
