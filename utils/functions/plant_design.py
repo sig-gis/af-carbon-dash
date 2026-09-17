@@ -832,7 +832,7 @@ def _sync_active_variant():
 
 def planting_sliders():
     """
-    Render all planting-related Streamlit sliders. Restores saved state, renders species sliders, computes species mix values, and stores
+    Render all planting-related Streamlit inputs. Restores saved state, renders species inputs, computes species mix values, and stores
     all planting parameters in session state.
     """
     presets = load_variant_presets()
@@ -907,7 +907,7 @@ def planting_sliders():
     _init_planting_state(variant, preset)
     _apply_planting_prefill(variant, sp_keys)
 
-    # Per-variant slider bounds. Clamp before rendering to avoid StreamlitValueBelowMinError.
+    # Per-variant input bounds. Clamp before rendering to avoid Streamlit value errors.
     bounds = slider_bounds(preset)
     st.session_state["si"] = clamp(
         int(st.session_state.get("si", bounds["si_min"])),
@@ -928,18 +928,20 @@ def planting_sliders():
         help=H("number.inputs.acres"),
     )
     st.caption(f"{int(st.session_state.get('net_acres', 0)):,} acres")
-    st.slider(
+    st.number_input(
         "Survival Percentage",
-        bounds["survival_min"],
-        bounds["survival_max"],
+        min_value=bounds["survival_min"],
+        max_value=bounds["survival_max"],
+        step=1,
         key="survival",
         help=H("planting.slider_survival"),
     )
     si_locked = variant.split("_")[0] in SI_INSENSITIVE_VARIANTS
-    st.slider(
+    st.number_input(
         "Site Index",
-        bounds["si_min"],
-        bounds["si_max"],
+        min_value=bounds["si_min"],
+        max_value=bounds["si_max"],
+        step=1,
         key="si",
         disabled=si_locked,
         help=H("planting.slider_si_disabled") if si_locked else H("planting.slider_si"),
@@ -958,9 +960,15 @@ def planting_sliders():
             width="stretch",
         )
 
-    tpa_cap = preset.get("_tpa_cap", 435)
+    tpa_cap = int(preset.get("_tpa_cap", 435))
     for i, spk in enumerate(sp_keys):
-        st.slider(_species_label(variant, i), 0, tpa_cap, key=spk)
+        st.number_input(
+            _species_label(variant, i),
+            min_value=0,
+            max_value=tpa_cap,
+            step=1,
+            key=spk,
+        )
 
     # Summary
     total_tpa = sum(int(st.session_state.get(k, 0)) for k in sp_keys)
@@ -972,7 +980,7 @@ def planting_sliders():
     )
     if total_tpa > tpa_cap:
         st.warning(
-            f"Total initial TPA exceeds {tpa_cap} and may present an unrealistic scenario. Consider adjusting sliders."
+            f"Total initial TPA exceeds {tpa_cap} and may present an unrealistic scenario. Consider adjusting species TPA values."
         )
     elif total_tpa == 0:
         st.error(
