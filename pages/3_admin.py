@@ -24,6 +24,7 @@ from model_service.model import (
 from model_service.store import get_store
 from utils.config import get_api_base_url
 from utils.functions.slider_bounds import slider_bounds
+from utils.functions.variant_labels import format_variant_label
 
 logger = logging.getLogger(__name__)
 
@@ -214,9 +215,12 @@ def _render_upload_tab(
                     else 0
                 )
                 variant = st.selectbox(
-                    "Variant", options=options,
-                    index=default_var_idx, key=f"var_{idx}",
+                    "Variant",
+                    options=options,
+                    index=default_var_idx,
+                    key=f"var_{idx}",
                     accept_new_options=True,
+                    format_func=lambda v: format_variant_label(v, include_code=True),
                 )
                 variant = variant.strip().upper() if variant else variant
 
@@ -296,7 +300,11 @@ def _render_upload_tab(
 
     variant_settings: dict[str, dict] = {}
     for v_idx, (v, _fcs) in enumerate(sorted(variants_in_batch.items())):
-        label = f"Species & Defaults — {v}" if len(variants_in_batch) > 1 else "Species & Defaults"
+        label = (
+            f"Species & Defaults — {format_variant_label(v, include_code=True)}"
+            if len(variants_in_batch) > 1
+            else "Species & Defaults"
+        )
         st.subheader(label)
 
         all_species_codes = sorted(species_labels.keys())
@@ -433,7 +441,8 @@ def _render_upload_tab(
         if existing:
             st.caption(
                 f"**{fc['filename']}**: replaces existing "
-                f"{fc['variant']}/{fc['loccode']}/{fc['pct_level']}"
+                f"{format_variant_label(fc['variant'], include_code=True)}/"
+                f"{fc['loccode']}/{fc['pct_level']}"
             )
 
     missing = [fc for fc in file_configs if not fc["variant"] or not fc["loccode"]]
@@ -562,7 +571,7 @@ def main() -> None:
                 ret = m.get("pct_retention")
                 ret_str = f" ({ret}%)" if ret is not None else ""
                 return (
-                    f"{m['variant']} / {m['loccode']} / "
+                    f"{format_variant_label(m['variant'], include_code=True)} / {m['loccode']} / "
                     f"{pct}{ret_str} / v{m.get('version', '?')}"
                 )
 
@@ -596,9 +605,12 @@ def main() -> None:
                 )
                 edit_var_idx = options.index(cur_var) if cur_var in options else 0
                 edit_variant = st.selectbox(
-                    "Variant", options=options,
-                    index=edit_var_idx, key="edit_variant",
+                    "Variant",
+                    options=options,
+                    index=edit_var_idx,
+                    key="edit_variant",
                     accept_new_options=True,
+                    format_func=lambda v: format_variant_label(v, include_code=True),
                 )
                 edit_variant = edit_variant.strip().upper() if edit_variant else edit_variant
 
@@ -821,7 +833,7 @@ def main() -> None:
                     )
 
                     st.success(
-                        f"Updated **{edit_variant}/{edit_loccode}/{edit_pct}**"
+                        f"Updated **{format_variant_label(edit_variant, include_code=True)}/{edit_loccode}/{edit_pct}**"
                     )
 
                     # Refresh GeoJSON + caches
@@ -849,7 +861,7 @@ def main() -> None:
                 store.put_json(registry, "registry.json")
 
                 label = (
-                    f"{old['variant']}/{old['loccode']}/"
+                    f"{format_variant_label(old['variant'], include_code=True)}/{old['loccode']}/"
                     f"{old.get('pct_level', 'PCT0')}"
                 )
                 st.success(f"Deleted **{label}** from registry.")
@@ -891,7 +903,10 @@ def main() -> None:
                     if sp_codes
                     else ""
                 )
-                with st.expander(f"**{v}** — {len(variants[v])} models{sp_str}"):
+                with st.expander(
+                    f"**{format_variant_label(v, include_code=True)}** — "
+                    f"{len(variants[v])} models{sp_str}"
+                ):
                     for m in sorted(
                         variants[v],
                         key=lambda x: (x["loccode"], x.get("pct_level", "")),

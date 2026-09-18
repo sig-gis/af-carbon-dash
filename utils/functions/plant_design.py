@@ -33,6 +33,7 @@ from utils.functions.statefulness import (
     _species_keys,
     _species_label,
 )
+from utils.functions.variant_labels import format_variant_label
 
 SI_INSENSITIVE_VARIANTS = {"CI", "IE"}
 
@@ -869,6 +870,7 @@ def planting_sliders():
         variant = st.selectbox(
             "FVS Variant",
             options=sub_variants,
+            format_func=format_variant_label,
             key="planting_sub_variant",
             on_change=_sync_active_variant,
             help=H("planting.variant_label"),
@@ -876,7 +878,7 @@ def planting_sliders():
     else:
         variant = sub_variants[0]
         st.markdown(
-            f"**FVS Variant:** {variant}",
+            f"**FVS Variant:** {format_variant_label(variant)}",
             unsafe_allow_html=False,
             help=H("planting.variant_label"),
             width="stretch",
@@ -2056,13 +2058,14 @@ def generate_report():
 
     # Collect data for the report
     # Planting design - using static values for now (can be made dynamic later)
+    report_variant = st.session_state.get(
+        "active_variant", st.session_state.get("selected_variant", "PN")
+    )
     planting_design = [
         {"column1": "Reforestation Strategy", "column2": "Mixed Species Planting"},
         {
             "column1": "Variant",
-            "column2": st.session_state.get(
-                "active_variant", st.session_state.get("selected_variant", "PN")
-            ),
+            "column2": format_variant_label(report_variant),
         },
         {
             "column1": "Location Name",

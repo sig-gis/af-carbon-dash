@@ -33,6 +33,7 @@ from utils.functions.plant_design import (
     _resolve_sub_variants,
 )
 from utils.functions.slider_bounds import clamp, slider_bounds
+from utils.functions.variant_labels import format_variant_label
 from utils.functions.statefulness import (
     _backup_keys,
     _restore_backup,
@@ -379,12 +380,16 @@ def _solver_inputs() -> dict | None:
         variant = st.selectbox(
             "FVS Variant",
             options=sub_variants,
+            format_func=format_variant_label,
             key="solver_sub_variant",
             help=H("planting.variant_label"),
         )
     else:
         variant = sub_variants[0]
-        st.markdown(f"**FVS Variant:** {variant}", help=H("planting.variant_label"))
+        st.markdown(
+            f"**FVS Variant:** {format_variant_label(variant)}",
+            help=H("planting.variant_label"),
+        )
     st.caption(f"Location: {varloc_name} ({varloc_code})")
 
     preset = presets.get(variant, presets.get("PN", {}))

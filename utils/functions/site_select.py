@@ -14,6 +14,7 @@ from shapely.ops import unary_union
 
 from utils.config import get_api_base_url
 from utils.functions.map_colors import color_for_feature
+from utils.functions.variant_labels import format_variant_label
 from utils.functions.helper import H
 
 logger = logging.getLogger(__name__)
@@ -773,9 +774,14 @@ def display_selected_info():
                 if key == "FVSVariant":
                     active = st.session_state.get("active_variant")
                     if active and active != value:
-                        display_value = f"{active} (from {value})"
+                        display_value = (
+                            f"{format_variant_label(active)} "
+                            f"(from {format_variant_label(value)})"
+                        )
                     elif active:
-                        display_value = active
+                        display_value = format_variant_label(active)
+                    else:
+                        display_value = format_variant_label(value)
                 st.success(f"Successfully selected **{display_key}:** {display_value}")
                 # st.success(f"Please continue to Planting Design, or select a different variant.")
 
@@ -784,8 +790,8 @@ def _candidate_label(c: dict) -> str:
     """Human-readable label for a variant candidate in the chooser."""
     name = c.get("locname") or ""
     if name:
-        return f"{c['variant']} — {name} ({c['loccode']})"
-    return f"{c['variant']} ({c['loccode']})"
+        return f"{format_variant_label(c['variant'])} — {name} ({c['loccode']})"
+    return f"{format_variant_label(c['variant'])} ({c['loccode']})"
 
 
 def variant_chooser():
