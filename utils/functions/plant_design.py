@@ -865,6 +865,7 @@ def planting_sliders():
     st.session_state["planting_sub_variant"] = current
 
     if len(sub_variants) > 1:
+        st.info("Multiple FVS variants cover this location — choose one:")
         variant = st.selectbox(
             "FVS Variant",
             options=sub_variants,

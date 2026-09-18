@@ -28,7 +28,6 @@ from utils.functions.site_select import (
     load_geojson_fragment,
     load_geojson_or_shapefile,
     show_clicked_variant,
-    variant_chooser,
     variants_at_geometry,
 )
 from utils.functions.solver import current_solver_prefill, run_solver
@@ -521,14 +520,9 @@ if st.session_state.active_tab == "Site Selection Map":
             feature_group_to_add=highlight_fg,
         )
 
-    # with controls_col:
-    #     show_clicked_variant(map_data)
-    #     display_selected_info()
-    #     variant_chooser()
     with controls_col:
         show_clicked_variant(map_data)
         display_selected_info()
-        variant_chooser()
 
         st.divider()
 
