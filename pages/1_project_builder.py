@@ -110,6 +110,8 @@ if st.session_state.active_tab == "Site Selection Map":
     if "upload_file" not in st.session_state:
         st.session_state.upload_file = []
 
+    st.session_state.setdefault("site_map_warning", None)
+
     geojson_str, tooltip_fields = load_geojson_fragment(
         simplified_geojson,
         local_shapefile,
@@ -171,11 +173,15 @@ if st.session_state.active_tab == "Site Selection Map":
             matched = auto_select_variant_from_point(new_pt, geojson_str)
 
             if matched:
+                st.session_state["site_map_warning"] = None
                 st.success(
                     "Latitude/Longitude matched a supported FVS variant. Variant auto-selected."
                 )
             else:
-                st.warning("Latitude/Longitude does not intersect a supported FVS variant.")
+                st.session_state["site_map_warning"] = (
+                    "Latitude/Longitude does not intersect a supported FVS variant."
+                )
+                st.warning(st.session_state["site_map_warning"])
 
             st.rerun()
 
@@ -198,13 +204,15 @@ if st.session_state.active_tab == "Site Selection Map":
                     matched = auto_select_variant_from_point(new_pt, geojson_str)
 
                     if matched:
+                        st.session_state["site_map_warning"] = None
                         st.success(
                             "Address matched a supported FVS variant. Variant auto-selected."
                         )
                     else:
-                        st.warning(
-                            "Address found, but it does not intersect a supported FVS variant polygon."
+                        st.session_state["site_map_warning"] = (
+                            "Address found, but it does not intersect a supported FVS variant."
                         )
+                        st.warning(st.session_state["site_map_warning"])
 
                     st.rerun()
 
@@ -306,6 +314,7 @@ if st.session_state.active_tab == "Site Selection Map":
                 "uploaded_geojson_str",
                 "uploaded_tooltip_fields",
                 "upload_auto_selected",
+                "site_map_warning",
             ]:
                 if key in st.session_state:
                     del st.session_state[key]
@@ -365,6 +374,7 @@ if st.session_state.active_tab == "Site Selection Map":
                 "uploaded_geojson_str",
                 "uploaded_tooltip_fields",
                 "upload_auto_selected",
+                "site_map_warning",
             ]:
                 if key in st.session_state:
                     del st.session_state[key]
@@ -462,17 +472,20 @@ if st.session_state.active_tab == "Site Selection Map":
                 upload_candidates = st.session_state.get("variant_candidates", [])
 
                 if matched:
+                    st.session_state["site_map_warning"] = None
                     st.success(
                         "Uploaded geometry matched a supported FVS variant. Variant auto-selected."
                     )
                 elif upload_candidates:
+                    st.session_state["site_map_warning"] = None
                     st.warning(
                         "Uploaded geometry spans multiple supported FVS variant locations. Please select the correct variant before continuing."
                     )
                 else:
-                    st.warning(
+                    st.session_state["site_map_warning"] = (
                         "Uploaded geometry does not intersect a supported FVS variant."
                     )
+                    st.warning(st.session_state["site_map_warning"])
 
         uploaded_geojson_str = st.session_state.get("uploaded_geojson_str")
         uploaded_tooltip_fields = st.session_state.get("uploaded_tooltip_fields")
@@ -485,6 +498,9 @@ if st.session_state.active_tab == "Site Selection Map":
     )
 
     with map_col:
+        if st.session_state.get("site_map_warning"):
+            st.warning(st.session_state["site_map_warning"])
+
         # st.subheader(
         #     "Select FVS Variant",
         #     anchor=None,
@@ -580,6 +596,7 @@ if st.session_state.active_tab == "Site Selection Map":
                 "upload_auto_selected",
                 "large_upload_signed_url",
                 "large_upload_gcs_uri",
+                "site_map_warning",
             ]:
                 if key in st.session_state:
                     del st.session_state[key]
