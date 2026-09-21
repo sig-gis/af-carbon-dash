@@ -353,32 +353,36 @@ _FIN_FIELD_GROUPS = [
 ]
 
 
-def _financial_form(show_financial_inputs_header: bool = True) -> dict:
+def _render_financial_field(field: str, defaults: dict):
+    """Render one Solver financial number input and return its current value."""
+    label, _is_pct, fmt, minv, step = _FIN_FIELD_BY_NAME[field]
+    key = f"solver_fin_{field}"
+    # Match the value/min/step types to the format so an integer-formatted
+    # ("%d") input doesn't get a float value (Streamlit warns on the mismatch).
+    cast = int if fmt == "%d" else float
+    if key not in st.session_state:
+        st.session_state[key] = cast(defaults.get(field, 0))
+    return st.number_input(
+        label,
+        min_value=cast(minv),
+        step=cast(step),
+        format=fmt,
+        key=key,
+        help=H(f"credits.inputs.{field}"),
+    )
+
+
+def _financial_form() -> dict:
     """Render the single-protocol financial inputs (percent fields stay percent)."""
     defaults = _load_proforma_defaults()
     values: dict = {}
 
-    for group_label, fields in _FIN_FIELD_GROUPS:
-        if show_financial_inputs_header or group_label != "Financial Inputs":
+    group_cols = st.columns(3)
+    for col, (group_label, fields) in zip(group_cols, _FIN_FIELD_GROUPS):
+        with col:
             st.markdown(f"**{group_label}**")
-        cols = st.columns(min(3, len(fields)))
-        for i, field in enumerate(fields):
-            label, _is_pct, fmt, minv, step = _FIN_FIELD_BY_NAME[field]
-            key = f"solver_fin_{field}"
-            # Match the value/min/step types to the format so an integer-formatted
-            # ("%d") input doesn't get a float value (Streamlit warns on the mismatch).
-            cast = int if fmt == "%d" else float
-            if key not in st.session_state:
-                st.session_state[key] = cast(defaults.get(field, 0))
-            with cols[i % len(cols)]:
-                values[field] = st.number_input(
-                    label,
-                    min_value=cast(minv),
-                    step=cast(step),
-                    format=fmt,
-                    key=key,
-                    help=H(f"credits.inputs.{field}"),
-                )
+            for field in fields:
+                values[field] = _render_financial_field(field, defaults)
     return values
 
 
@@ -466,7 +470,7 @@ def _solver_inputs() -> dict | None:
         help=H("solver.protocol"),
     )
 
-    st.markdown("**Financial Inputs**")
+    st.markdown("**Carbon & Financial Assumptions**")
     c1, c2 = st.columns(2)
     with c1:
         target_npv = st.number_input(
@@ -484,7 +488,7 @@ def _solver_inputs() -> dict | None:
             key="solver_npv_year",
             help=H("credits.inputs.npv_year"),
         )
-    financial_params_pct = _financial_form(show_financial_inputs_header=False)
+    financial_params_pct = _financial_form()
 
     return {
         "variant": variant,
