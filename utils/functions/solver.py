@@ -322,41 +322,63 @@ def _pct_selectbox(variant: str, loccode: str) -> str:
 # credits_inputs. Units live in the label; st.number_input's `format` only
 # accepts a bare printf numeric spec (no "$" prefix, unlike data_editor columns).
 _FIN_FIELDS = [
-    ("planting_cost", "Planting Cost ($)", False, "%d", 0.0, 50.0),
     ("price_per_ert_initial", "ERT Price ($)", False, "%.2f", 0.0, 1.0),
-    ("num_plots", "Plots", False, "%d", 1.0, 1.0),
-    ("cost_per_cfi_plot", "Cost/CFI Plot ($)", False, "%.2f", 0.0, 1.0),
+    ("discount_rate", "Discount Rate (%)", True, "%.2f", 0.0, 0.5),
+    ("anticipated_inflation", "Inflation (%)", True, "%.2f", 0.0, 0.5),
+    ("credit_price_increase", "Credit Price Increase (%)", True, "%.2f", 0.0, 0.5),
+    ("planting_cost", "Planting Cost ($)", False, "%d", 0.0, 50.0),
+    ("cost_per_cfi_plot", "CFI Plot Cost ($)", False, "%.2f", 0.0, 1.0),
+    ("num_plots", "Number of Plots", False, "%d", 1.0, 1.0),
     ("registry_fees", "Registry Fee ($)", False, "%.2f", 0.0, 1.0),
     ("issuance_fee_per_ert", "Issuance Fee ($/ERT)", False, "%.4f", 0.0, 0.01),
-    ("validation_cost", "Validation Cost ($)", False, "%d", 0.0, 1000.0),
-    ("verification_cost", "Verification Cost ($)", False, "%d", 0.0, 1000.0),
-    ("anticipated_inflation", "Inflation (%)", True, "%.2f", 0.0, 0.5),
-    ("discount_rate", "Discount Rate (%)", True, "%.2f", 0.0, 0.5),
-    ("credit_price_increase", "Credit Price Increase (%)", True, "%.2f", 0.0, 0.5),
+    ("validation_cost", "Validation Fee ($)", False, "%d", 0.0, 1000.0),
+    ("verification_cost", "Verification Fee ($)", False, "%d", 0.0, 1000.0),
+]
+
+_FIN_FIELD_BY_NAME = {field: spec for field, *spec in _FIN_FIELDS}
+
+_FIN_FIELD_GROUPS = [
+    (
+        "Financial Inputs",
+        ["price_per_ert_initial", "discount_rate", "anticipated_inflation", "credit_price_increase"],
+    ),
+    (
+        "Implementation Costs",
+        ["planting_cost", "cost_per_cfi_plot", "num_plots"],
+    ),
+    (
+        "Registry-related Fees / Defaults",
+        ["registry_fees", "issuance_fee_per_ert", "validation_cost", "verification_cost"],
+    ),
 ]
 
 
-def _financial_form() -> dict:
+def _financial_form(show_financial_inputs_header: bool = True) -> dict:
     """Render the single-protocol financial inputs (percent fields stay percent)."""
     defaults = _load_proforma_defaults()
     values: dict = {}
-    cols = st.columns(3)
-    for i, (field, label, _is_pct, fmt, minv, step) in enumerate(_FIN_FIELDS):
-        key = f"solver_fin_{field}"
-        # Match the value/min/step types to the format so an integer-formatted
-        # ("%d") input doesn't get a float value (Streamlit warns on the mismatch).
-        cast = int if fmt == "%d" else float
-        if key not in st.session_state:
-            st.session_state[key] = cast(defaults.get(field, 0))
-        with cols[i % 3]:
-            values[field] = st.number_input(
-                label,
-                min_value=cast(minv),
-                step=cast(step),
-                format=fmt,
-                key=key,
-                help=H(f"credits.inputs.{field}"),
-            )
+
+    for group_label, fields in _FIN_FIELD_GROUPS:
+        if show_financial_inputs_header or group_label != "Financial Inputs":
+            st.markdown(f"**{group_label}**")
+        cols = st.columns(min(3, len(fields)))
+        for i, field in enumerate(fields):
+            label, _is_pct, fmt, minv, step = _FIN_FIELD_BY_NAME[field]
+            key = f"solver_fin_{field}"
+            # Match the value/min/step types to the format so an integer-formatted
+            # ("%d") input doesn't get a float value (Streamlit warns on the mismatch).
+            cast = int if fmt == "%d" else float
+            if key not in st.session_state:
+                st.session_state[key] = cast(defaults.get(field, 0))
+            with cols[i % len(cols)]:
+                values[field] = st.number_input(
+                    label,
+                    min_value=cast(minv),
+                    step=cast(step),
+                    format=fmt,
+                    key=key,
+                    help=H(f"credits.inputs.{field}"),
+                )
     return values
 
 
@@ -436,14 +458,23 @@ def _solver_inputs() -> dict | None:
         )
         return None
 
-    st.markdown("**Carbon & Financials**")
-    c1, c2, c3 = st.columns(3)
+    st.markdown("**Carbon Protocol**")
+    protocol = st.selectbox(
+        "Protocol",
+        options=PROTOCOL_ORDER,
+        key="solver_protocol",
+        help=H("solver.protocol"),
+    )
+
+    st.markdown("**Financial Inputs**")
+    c1, c2 = st.columns(2)
     with c1:
-        protocol = st.selectbox(
-            "Protocol",
-            options=PROTOCOL_ORDER,
-            key="solver_protocol",
-            help=H("solver.protocol"),
+        target_npv = st.number_input(
+            "Target NPV ($)",
+            value=0.0,
+            step=1000.0,
+            key="solver_target_npv",
+            help=H("solver.target_npv"),
         )
     with c2:
         npv_year = st.selectbox(
@@ -453,15 +484,7 @@ def _solver_inputs() -> dict | None:
             key="solver_npv_year",
             help=H("credits.inputs.npv_year"),
         )
-    with c3:
-        target_npv = st.number_input(
-            "Target NPV ($)",
-            value=0.0,
-            step=1000.0,
-            key="solver_target_npv",
-            help=H("solver.target_npv"),
-        )
-    financial_params_pct = _financial_form()
+    financial_params_pct = _financial_form(show_financial_inputs_header=False)
 
     return {
         "variant": variant,

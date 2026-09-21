@@ -160,6 +160,7 @@ if st.session_state.active_tab == "Site Selection Map":
             state = st.text_input("State")
 
             go_address_button = st.button("Go to Address", use_container_width=True)
+            reset_point_button = st.button("Reset point from map", use_container_width=True)
 
         if add_point_button:
             new_pt = Point(lon, lat)
@@ -220,6 +221,30 @@ if st.session_state.active_tab == "Site Selection Map":
                     st.error("Address not found.")
             else:
                 st.error("Enter at least one field for address, city, or state.")
+
+        if reset_point_button:
+            for key in [
+                "points",
+                "last_point",
+                "site_map_warning",
+                "variant_candidates",
+                "site_variant_choice",
+                "site_variant_selection_required",
+                "active_variant",
+                "selected_variant",
+                "selected_varloc_code",
+                "FVSLocCode",
+                "selected_varloc_name",
+                "clicked_feature",
+                "clicked_props",
+            ]:
+                st.session_state.pop(key, None)
+
+            if st.session_state.get("last_added_type") == "point":
+                st.session_state.pop("last_added_type", None)
+
+            st.session_state.points = []
+            st.rerun()
 
         with st.expander(label="Upload KML/GeoJSON/Shapefile", expanded=False):
             uploaded_files = st.file_uploader(
