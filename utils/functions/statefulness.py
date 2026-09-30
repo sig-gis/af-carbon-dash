@@ -113,6 +113,7 @@ def _apply_planting_prefill(variant: str, sp_keys: list[str]):
             "protocol": protocol,
             "planting_cost": prefill.get("planting_cost"),
             "price_per_ert_initial": prefill.get("price_per_ert_initial"),
+            "discount_rate": prefill.get("discount_rate"),
         }
     if "npv_year" in prefill:
         st.session_state["credits_npv_year"] = int(prefill["npv_year"])

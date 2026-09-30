@@ -521,6 +521,7 @@ def _planting_payload(inputs: dict, *, net_acres=None, species_tpa=None) -> dict
         "npv_year": inputs["npv_year"],
         "planting_cost": fin["planting_cost"],
         "price_per_ert_initial": fin["price_per_ert_initial"],
+        "discount_rate": fin["discount_rate"],
     }
     if net_acres is not None:
         payload["net_acres"] = int(net_acres)
@@ -562,6 +563,11 @@ def current_solver_prefill() -> dict | None:
                         defaults.get("price_per_ert_initial", 25.0),
                     )
                 ),
+                "discount_rate": float(
+                    st.session_state.get(
+                        "solver_fin_discount_rate", defaults.get("discount_rate", 6.0)
+                    )
+                ),
             },
         }
     )
@@ -581,7 +587,8 @@ def _apply_button(key: str, payload: dict):
         kwargs={"payload": payload},
     )
     st.caption(
-        "Prefills Planting Design with these inputs and the solved value. "
+        "Prefills Planting Design with these inputs and the solved value, "
+        "including planting cost, credit price and discount rate. "
         "Fixed financial assumptions there come from protocol presets."
     )
 
