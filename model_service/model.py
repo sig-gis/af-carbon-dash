@@ -752,6 +752,16 @@ def default_scenario(variant: str, loccode: str) -> dict:
     variant_presets = load_effective_preset_map()
     species_map = load_effective_species_map()
     proforma_presets = _load_base_json("proforma_presets.json")
+    protocol_overrides = proforma_presets.get("protocol_overrides", {})
+    base_financial_params = {
+        key: value
+        for key, value in proforma_presets.items()
+        if key != "protocol_overrides"
+    }
+    acr_financial_params = {
+        **base_financial_params,
+        **protocol_overrides.get("ACR", {}),
+    }
     registry = store.get_json("registry.json").get("models", [])
 
     resolved_variant = _resolve_variant_for_loccode(variant, loccode, registry)
@@ -789,7 +799,7 @@ def default_scenario(variant: str, loccode: str) -> dict:
         "net_acres": 1000.0,
         "protocols": ["ACR"],
         "financial_params": {
-            "ACR": dict(proforma_presets),
+            "ACR": acr_financial_params,
         },
         "npv_year": 40,
     }
