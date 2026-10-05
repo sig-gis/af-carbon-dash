@@ -16,14 +16,16 @@ class AFFDashClient:
     """Client for AFF carbon scenario evaluation.
 
     By default, calls the deployed dev API. Override the URL with the
-    ``api_base_url`` argument or the ``CARBON_API_BASE_URL`` env var. To run
-    in-process against local model files, pass ``local_models_dir=<path>``.
+    ``api_base_url`` argument or the ``CARBON_API_BASE_URL`` env var. The
+    deployed API requires a bearer key: pass ``api_key`` or set the
+    ``CARBON_API_KEY`` env var. To run in-process against local model files,
+    pass ``local_models_dir=<path>`` (no key needed).
 
     Examples
     --------
     Hit the deployed API::
 
-        client = AFFDashClient()
+        client = AFFDashClient(api_key="...")   # or export CARBON_API_KEY=...
         result = client.solve_for_tnr(
             variant="PN", loccode="609", target_tnr=500_000, npv_year=40,
         )
@@ -43,6 +45,7 @@ class AFFDashClient:
         self,
         api_base_url: str | None = None,
         *,
+        api_key: str | None = None,
         local_models_dir: str | os.PathLike | None = None,
         timeout: float = 60.0,
     ) -> None:
@@ -52,7 +55,8 @@ class AFFDashClient:
             url = (
                 api_base_url or os.environ.get("CARBON_API_BASE_URL") or DEFAULT_API_URL
             )
-            self._backend = HTTPBackend(url, timeout=timeout)
+            key = api_key or os.environ.get("CARBON_API_KEY")
+            self._backend = HTTPBackend(url, api_key=key, timeout=timeout)
 
     # ----- public API -------------------------------------------------------
 

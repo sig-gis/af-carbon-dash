@@ -20,7 +20,7 @@ from model_service.main import (
     load_variant_presets,
     load_variant_species,
 )
-from utils.config import get_api_base_url, normalize_params
+from utils.config import api_session, get_api_base_url, normalize_params
 from utils.functions.helper import HELP, H
 from utils.functions.slider_bounds import clamp, slider_bounds
 from utils.functions.statefulness import (
@@ -45,7 +45,7 @@ def _resolve_sub_variants(map_variant: str, loccode: str) -> list[str]:
     Falls back to species config prefix matching if no registry entries found.
     """
     try:
-        resp = requests.get(f"{get_api_base_url()}/models/registry", timeout=5)
+        resp = api_session().get(f"{get_api_base_url()}/models/registry", timeout=5)
         resp.raise_for_status()
         registry = resp.json().get("models", [])
     except Exception:
@@ -616,7 +616,7 @@ def _protocol_adjusted_average_from_carbon_curve(
         "protocols": protocols,
     }
 
-    resp = requests.post(
+    resp = api_session().post(
         f"{API_BASE_URL}/carbon/units",
         json=payload,
         timeout=10,
@@ -1041,7 +1041,7 @@ def carbon_chart():
     }
     # Fetch available PCT levels with retention percentages for this variant/location
     try:
-        _pct_resp = requests.get(
+        _pct_resp = api_session().get(
             f"{API_BASE_URL}/models/pct-info",
             params={"variant": variant, "loccode": loccode},
             timeout=5,
@@ -1081,7 +1081,7 @@ def carbon_chart():
         "pct_level": pct_level,
     }
 
-    resp = requests.post(
+    resp = api_session().post(
         f"{API_BASE_URL}/carbon/calculate",
         json=payload,
         timeout=10,
@@ -1357,7 +1357,7 @@ def carbon_units():
 
     json.dumps(payload)
 
-    resp = requests.post(
+    resp = api_session().post(
         f"{API_BASE_URL}/carbon/units",
         json=payload,
         timeout=10,
@@ -1910,7 +1910,7 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
         }
 
         json.dumps(payload)
-        resp = requests.post(
+        resp = api_session().post(
             f"{API_BASE_URL}/proforma/compute",
             json=payload,
             timeout=10,
@@ -2382,7 +2382,7 @@ def generate_report():
 
     try:
         with st.spinner("Generating report..."):
-            resp = requests.post(
+            resp = api_session().post(
                 f"{API_BASE_URL}/reports/generate",
                 json=payload,
                 timeout=300,  # Longer timeout for report generation

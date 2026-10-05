@@ -6,13 +6,12 @@ import os
 import tempfile
 import numpy as np
 import logging
-import requests
 from pathlib import Path
 import io
 from shapely.geometry import shape, box, Point
 from shapely.ops import unary_union
 
-from utils.config import get_api_base_url
+from utils.config import api_session, get_api_base_url
 from utils.functions.map_colors import color_for_feature
 from utils.functions.variant_labels import format_variant_label
 from utils.functions.helper import H
@@ -37,7 +36,7 @@ def _fetch_geojson_from_api() -> str | None:
 
     try:
         base_url = get_api_base_url()
-        resp = requests.get(f"{base_url}/geo/variants", timeout=30)
+        resp = api_session().get(f"{base_url}/geo/variants", timeout=30)
         resp.raise_for_status()
         payload = resp.json()
 
@@ -410,7 +409,7 @@ def _loccode_str(v):
 def _fetch_registry() -> list[dict]:
     """Fetch the model registry once for candidate expansion."""
     try:
-        resp = requests.get(f"{get_api_base_url()}/models/registry", timeout=5)
+        resp = api_session().get(f"{get_api_base_url()}/models/registry", timeout=5)
         resp.raise_for_status()
         return resp.json().get("models", [])
     except Exception:

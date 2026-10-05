@@ -11,9 +11,10 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import requests
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
+
+from model_service import auth
 
 from model_service.config_sync import sync_config_defaults
 from model_service.geo import get_filtered_geojson
@@ -50,9 +51,14 @@ from model_service.schemas import (
 )
 from model_service.store import get_store
 from model_service.tpa_sweep import solve_tpa_range
-from utils.config import get_api_base_url
+from utils.config import api_session, get_api_base_url
 
 logger = logging.getLogger(__name__)
+
+# uvicorn configures only its own loggers; give ours a handler so the access
+# log and auth messages reach stdout (and therefore Cloud Run logging).
+if not logging.getLogger().handlers:
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(name)s: %(message)s")
 
 APP_ROOT = Path(__file__).resolve().parent.parent
 BASE_PATH = APP_ROOT / "conf" / "base"
@@ -77,6 +83,7 @@ def refresh_geojson() -> None:
 async def lifespan(app: FastAPI):
     """Load registry and GeoJSON cache on startup. Models are fetched lazily on first use."""
     t0 = time.time()
+    auth.validate_startup()
     store = get_store()
 
     registry = store.get_json("registry.json").get("models", [])
@@ -89,9 +96,43 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Carbon Model Service", lifespan=lifespan)
+# Every route authenticates the calling *system* (see model_service/auth.py);
+# only /health is public. Admin-only routes add Depends(auth.require_admin).
+app = FastAPI(
+    title="Carbon Model Service",
+    lifespan=lifespan,
+    dependencies=[Depends(auth.require_client)],
+)
 
-API_BASE_URL = get_api_base_url()
+
+@app.middleware("http")
+async def _access_log(request: Request, call_next):
+    """One line per request naming the authenticated client, for attribution."""
+    t0 = time.perf_counter()
+    response = await call_next(request)
+    client = getattr(request.state, "client", None)
+    logger.info(
+        "%s %s -> %d (%.0f ms) client=%s",
+        request.method,
+        request.url.path,
+        response.status_code,
+        (time.perf_counter() - t0) * 1000,
+        client.name if client else "-",
+    )
+    return response
+
+
+
+def _api_base_url() -> str:
+    """Base URL for the dashboard-side loaders below.
+
+    Resolved lazily: these helpers run in the *dashboard* process. The API
+    process itself never needs a base URL, and resolving it at import time
+    would trip get_api_base_url()'s production guard (no CARBON_API_BASE_URL is
+    set on the API service) and crash the service on startup.
+    """
+    return get_api_base_url()
+
 
 
 def _registered_variants() -> set[str]:
@@ -116,37 +157,37 @@ def load_json(filename: str):
 
 
 def fetch_carbon_coefficients():
-    resp = requests.get(f"{API_BASE_URL}/carbon/coefficients", timeout=5)
+    resp = api_session().get(f"{_api_base_url()}/carbon/coefficients", timeout=5)
     resp.raise_for_status()
     return resp.json()
 
 
 def _load_proforma_defaults() -> dict:
-    resp = requests.get(f"{API_BASE_URL}/proforma/presets", timeout=5)
+    resp = api_session().get(f"{_api_base_url()}/proforma/presets", timeout=5)
     resp.raise_for_status()
     return resp.json()
 
 
 def load_variant_presets() -> dict:
-    resp = requests.get(f"{API_BASE_URL}/variant/presets", timeout=5)
+    resp = api_session().get(f"{_api_base_url()}/variant/presets", timeout=5)
     resp.raise_for_status()
     return resp.json()
 
 
 def load_species_labels() -> dict:
-    resp = requests.get(f"{API_BASE_URL}/species/labels", timeout=5)
+    resp = api_session().get(f"{_api_base_url()}/species/labels", timeout=5)
     resp.raise_for_status()
     return resp.json()
 
 
 def load_protocol_rules() -> dict:
-    resp = requests.get(f"{API_BASE_URL}/protocol/rules", timeout=5)
+    resp = api_session().get(f"{_api_base_url()}/protocol/rules", timeout=5)
     resp.raise_for_status()
     return resp.json()
 
 
 def load_variant_species() -> dict:
-    resp = requests.get(f"{API_BASE_URL}/variant/species", timeout=5)
+    resp = api_session().get(f"{_api_base_url()}/variant/species", timeout=5)
     resp.raise_for_status()
     return resp.json()
 
@@ -228,7 +269,7 @@ def get_pct_info(variant: str, loccode: str):
     )
 
 
-@app.post("/geo/refresh")
+@app.post("/geo/refresh", dependencies=[Depends(auth.require_admin)])
 def geo_refresh():
     """Rebuild the filtered GeoJSON cache from the current registry."""
     refresh_geojson()

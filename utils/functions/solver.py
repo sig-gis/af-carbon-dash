@@ -24,7 +24,7 @@ import requests
 import streamlit as st
 
 from model_service.main import load_variant_presets
-from utils.config import get_api_base_url, normalize_params
+from utils.config import api_session, get_api_base_url, normalize_params
 from utils.functions.helper import H
 from utils.functions.plant_design import (
     PROTOCOL_ORDER,
@@ -234,7 +234,7 @@ def _breakeven_acres(result: dict | None) -> float | None:
 # --------------------------------------------------------------------------- #
 def _run_scenario(scenario: dict) -> dict:
     """POST one solve scenario to /scenario/run. Raises on HTTP error."""
-    resp = requests.post(f"{API_BASE_URL}/scenario/run", json=scenario, timeout=30)
+    resp = api_session().post(f"{API_BASE_URL}/scenario/run", json=scenario, timeout=30)
     resp.raise_for_status()
     return resp.json()
 
@@ -245,7 +245,7 @@ def _run_bulk(scenarios: list[dict]) -> tuple[list[dict | None], list[dict]]:
     Returns ``(results, errors)`` aligned to the input order, matching the
     shape of ``aff_dash_client.run_many``.
     """
-    resp = requests.post(
+    resp = api_session().post(
         f"{API_BASE_URL}/scenario/bulk",
         json={"scenarios": scenarios},
         timeout=120,
@@ -257,7 +257,7 @@ def _run_bulk(scenarios: list[dict]) -> tuple[list[dict | None], list[dict]]:
 
 def _run_solve_tpa(scenario: dict) -> dict:
     """POST one TPA-breakeven scenario to /scenario/solve-tpa. Raises on HTTP error."""
-    resp = requests.post(
+    resp = api_session().post(
         f"{API_BASE_URL}/scenario/solve-tpa", json=scenario, timeout=120
     )
     resp.raise_for_status()
@@ -295,7 +295,7 @@ def _pct_selectbox(variant: str, loccode: str) -> str:
     """Render the PCT selector (own key); options come from the model registry."""
     _PCT_LABELS = {"PCT0": "None", "PCT1": "Light", "PCT2": "Moderate"}
     try:
-        resp = requests.get(
+        resp = api_session().get(
             f"{API_BASE_URL}/models/pct-info",
             params={"variant": variant, "loccode": loccode},
             timeout=5,

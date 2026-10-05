@@ -41,3 +41,10 @@ model_service/quarto/data/*
 model_service/quarto/reports/*
 model_service/quarto/reports/report_files/*
 !model_service/quarto/data/var_sp_ref.csv
+
+# auto-generated model-service API keys (local store backend)
+/api_keys.json
+
+# local tooling artifacts
+.DS_Store
+.playwright-mcp/
