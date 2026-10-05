@@ -1,48 +1,62 @@
-from contextlib import asynccontextmanager
-import logging
-
-from fastapi import FastAPI, HTTPException
-from fastapi import Depends
-from fastapi.responses import FileResponse, JSONResponse
-from pathlib import Path
-import json
-import pandas as pd
-import requests
-import numpy as np
-import subprocess
 import datetime
+import json
+import logging
 import os
+import subprocess
 import tempfile
 import time
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from contextlib import asynccontextmanager
+from pathlib import Path
 
+import numpy as np
+import pandas as pd
+import requests
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.responses import FileResponse, JSONResponse
+
+from model_service.config_sync import sync_config_defaults
+from model_service.geo import get_filtered_geojson
 from model_service.model import (
-    compute_proforma,
-    compute_summaries,
+    align_projection_years,
     compute_carbon_scores,
     compute_carbon_units,
-    get_fvs_models,
-    predict_fvs_metrics,
-    run_scenario,
+    compute_proforma,
+    compute_summaries,
     default_scenario,
+    get_fvs_models,
+    load_effective_preset_map,
+    load_effective_species_map,
+    predict_fvs_metrics,
+    recompute_annual_carbon_columns,
+    run_scenario,
 )
 from model_service.schemas import (
-    ProformaRequest,
-    ProformaResponse,
+    BulkScenarioError,
+    BulkScenarioRequest,
+    BulkScenarioResponse,
     CarbonInputs,
     CarbonResponse,
     CarbonUnitsRequest,
     CarbonUnitsResponse,
+    ProformaRequest,
+    ProformaResponse,
     ReportRequest,
+    ScenarioDefaults,
     ScenarioRequest,
     ScenarioResponse,
-    ScenarioDefaults,
+    TpaSweepRequest,
+    TpaSweepResponse,
 )
 from model_service.store import get_store
-from model_service.geo import get_filtered_geojson
-
+from model_service.tpa_sweep import solve_tpa_range
 from utils.config import get_api_base_url
 
 logger = logging.getLogger(__name__)
+
+APP_ROOT = Path(__file__).resolve().parent.parent
+BASE_PATH = APP_ROOT / "conf" / "base"
+QUARTO_DIR = APP_ROOT / "model_service" / "quarto"
 
 # Cached filtered GeoJSON (rebuilt on startup)
 _filtered_geojson: dict | None = None
@@ -68,6 +82,8 @@ async def lifespan(app: FastAPI):
     registry = store.get_json("registry.json").get("models", [])
     logger.info("Registry loaded: %d models (%.1fs)", len(registry), time.time() - t0)
 
+    sync_config_defaults(store, BASE_PATH)
+
     refresh_geojson()
 
     yield
@@ -77,82 +93,93 @@ app = FastAPI(title="Carbon Model Service", lifespan=lifespan)
 
 API_BASE_URL = get_api_base_url()
 
-SUPPORTED_VARIANTS = {"CR", "CR_1", "CR_2", "EC", "EM", "PN", "WS", "WS_1"}
+
+def _registered_variants() -> set[str]:
+    """Variant codes currently in the model registry."""
+    registry = get_store().get_json("registry.json").get("models", [])
+    return {m["variant"] for m in registry if m.get("variant")}
 
 
-def normalize_variant(value: str) -> str:
-    if value is None:
+def normalize_variant(value: str, supported: set[str]) -> str:
+    if not value:
         return ""
     normalized = str(value).strip().upper()
-    for variant in SUPPORTED_VARIANTS:
+    for variant in sorted(supported, key=len, reverse=True):
         if variant in normalized:
             return variant
     return normalized
 
-# BASE_PATH = Path("conf/base")
-# QUARTO_DIR = Path("model_service/quarto")
-
-APP_ROOT = Path(__file__).resolve().parent.parent
-BASE_PATH = APP_ROOT / "conf" / "base"
-QUARTO_DIR = APP_ROOT / "model_service" / "quarto"
 
 def load_json(filename: str):
     with open(BASE_PATH / filename, "r") as f:
         return json.load(f)
-    
+
+
 def fetch_carbon_coefficients():
     resp = requests.get(f"{API_BASE_URL}/carbon/coefficients", timeout=5)
     resp.raise_for_status()
     return resp.json()
+
 
 def _load_proforma_defaults() -> dict:
     resp = requests.get(f"{API_BASE_URL}/proforma/presets", timeout=5)
     resp.raise_for_status()
     return resp.json()
 
+
 def load_variant_presets() -> dict:
     resp = requests.get(f"{API_BASE_URL}/variant/presets", timeout=5)
     resp.raise_for_status()
     return resp.json()
+
 
 def load_species_labels() -> dict:
     resp = requests.get(f"{API_BASE_URL}/species/labels", timeout=5)
     resp.raise_for_status()
     return resp.json()
 
+
 def load_protocol_rules() -> dict:
     resp = requests.get(f"{API_BASE_URL}/protocol/rules", timeout=5)
     resp.raise_for_status()
     return resp.json()
+
 
 def load_variant_species() -> dict:
     resp = requests.get(f"{API_BASE_URL}/variant/species", timeout=5)
     resp.raise_for_status()
     return resp.json()
 
+
 @app.get("/carbon/coefficients")
 def get_carbon_coefficients():
     return load_json("carbon_model_coefficients.json")
+
 
 @app.get("/proforma/presets")
 def get_proforma_presets():
     return load_json("proforma_presets.json")
 
+
 @app.get("/variant/presets")
 def get_variant_presets():
-    return load_json("FVSVariant_presets.json")
+    return load_effective_preset_map()
+
 
 @app.get("/species/labels")
 def get_species_labels():
     return load_json("species_labels.json")
 
+
 @app.get("/protocol/rules")
 def get_protocol_rules():
     return load_json("protocol_rules.json")
 
+
 @app.get("/variant/species")
 def get_variant_species():
-    return load_json("variant_species.json")
+    return load_effective_species_map()
+
 
 @app.get("/health")
 def health():
@@ -180,14 +207,14 @@ def get_pct_info(variant: str, loccode: str):
     store = get_store()
     registry = store.get_json("registry.json").get("models", [])
     matches = [
-        m for m in registry
+        m
+        for m in registry
         if m.get("variant") == variant and m.get("loccode") == loccode
     ]
     if not matches:
         # Fallback: return all PCT levels with no retention data
         return [
-            {"pct_level": p, "pct_retention": None}
-            for p in ["PCT0", "PCT1", "PCT2"]
+            {"pct_level": p, "pct_retention": None} for p in ["PCT0", "PCT1", "PCT2"]
         ]
     return sorted(
         [
@@ -221,6 +248,7 @@ def run_proforma(req: ProformaRequest):
         "summaries": summaries_df.to_dict(orient="records"),
     }
 
+
 @app.post("/carbon/calculate", response_model=CarbonResponse)
 def calculate_carbon(inputs: CarbonInputs):
     species_tpa = inputs.species_tpa  # already a positional list [SP1, SP2, ...]
@@ -231,14 +259,14 @@ def calculate_carbon(inputs: CarbonInputs):
     if models is not None:
         wide = predict_fvs_metrics(models, inputs.survival, inputs.si, species_tpa)
         if not wide.empty:
-            if "ABLD_C" in wide.columns:
-                wide["Annual_ABLD_C"] = wide["ABLD_C"].diff().fillna(wide["ABLD_C"].iloc[0])
+            wide = align_projection_years(wide)
+            wide = recompute_annual_carbon_columns(wide)
 
             # Prepend base year row
-            zero_row = {col: 0.0 for col in wide.columns}
-            zero_row["Year"] = 2024
-            wide = pd.concat([pd.DataFrame([zero_row]), wide], ignore_index=True)
-            wide = wide.sort_values("Year").reset_index(drop=True)
+            # zero_row = {col: 0.0 for col in wide.columns}
+            # zero_row["Year"] = 2026
+            # wide = pd.concat([pd.DataFrame([zero_row]), wide], ignore_index=True)
+            # wide = wide.sort_values("Year").reset_index(drop=True)
 
             return {
                 "carbon_df": wide.to_dict(orient="records"),
@@ -253,20 +281,28 @@ def calculate_carbon(inputs: CarbonInputs):
         survival=inputs.survival,
         si=inputs.si,
     )
-    results.insert(0, {
-        "Year": 2024,
-        "ABLD_C": 0.0,
-        "Annual_ABLD_C": 0.0,
-    })
+    results_df = align_projection_years(pd.DataFrame(results))
+    results_df = recompute_annual_carbon_columns(results_df)
+    # results.insert(
+    #     0,
+    #     {
+    #         "Year": 2026,
+    #         "ABLD_C": 0.0,
+    #         "Annual_ABLD_C": 0.0,
+    #     },
+    # )
 
     return {
-        "carbon_df": results,
+        "carbon_df": results_df.to_dict(orient="records"),
         "model_source": "coefficients",
     }
 
+
 @app.post("/carbon/units", response_model=CarbonUnitsResponse)
-def carbon_units_endpoint(req: CarbonUnitsRequest,
-                          protocol_rules: dict = Depends(get_protocol_rules),):
+def carbon_units_endpoint(
+    req: CarbonUnitsRequest,
+    protocol_rules: dict = Depends(get_protocol_rules),
+):
     df_carbon = pd.DataFrame(req.carbon_rows)
 
     ruleset = req.protocol_rules or protocol_rules
@@ -277,9 +313,7 @@ def carbon_units_endpoint(req: CarbonUnitsRequest,
         ruleset,
     )
 
-    return {
-        "rows": df_units.to_dict(orient="records")
-    }
+    return {"rows": df_units.to_dict(orient="records")}
 
 
 @app.post("/scenario/run", response_model=ScenarioResponse)
@@ -295,6 +329,83 @@ def scenario_run(req: ScenarioRequest):
     return result
 
 
+@app.post("/scenario/solve-tpa", response_model=TpaSweepResponse)
+def scenario_solve_tpa(req: TpaSweepRequest):
+    """
+    Grid-sweep species_tpa and return the TPA range(s) where NPV meets the target.
+    NPV is nonlinear in TPA, so the range is read off the curve, not solved
+    closed-form. mode sweeps a mix multiplier, one species, or every species.
+    """
+    try:
+        result = solve_tpa_range(req.model_dump(exclude_none=False))
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return result
+
+
+MAX_BULK_BATCH_SIZE = 1000
+# Worker count for scenario_bulk parallelism. 1 is sequential processing
+_BULK_WORKERS = max(1, int(os.environ.get("BULK_WORKERS", "1")))
+# "thread" or "process". "thread" is limited by GIL. "process" requires a bigger
+# Cloud Run container.
+_BULK_WORKER_MODE = os.environ.get("BULK_WORKER_MODE", "thread").lower()
+
+
+def _run_one_scenario(idx_payload: tuple[int, dict]):
+    idx, payload = idx_payload
+    try:
+        return idx, run_scenario(payload), None
+    except (KeyError, ValueError) as exc:
+        return idx, None, str(exc)
+    except Exception as exc:
+        logger.exception(
+            "run_scenario raised unexpected %s for index %d",
+            type(exc).__name__,
+            idx,
+        )
+        return idx, None, f"{type(exc).__name__}: {exc}"
+
+
+@app.post("/scenario/bulk", response_model=BulkScenarioResponse)
+def scenario_bulk(req: BulkScenarioRequest):
+    """Evaluate up to MAX_BULK_BATCH_SIZE scenarios in one request."""
+    if not req.scenarios:
+        raise HTTPException(status_code=400, detail="scenarios must be non-empty")
+    if len(req.scenarios) > MAX_BULK_BATCH_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"batch size {len(req.scenarios)} exceeds max {MAX_BULK_BATCH_SIZE}",
+        )
+
+    payloads = [
+        (idx, scenario.model_dump(exclude_none=False))
+        for idx, scenario in enumerate(req.scenarios)
+    ]
+    results: list[dict | None] = [None] * len(payloads)
+    errors: list[BulkScenarioError] = []
+
+    if _BULK_WORKERS <= 1 or len(payloads) <= 1:
+        for item in payloads:
+            idx, result, err = _run_one_scenario(item)
+            results[idx] = result
+            if err is not None:
+                errors.append(BulkScenarioError(index=idx, error=err))
+    else:
+        Pool = (
+            ProcessPoolExecutor
+            if _BULK_WORKER_MODE == "process"
+            else ThreadPoolExecutor
+        )
+        with Pool(max_workers=_BULK_WORKERS) as pool:
+            for idx, result, err in pool.map(_run_one_scenario, payloads):
+                results[idx] = result
+                if err is not None:
+                    errors.append(BulkScenarioError(index=idx, error=err))
+        errors.sort(key=lambda e: e.index)
+
+    return {"results": results, "errors": errors}
+
+
 @app.get("/scenario/defaults", response_model=ScenarioDefaults)
 def scenario_defaults(variant: str, loccode: str):
     """
@@ -308,7 +419,7 @@ def scenario_defaults(variant: str, loccode: str):
         raise HTTPException(status_code=404, detail=str(exc))
 
 
-#QUARTO REPORTING
+# QUARTO REPORTING
 @app.post("/reports/generate")
 def generate_report(req: ReportRequest = None):
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
@@ -337,13 +448,14 @@ def generate_report(req: ReportRequest = None):
     env["QUARTO_FIG_DIR"] = str(QUARTO_DIR / "data" / "fig")
 
     if req:
-        selected_variant = normalize_variant(req.data.selected_variant)
-        if selected_variant not in SUPPORTED_VARIANTS:
+        supported = _registered_variants()
+        selected_variant = normalize_variant(req.data.selected_variant, supported)
+        if selected_variant not in supported:
             raise HTTPException(
                 status_code=400,
                 detail=(
                     "Unsupported variant value. "
-                    f"Expected one of {sorted(SUPPORTED_VARIANTS)}, got: {selected_variant!r}"
+                    f"Expected one of {sorted(supported)}, got: {selected_variant!r}"
                 ),
             )
 
@@ -353,7 +465,12 @@ def generate_report(req: ReportRequest = None):
             mask = df["column1"].astype(str).str.strip().str.lower() == "variant"
             if not mask.any():
                 df = pd.concat(
-                    [df, pd.DataFrame([{"column1": "Variant", "column2": selected_variant}])],
+                    [
+                        df,
+                        pd.DataFrame(
+                            [{"column1": "Variant", "column2": selected_variant}]
+                        ),
+                    ],
                     ignore_index=True,
                 )
         df.to_csv(DATA_DIR / "planting_design.csv", index=False, header=None)
@@ -375,11 +492,17 @@ def generate_report(req: ReportRequest = None):
     try:
         result = subprocess.run(
             [
-                "quarto", "render", str(QUARTO_DIR / "report.ipynb"),
-                "--to", "typst-pdf",
-                "--output-dir", str(REPORTS_DIR),
-                "--output", f"report_{timestamp}.pdf",
-                "--execute", "--no-cache"
+                "quarto",
+                "render",
+                str(QUARTO_DIR / "report.ipynb"),
+                "--to",
+                "typst-pdf",
+                "--output-dir",
+                str(REPORTS_DIR),
+                "--output",
+                f"report_{timestamp}.pdf",
+                "--execute",
+                "--no-cache",
             ],
             cwd=str(QUARTO_DIR),
             env=env,
@@ -395,7 +518,7 @@ def generate_report(req: ReportRequest = None):
     if result.returncode != 0:
         raise HTTPException(
             status_code=500,
-            detail=f"Quarto failed:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+            detail=f"Quarto failed:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}",
         )
 
     return FileResponse(

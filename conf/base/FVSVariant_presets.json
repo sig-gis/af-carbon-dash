@@ -2,37 +2,90 @@
     "CR_1": {
         "survival": 65,
         "si": 110,
-        "default_tpa": [60, 15, 20, 20],
+        "si_min": 42,
+        "si_max": 109,
+        "survival_min": 22,
+        "survival_max": 89,
+        "default_tpa": [
+            60,
+            15,
+            20,
+            20
+        ],
         "_tpa_cap": 435
     },
     "CR_2": {
         "survival": 65,
-        "si": 110,
-        "default_tpa": [40, 20, 30, 20],
+        "si": 40,
+        "si_min": 6,
+        "si_max": 40,
+        "survival_min": 20,
+        "survival_max": 90,
+        "default_tpa": [
+            40,
+            20,
+            30,
+            20
+        ],
         "_tpa_cap": 435
     },
     "EC": {
         "survival": 72,
-        "si": 122,
-        "default_tpa": [55, 15, 20],
+        "si": 110,
+        "si_min": 50,
+        "si_max": 110,
+        "survival_min": 50,
+        "survival_max": 90,
+        "default_tpa": [
+            55,
+            15,
+            20
+        ],
         "_tpa_cap": 435
     },
     "EM": {
         "survival": 70,
         "si": 120,
-        "default_tpa": [60, 15, 20, 20],
+        "si_min": 40,
+        "si_max": 160,
+        "survival_min": 50,
+        "survival_max": 90,
+        "default_tpa": [
+            60,
+            15,
+            20,
+            20
+        ],
         "_tpa_cap": 435
     },
     "PN": {
         "survival": 70,
         "si": 125,
-        "default_tpa": [60, 15, 20, 20],
+        "si_min": 96,
+        "si_max": 137,
+        "survival_min": 50,
+        "survival_max": 90,
+        "default_tpa": [
+            60,
+            15,
+            20,
+            20
+        ],
         "_tpa_cap": 435
     },
     "WS_1": {
         "survival": 70,
-        "si": 120,
-        "default_tpa": [60, 15, 20, 20],
+        "si": 110,
+        "si_min": 25,
+        "si_max": 110,
+        "survival_min": 50,
+        "survival_max": 90,
+        "default_tpa": [
+            60,
+            15,
+            20,
+            20
+        ],
         "_tpa_cap": 435
     }
 }

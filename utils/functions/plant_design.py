@@ -1,20 +1,41 @@
-import streamlit as st           
-import json                       
-import pandas as pd               
-import numpy as np                 
-import numpy_financial as npf     
-from pathlib import Path           
-from scipy.interpolate import make_interp_spline  
-import altair as alt  
-import requests
+import json
+import hashlib
 import os
+from pathlib import Path
 from urllib.parse import urlparse
 
-from utils.functions.helper import  H
-from utils.functions.statefulness import  _carbon_units_keys, _init_planting_state, _init_carbon_units_state, _backup_keys, _restore_backup, _species_keys, _species_label
-from utils.config import get_api_base_url, normalize_params
+import altair as alt
+import numpy as np
+import numpy_financial as npf
+import pandas as pd
+import plotly.graph_objects as go
+import requests
+import streamlit as st
+from matplotlib import colors as mcolors
+from plotly.colors import qualitative
+from scipy.interpolate import make_interp_spline
 
-from model_service.main import load_variant_presets, load_variant_species, _load_proforma_defaults
+from model_service.main import (
+    _load_proforma_defaults,
+    load_variant_presets,
+    load_variant_species,
+)
+from utils.config import get_api_base_url, normalize_params
+from utils.functions.helper import HELP, H
+from utils.functions.slider_bounds import clamp, slider_bounds
+from utils.functions.statefulness import (
+    _apply_planting_prefill,
+    _backup_keys,
+    _carbon_units_keys,
+    _init_carbon_units_state,
+    _init_planting_state,
+    _restore_backup,
+    _species_keys,
+    _species_label,
+)
+from utils.functions.variant_labels import format_variant_label
+
+SI_INSENSITIVE_VARIANTS = {"CI", "IE"}
 
 
 def _resolve_sub_variants(map_variant: str, loccode: str) -> list[str]:
@@ -29,29 +50,47 @@ def _resolve_sub_variants(map_variant: str, loccode: str) -> list[str]:
         registry = resp.json().get("models", [])
     except Exception:
         registry = []
+
+    # Prefer registry varloc matches
+    registered = sorted(
+        {
+            m["variant"]
+            for m in registry
+            if m.get("loccode") == loccode
+            and m.get("variant")
+            and (
+                m["variant"] == map_variant
+                or m["variant"].startswith(map_variant + "_")
+            )
+        }
+    )
+    if registered:
+        return registered
+
+    # Fallback with species-config keys matching map_variant
     vs = load_variant_species()
-
-    # Find all sub-variant keys that could match this map variant
-    candidate_keys = []
+    sub_keys = sorted(
+        k
+        for k, v in vs.items()
+        if isinstance(v, list) and k.startswith(map_variant + "_")
+    )
+    if sub_keys:
+        return sub_keys
     if map_variant in vs and isinstance(vs[map_variant], list):
-        candidate_keys = [map_variant]
-    else:
-        candidate_keys = sorted(k for k, v in vs.items() if isinstance(v, list) and k.startswith(map_variant + "_"))
+        return [map_variant]
+    return [map_variant]
 
-    if not candidate_keys:
-        candidate_keys = [map_variant]
-
-    # Filter to sub-variants that have models for this loccode
-    available = [
-        k for k in candidate_keys
-        if any(m["variant"] == k and m["loccode"] == loccode for m in registry)
-    ]
-
-    return available if available else candidate_keys
 
 API_BASE_URL = get_api_base_url()
 
-CHART_BASE_YEAR = 2024
+CHART_BASE_YEAR = 2026
+HATCH_START_AGE = 40
+HATCH_BG_ALPHA = 0.08
+HATCH_LINE_ALPHA = 0.18
+HATCH_STEP_YEARS = 2.0
+HATCH_SLOPE_YEARS = 4.0
+BASE_LINE_WIDTH = 3.0
+PROTOCOL_ORDER = ["ACR", "CAR", "VERRA", "GS", "ISO"]
 
 # Keep protocol line colors stable regardless of selection/removal order.
 PROTOCOL_COLOR_MAP = {
@@ -63,110 +102,804 @@ PROTOCOL_COLOR_MAP = {
 }
 
 
-def _five_year_values(max_year: int, start_year: int = CHART_BASE_YEAR) -> list[int]:
+def _round_to_nearest_hundred(value):
+    """Round numeric display values to the nearest hundreds place."""
+    if value is None or pd.isna(value):
+        return value
+    return round(float(value), -2)
+
+
+def _format_nearest_hundred(value, prefix: str = "", suffix: str = "") -> str:
+    """Format numeric display values rounded to the nearest hundreds place."""
+    rounded = _round_to_nearest_hundred(value)
+    if rounded is None or pd.isna(rounded):
+        return "-"
+    return f"{prefix}{rounded:,.0f}{suffix}"
+
+
+def _rgba_with_alpha(color: str, alpha: float) -> str:
+    """Convert a matplotlib/hex color into an rgba(...) string with custom alpha."""
+    r, g, b, _ = mcolors.to_rgba(color)
+    return f"rgba({int(r * 255)}, {int(g * 255)}, {int(b * 255)}, {alpha:.3f})"
+
+
+def _add_fading_line_series(
+    fig: go.Figure,
+    series_df: pd.DataFrame,
+    x_col: str,
+    y_col: str,
+    color: str,
+    label: str | None,
+    showlegend: bool,
+    line_dash: str = "solid",
+):
+    """Add a single series to a Plotly figure with constant-opacity lines/markers."""
+    if series_df.empty:
+        return
+
+    x = series_df[x_col].astype(float).to_numpy()
+    y = series_df[y_col].astype(float).to_numpy()
+    rounded_y = np.array([_round_to_nearest_hundred(v) for v in y], dtype=float)
+
+    if len(x) == 1:
+        marker_color = _rgba_with_alpha(color, 1.0)
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=y,
+                mode="markers",
+                marker=dict(color=[marker_color], size=7),
+                customdata=rounded_y,
+                name=label,
+                legendgroup=label,
+                showlegend=showlegend,
+                hovertemplate=f"Year: %{{x:.0f}}<br>{y_col}: %{{customdata:,.0f}}"
+                + (f"<br>Series: {label}" if label else "")
+                + "<extra></extra>",
+            )
+        )
+        return
+
+    for idx in range(len(x) - 1):
+        x0, x1 = x[idx], x[idx + 1]
+        y0, y1 = y[idx], y[idx + 1]
+        fig.add_trace(
+            go.Scatter(
+                x=[x0, x1],
+                y=[y0, y1],
+                mode="lines",
+                line=dict(
+                    color=_rgba_with_alpha(color, 1.0),
+                    width=BASE_LINE_WIDTH,
+                    dash=line_dash,
+                ),
+                name=label,
+                legendgroup=label,
+                showlegend=showlegend and idx == 0,
+                hoverinfo="skip",
+            )
+        )
+
+    marker_colors = [_rgba_with_alpha(color, 1.0) for _ in x]
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=y,
+            mode="markers",
+            marker=dict(color=marker_colors, size=7),
+            customdata=rounded_y,
+            name=label,
+            legendgroup=label,
+            showlegend=False,
+            hovertemplate=f"Year: %{{x:.0f}}<br>{y_col}: %{{customdata:,.0f}}"
+            + (f"<br>Series: {label}" if label else "")
+            + "<extra></extra>",
+        )
+    )
+
+
+def _plot_fading_line_chart(
+    data: pd.DataFrame,
+    x_col: str,
+    y_col: str,
+    title: str,
+    y_title: str,
+    include_years: list[int],
+    series_col: str | None = None,
+    show_future_hatch: bool = False,
+):
+    """Render a Plotly line chart with optional year-40+ hatch background."""
+    if data.empty or x_col not in data.columns or y_col not in data.columns:
+        st.info(f"No data available for {title}.")
+        return
+
+    x_values = pd.to_numeric(data[x_col], errors="coerce").dropna()
+    if x_values.empty:
+        st.info(f"No valid years available for {title}.")
+        return
+
+    fig = go.Figure()
+
+    # hatch_start_year = CHART_BASE_YEAR + HATCH_START_AGE
+    # x_end = max(include_years) if include_years else CHART_BASE_YEAR
+    chart_start_year = min(include_years) if include_years else int(x_values.min())
+    hatch_start_year = chart_start_year + HATCH_START_AGE
+    x_end = max(include_years) if include_years else chart_start_year
+
+    if (
+        show_future_hatch
+        and x_end > hatch_start_year
+        and not data.empty
+        and y_col in data.columns
+    ):
+        y_series = data[y_col].astype(float).replace([np.inf, -np.inf], np.nan).dropna()
+        if not y_series.empty:
+            y_min = float(y_series.min())
+            y_max = float(y_series.max())
+            if y_min == y_max:
+                pad = max(abs(y_min) * 0.05, 1.0)
+                y_min -= pad
+                y_max += pad
+
+            fig.add_shape(
+                type="rect",
+                x0=hatch_start_year,
+                x1=x_end,
+                y0=y_min,
+                y1=y_max,
+                xref="x",
+                yref="y",
+                line=dict(width=0),
+                fillcolor=f"rgba(120,120,120,{HATCH_BG_ALPHA:.3f})",
+                layer="below",
+            )
+
+            x_cursor = hatch_start_year - (y_max - y_min)
+            while x_cursor < x_end:
+                x0 = max(hatch_start_year, x_cursor)
+                x1 = min(x_end, x_cursor + HATCH_SLOPE_YEARS)
+                if x1 > x0:
+                    fig.add_shape(
+                        type="line",
+                        x0=x0,
+                        y0=y_min,
+                        x1=x1,
+                        y1=y_max,
+                        xref="x",
+                        yref="y",
+                        line=dict(
+                            color=f"rgba(90,90,90,{HATCH_LINE_ALPHA:.3f})", width=1
+                        ),
+                        layer="below",
+                    )
+                x_cursor += HATCH_STEP_YEARS
+
+    if series_col:
+        series_vals = data[series_col].dropna().unique().tolist()
+        protocol_dash_map = {"ACR": "dash", "CAR": "longdash", "VERRA": "dot"}
+        if series_col == "Protocol":
+            ordered = [p for p in PROTOCOL_ORDER if p in series_vals]
+            remaining = [s for s in series_vals if s not in ordered]
+            series_vals = ordered + sorted(remaining)
+        # Keep protocol colors stable regardless of selection order.
+        palette = qualitative.Plotly
+        fallback_cycle = iter(palette)
+        color_map: dict[str, str] = {}
+        for s in series_vals:
+            key = str(s)
+            if key in PROTOCOL_COLOR_MAP:
+                color_map[s] = PROTOCOL_COLOR_MAP[key]
+            else:
+                color_map[s] = next(fallback_cycle, "#7f7f7f")
+
+        for s in series_vals:
+            s_df = data[data[series_col] == s].sort_values(x_col)
+            _add_fading_line_series(
+                fig=fig,
+                series_df=s_df,
+                x_col=x_col,
+                y_col=y_col,
+                color=color_map[s],
+                label=str(s),
+                showlegend=True,
+                line_dash=protocol_dash_map.get(str(s), "solid")
+                if series_col == "Protocol"
+                else "solid",
+            )
+    else:
+        _add_fading_line_series(
+            fig=fig,
+            series_df=data.sort_values(x_col),
+            x_col=x_col,
+            y_col=y_col,
+            color=qualitative.Plotly[0],
+            label=None,
+            showlegend=False,
+        )
+
+    fig.update_layout(
+        title=title,
+        template="plotly_white",
+        height=400,
+        margin=dict(l=20, r=20, t=50, b=20),
+        legend_title=series_col if series_col else None,
+    )
+    fig.update_xaxes(
+        title_text="Year",
+        tickvals=include_years,
+        tickformat="d",
+        tickangle=30,
+        # range=[CHART_BASE_YEAR, max(include_years)],
+        range=[chart_start_year, max(include_years)],
+        showgrid=True,
+        gridcolor="rgba(0,0,0,0.15)",
+    )
+    fig.update_yaxes(
+        title_text=y_title,
+        showgrid=True,
+        gridcolor="rgba(0,0,0,0.15)",
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _five_year_values(max_year: int, start_year) -> list[int]:
     """Return 5-year x-axis values from start_year through max_year (inclusive range)."""
     if max_year < start_year:
         return [start_year]
     return list(range(start_year, int(max_year) + 1, 5))
 
+def _dynamic_baseline_year(df: pd.DataFrame, year_col: str = "Year", step_years: int = 5) -> int:
+    """Return the dynamic zero-baseline year immediately before the first modeled year."""
+    years = pd.to_numeric(df[year_col], errors="coerce").dropna()
+    if years.empty:
+        raise ValueError("Cannot determine baseline year from empty/non-numeric Year values.")
+    # return int(years.min()) - step_years
+    return int(years.min())
 
-def _protocol_color_scale(protocols: list[str]) -> alt.Scale:
-    """Build a deterministic Altair color scale for selected protocols."""
-    domain = [p for p in protocols if p in PROTOCOL_COLOR_MAP]
-    # Fallback color for any unknown protocol names
-    unknown = [p for p in protocols if p not in PROTOCOL_COLOR_MAP]
-    domain.extend(unknown)
-
-    color_range = [PROTOCOL_COLOR_MAP[p] for p in domain if p in PROTOCOL_COLOR_MAP]
-    color_range.extend(["#7f7f7f"] * len(unknown))
-
-    return alt.Scale(domain=domain, range=color_range)
-
-
-def _prepend_zero_year_row(
+def _prepend_dynamic_zero_row(
     df: pd.DataFrame,
     value_col: str,
     year_col: str = "Year",
-    base_year: int = CHART_BASE_YEAR,
-) -> pd.DataFrame:
-    """Prepend a synthetic base-year row (value=0) for single-series charts."""
+    step_years: int = 5,
+) -> tuple[pd.DataFrame, int]:
+    """Prepend a zero row at first modeled year - step_years for single-series charts."""
     out = df.copy()
-    out = out[out[year_col] != base_year]
+    baseline_year = _dynamic_baseline_year(out, year_col=year_col, step_years=step_years)
+
     zero_row = {col: np.nan for col in out.columns}
-    zero_row[year_col] = base_year
+    zero_row[year_col] = baseline_year
     zero_row[value_col] = 0.0
+
     out = pd.concat([pd.DataFrame([zero_row]), out], ignore_index=True)
-    return out.sort_values(year_col).reset_index(drop=True)
+    out = out.sort_values(year_col).reset_index(drop=True)
+
+    return out, baseline_year
 
 
-def _prepend_zero_year_rows_by_group(
+def _prepend_dynamic_zero_rows_by_group(
     df: pd.DataFrame,
     group_col: str,
     value_col: str,
+    groups: list[str] | None = None,
     year_col: str = "Year",
-    base_year: int = CHART_BASE_YEAR,
-) -> pd.DataFrame:
-    """Prepend a synthetic base-year row (value=0) for each group in multi-series charts."""
+    step_years: int = 5,
+) -> tuple[pd.DataFrame, int]:
+    """Prepend zero rows at first modeled year - step_years for each group."""
     out = df.copy()
-    out = out[out[year_col] != base_year]
-    groups = out[group_col].dropna().unique().tolist()
+    baseline_year = _dynamic_baseline_year(out, year_col=year_col, step_years=step_years)
 
-    if not groups:
-        return out
+    if groups is None:
+        groups = out[group_col].dropna().unique().tolist()
 
     zero_rows = pd.DataFrame(
-        [{year_col: base_year, group_col: g, value_col: 0.0} for g in groups]
+        [{year_col: baseline_year, group_col: group, value_col: 0.0} for group in groups]
     )
+
     out = pd.concat([zero_rows, out], ignore_index=True)
-    return out.sort_values([group_col, year_col]).reset_index(drop=True)
+    out = out.sort_values([group_col, year_col]).reset_index(drop=True)
 
-def _credits_keys(prefix: str = "credits_") -> list[str]:
-    """
-    Return all proforma input keys (prefixed) that should persist for the Credits section.
-    Uses the JSON defaults as the source for which keys exist.
-    """
-    defaults = _load_proforma_defaults()
-    return [prefix + k for k in defaults.keys()]
+    return out, baseline_year
 
-def _seed_defaults(prefix: str = "credits_"):
+
+def _filter_to_five_year_intervals(
+    df: pd.DataFrame,
+    year_col: str = "Year",
+    # start_year: int = CHART_BASE_YEAR,
+    start_year: int | None = None,
+) -> tuple[pd.DataFrame, list[int]]:
+    """Keep rows at/after start_year and restricted to 5-year intervals from start_year."""
+    out = df.copy()
+
+    if start_year is None:
+        start_year = int(pd.to_numeric(out[year_col], errors="coerce").min())
+
+    out = out[out[year_col] >= start_year]
+    if out.empty:
+        return out, [start_year]
+
+    include_years = _five_year_values(int(out[year_col].max()), start_year=start_year)
+    out = out[out[year_col].isin(include_years)]
+    return out, include_years
+
+def _regrid_series_to_five_year_intervals(
+    df: pd.DataFrame,
+    value_col: str,
+    year_col: str = "Year",
+    # start_year: int = CHART_BASE_YEAR,
+    start_year: int | None = None,
+) -> tuple[pd.DataFrame, list[int]]:
+    """Interpolate a single series onto 5-year grid from start_year."""
+    out = df.copy()
+
+    if start_year is None:
+        start_year = int(pd.to_numeric(out[year_col], errors="coerce").min())
+
+    out = out[out[year_col] >= start_year]
+    out = out[[year_col, value_col]].dropna().sort_values(year_col)
+    if out.empty:
+        return out, [start_year]
+
+    out = out.groupby(year_col, as_index=False)[value_col].first()
+
+    x = out[year_col].astype(float).to_numpy()
+    y = out[value_col].astype(float).to_numpy()
+    include_years = _five_year_values(int(x.max()), start_year=start_year)
+    xi = np.array(include_years, dtype=float)
+    yi = np.interp(xi, x, y)
+
+    reg = pd.DataFrame({year_col: xi.astype(int), value_col: yi})
+    return reg, include_years
+
+def _co2e_accumulation_summary(
+    df: pd.DataFrame,
+    value_col: str = "CO2e",
+    year_col: str = "Year",
+    # base_year: int = CHART_BASE_YEAR,
+    base_year: int | None = None,
+    horizons: tuple[int, ...] = (10, 50, 100),
+) -> pd.DataFrame:
+    """Return CO2e accumulation values interpolated at project-year horizons."""
+    if df.empty or value_col not in df.columns or year_col not in df.columns:
+        return pd.DataFrame()
+
+    curve = df[[year_col, value_col]].copy()
+    curve[year_col] = pd.to_numeric(curve[year_col], errors="coerce")
+    curve[value_col] = pd.to_numeric(curve[value_col], errors="coerce")
+    curve = curve.dropna(subset=[year_col, value_col]).sort_values(year_col)
+
+    if curve.empty:
+        return pd.DataFrame()
+
+    if base_year is None:
+        base_year = int(curve[year_col].min())
+
+    x = curve[year_col].astype(float).to_numpy()
+    y = curve[value_col].astype(float).to_numpy()
+    target_years = np.array([base_year + horizon for horizon in horizons], dtype=float)
+    values = np.interp(target_years, x, y)
+
+    return pd.DataFrame(
+        [
+            {f"Year {horizon}": _format_nearest_hundred(value) for horizon, value in zip(horizons, values)}
+        ]
+    )
+
+
+def _average_protocol_adjusted_cumulative_co2e(
+    df: pd.DataFrame | None,
+    protocols: list[str],
+    net_acres: float = 1,
+    show_total_project_acreage: bool = True,
+) -> pd.DataFrame:
+    """Return cumulative CO2e averaged by year across selected protocols."""
+    required_cols = {"Year", "Protocol", "CU"}
+    if df is None or df.empty or not required_cols.issubset(df.columns) or not protocols:
+        return pd.DataFrame()
+
+    avg_df = df[df["Protocol"].isin(protocols)].copy()
+    if avg_df.empty:
+        return pd.DataFrame()
+
+    avg_df["Year"] = pd.to_numeric(avg_df["Year"], errors="coerce")
+    avg_df["CU"] = pd.to_numeric(avg_df["CU"], errors="coerce")
+    avg_df = avg_df.dropna(subset=["Year", "Protocol", "CU"])
+    if avg_df.empty:
+        return pd.DataFrame()
+
+    if show_total_project_acreage:
+        avg_df["CU"] = avg_df["CU"] * net_acres
+
+    avg_df = avg_df.sort_values(["Protocol", "Year"])
+    avg_df["Cumulative_CU"] = avg_df.groupby("Protocol")["CU"].cumsum()
+
+    return (
+        avg_df.groupby("Year", as_index=False)["Cumulative_CU"]
+        .mean()
+        .sort_values("Year")
+    )
+
+
+def _carbon_curve_signature(df: pd.DataFrame | None) -> str | None:
+    """Return a stable fingerprint for the current modeled carbon curve."""
+    required_cols = {"Year", "ABLD_C"}
+    if df is None or df.empty or not required_cols.issubset(df.columns):
+        return None
+
+    curve = df[["Year", "ABLD_C"]].copy()
+    curve["Year"] = pd.to_numeric(curve["Year"], errors="coerce")
+    curve["ABLD_C"] = pd.to_numeric(curve["ABLD_C"], errors="coerce")
+    curve = curve.dropna(subset=["Year", "ABLD_C"]).sort_values("Year")
+    if curve.empty:
+        return None
+
+    curve["Year"] = curve["Year"].round(6)
+    curve["ABLD_C"] = curve["ABLD_C"].round(6)
+    payload = curve.to_csv(index=False).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _interpolated_protocol_average_horizon_value(
+    df: pd.DataFrame | None,
+    base_year: int | None,
+    horizon: int = 100,
+    value_col: str = "Cumulative_CU",
+    year_col: str = "Year",
+) -> tuple[int, float] | None:
+    """Return the interpolated protocol-average cumulative value at a project horizon."""
+    if df is None or df.empty or value_col not in df.columns or year_col not in df.columns:
+        return None
+
+    curve = df[[year_col, value_col]].copy()
+    curve[year_col] = pd.to_numeric(curve[year_col], errors="coerce")
+    curve[value_col] = pd.to_numeric(curve[value_col], errors="coerce")
+    curve = curve.dropna(subset=[year_col, value_col]).sort_values(year_col)
+    if curve.empty:
+        return None
+
+    if base_year is None:
+        base_year = int(curve[year_col].min())
+
+    target_year = int(base_year + horizon)
+    value = float(
+        np.interp(
+            float(target_year),
+            curve[year_col].astype(float).to_numpy(),
+            curve[value_col].astype(float).to_numpy(),
+        )
+    )
+    return target_year, value
+
+
+def _protocol_adjusted_average_from_carbon_curve(
+    carbon_df: pd.DataFrame | None,
+    protocols: list[str],
+    net_acres: float = 1,
+    show_total_project_acreage: bool = True,
+    horizon: int = 100,
+) -> tuple[int, float, pd.DataFrame, int] | None:
+    """Compute the protocol-adjusted average cumulative CO2e directly from a carbon curve."""
+    if carbon_df is None or carbon_df.empty or not protocols:
+        return None
+    if "Year" not in carbon_df.columns or "ABLD_C" not in carbon_df.columns:
+        return None
+
+    carbon_rows_df = carbon_df[["Year", "ABLD_C"]].copy()
+    carbon_rows_df["Year"] = pd.to_numeric(carbon_rows_df["Year"], errors="coerce")
+    carbon_rows_df["ABLD_C"] = pd.to_numeric(carbon_rows_df["ABLD_C"], errors="coerce")
+    carbon_rows_df = carbon_rows_df.dropna(subset=["Year", "ABLD_C"]).sort_values("Year")
+    if carbon_rows_df.empty:
+        return None
+
+    carbon_baseline_year = int(carbon_rows_df["Year"].min())
+    payload = {
+        "carbon_rows": carbon_rows_df.to_dict(orient="records"),
+        "protocols": protocols,
+    }
+
+    resp = requests.post(
+        f"{API_BASE_URL}/carbon/units",
+        json=payload,
+        timeout=10,
+    )
+    resp.raise_for_status()
+
+    final_df = pd.DataFrame(resp.json()["rows"])
+    if final_df.empty:
+        return None
+
+    zero_cu_rows = pd.DataFrame(
+        [{"Year": carbon_baseline_year, "Protocol": protocol, "CU": 0.0} for protocol in protocols]
+    )
+    final_df = pd.concat([zero_cu_rows, final_df], ignore_index=True)
+    final_df = final_df.sort_values(["Protocol", "Year"]).reset_index(drop=True)
+
+    protocol_average_df = _average_protocol_adjusted_cumulative_co2e(
+        final_df,
+        protocols,
+        net_acres=net_acres,
+        show_total_project_acreage=show_total_project_acreage,
+    )
+    horizon_result = _interpolated_protocol_average_horizon_value(
+        protocol_average_df,
+        carbon_baseline_year,
+        horizon=horizon,
+    )
+    if horizon_result is None:
+        return None
+
+    final_year, final_value = horizon_result
+    return final_year, final_value, protocol_average_df, carbon_baseline_year
+
+# def _protocol_color_scale(protocols: list[str]) -> alt.Scale:
+#     """Build a deterministic Altair color scale for selected protocols."""
+#     domain = [p for p in protocols if p in PROTOCOL_COLOR_MAP]
+#     # Fallback color for any unknown protocol names
+#     unknown = [p for p in protocols if p not in PROTOCOL_COLOR_MAP]
+#     domain.extend(unknown)
+
+#     color_range = [PROTOCOL_COLOR_MAP[p] for p in domain if p in PROTOCOL_COLOR_MAP]
+#     color_range.extend(["#7f7f7f"] * len(unknown))
+
+#     return alt.Scale(domain=domain, range=color_range)
+
+
+# def _protocol_dash_scale(protocols: list[str]) -> alt.Scale:
+#     """Stable protocol dash mapping while preserving existing colors."""
+#     domain = [p for p in protocols if p in PROTOCOL_COLOR_MAP]
+#     unknown = [p for p in protocols if p not in PROTOCOL_COLOR_MAP]
+#     domain.extend(unknown)
+
+#     # ACR/CAR/VERRA get dashed styles; others remain solid.
+#     dash_map = {
+#         "ACR": [6, 4],
+#         "CAR": [10, 4],
+#         "VERRA": [2, 3],
+#     }
+#     dash_range = [dash_map.get(p, [1, 0]) for p in domain]
+#     return alt.Scale(domain=domain, range=dash_range)
+
+
+# def _build_future_hatch_layers(
+#     df: pd.DataFrame,
+#     y_col: str,
+#     include_years: list[int],
+# ) -> alt.LayerChart | None:
+#     """Create subtle future-period hatch-like background (year 40 onward)."""
+#     if df.empty or y_col not in df.columns or not include_years:
+#         return None
+
+#     hatch_start = CHART_BASE_YEAR + HATCH_START_AGE
+#     x_end = max(include_years)
+#     if x_end <= hatch_start:
+#         return None
+
+#     y_series = pd.to_numeric(df[y_col], errors="coerce").dropna()
+#     if y_series.empty:
+#         return None
+#     y_min = float(y_series.min())
+#     y_max = float(y_series.max())
+#     if y_min == y_max:
+#         pad = max(abs(y_min) * 0.05, 1.0)
+#         y_min -= pad
+#         y_max += pad
+
+#     rect_df = pd.DataFrame([{"x0": hatch_start, "x1": x_end, "y0": y_min, "y1": y_max}])
+#     rect = (
+#         alt.Chart(rect_df)
+#         .mark_rect(color="#777777", opacity=0.08)
+#         .encode(
+#             x="x0:Q",
+#             x2="x1:Q",
+#             y="y0:Q",
+#             y2="y1:Q",
+#         )
+#     )
+
+#     stripe_years = np.arange(hatch_start, x_end + 0.1, 2.0)
+#     stripe_df = pd.DataFrame({"x": stripe_years, "y0": y_min, "y1": y_max})
+#     stripes = (
+#         alt.Chart(stripe_df)
+#         .mark_rule(color="#666666", opacity=0.18, strokeDash=[2, 3])
+#         .encode(
+#             x="x:Q",
+#             y="y0:Q",
+#             y2="y1:Q",
+#         )
+#     )
+
+#     return rect + stripes
+
+# def _prepend_zero_year_row(
+#     df: pd.DataFrame,
+#     value_col: str,
+#     year_col: str = "Year",
+#     base_year: int = CHART_BASE_YEAR,
+# ) -> pd.DataFrame:
+#     """Prepend a synthetic base-year row (value=0) for single-series charts."""
+#     out = df.copy()
+#     out = out[out[year_col] != base_year]
+#     zero_row = {col: np.nan for col in out.columns}
+#     zero_row[year_col] = base_year
+#     zero_row[value_col] = 0.0
+#     out = pd.concat([pd.DataFrame([zero_row]), out], ignore_index=True)
+#     return out.sort_values(year_col).reset_index(drop=True)
+
+
+# def _prepend_zero_year_rows_by_group(
+#     df: pd.DataFrame,
+#     group_col: str,
+#     value_col: str,
+#     year_col: str = "Year",
+#     base_year: int = CHART_BASE_YEAR,
+# ) -> pd.DataFrame:
+#     """Prepend a synthetic base-year row (value=0) for each group in multi-series charts."""
+#     out = df.copy()
+#     out = out[out[year_col] != base_year]
+#     groups = out[group_col].dropna().unique().tolist()
+
+#     if not groups:
+#         return out
+
+#     zero_rows = pd.DataFrame(
+#         [{year_col: base_year, group_col: g, value_col: 0.0} for g in groups]
+#     )
+#     out = pd.concat([zero_rows, out], ignore_index=True)
+#     return out.sort_values([group_col, year_col]).reset_index(drop=True)
+
+
+# def _credits_keys(prefix: str = "credits_") -> list[str]:
+#     """
+#     Return all proforma input keys (prefixed) that should persist for the Credits section.
+#     Uses the JSON defaults as the source for which keys exist.
+#     """
+#     defaults = _proforma_base_defaults()
+#     return [prefix + k for k in defaults.keys()]
+
+
+# def _seed_defaults(prefix: str = "credits_"):
+#     """
+#     Seed Streamlit session state with default financial and credit parameters
+#     based on proforma defaults. Only sets missing keys.
+#     """
+#     defaults = _proforma_base_defaults()
+#     for k, v in defaults.items():
+#         st.session_state.setdefault(prefix + k, v)
+
+
+def _proforma_base_defaults() -> dict:
+    """Return the global/fallback proforma defaults.
+
+    Supports both the original flat proforma_presets.json structure and the new
+    structure with protocol-specific overrides:
+
+        {
+            "num_plots": 250,
+                flat fallback defaults ...,
+            "protocol_overrides": {
+                "ACR": {"registry_fees": 8500},
+                ...
+            }
+        }
     """
-    Seed Streamlit session state with default financial and credit parameters
-    based on proforma defaults. Only sets missing keys.
+    raw = _load_proforma_defaults() or {}
+
+    # If a future JSON is wrapped as {"defaults": {...}, "protocol_overrides": {...}},
+    # use the wrapped defaults. Otherwise keep the current flat structure and
+    # ignore nested override blocks when building the fallback defaults.
+    if isinstance(raw.get("defaults"), dict):
+        return raw["defaults"].copy()
+
+    return {
+        k: v
+        for k, v in raw.items()
+        if k not in {"defaults", "protocol_overrides", "protocols"}
+    }
+
+
+def _proforma_protocol_overrides() -> dict:
+    """Return protocol-specific proforma overrides from proforma_presets.json."""
+    raw = _load_proforma_defaults() or {}
+    overrides = raw.get("protocol_overrides") or raw.get("protocols") or {}
+    return overrides if isinstance(overrides, dict) else {}
+
+
+def _proforma_defaults_for_protocol(protocol: str) -> dict:
+    """Merge fallback defaults with protocol-specific overrides.
+
+    Blank/null override values are ignored so incomplete protocol rows, such as
+    ISO with some blank cells, safely fall back to the global defaults.
     """
-    defaults = _load_proforma_defaults()
-    for k, v in defaults.items():
-        st.session_state.setdefault(prefix + k, v)
+    defaults = _proforma_base_defaults()
+    overrides = _proforma_protocol_overrides().get(protocol, {})
+
+    if isinstance(overrides, dict):
+        for k, v in overrides.items():
+            if v is not None:
+                defaults[k] = v
+
+    return defaults
+
+
+def _sync_active_variant():
+    """Push a Planting Design sub-variant pick into ``active_variant``.
+
+    Runs as the selectbox ``on_change`` callback (before the rerun) so the
+    single source of truth reflects the user's choice *before* the widget is
+    re-seeded from it on the next run.
+    """
+    st.session_state["active_variant"] = st.session_state.get("planting_sub_variant")
+
 
 def planting_sliders():
     """
-    Render all planting-related Streamlit sliders. Restores saved state, renders species sliders, computes species mix values, and stores
-    all planting parameters in session state. 
+    Render all planting-related Streamlit inputs. Restores saved state, renders species inputs, computes species mix values, and stores
+    all planting parameters in session state.
     """
     presets = load_variant_presets()
     map_variant = st.session_state.get("selected_variant", "PN")
-    varloc_name = st.session_state.get("selected_varloc_name", "Olympic National Forest")
+    varloc_name = st.session_state.get(
+        "selected_varloc_name", "Olympic National Forest"
+    )
     varloc_code = st.session_state.get("selected_varloc_code", "609")
 
-    # Resolve sub-variants based on what models exist for this loccode
+    # Sub-variant refinement at the committed location. The Site Selection
+    # chooser may have already set ``active_variant`` (incl. cross-variant
+    # overlaps); here the user can still switch between sub-variants registered
+    # at this loccode (e.g. NC_1 vs NC_2). Selection stays in sync via
+    # ``active_variant``.
+    if st.session_state.get("_planting_prefill"):
+        st.session_state["active_variant"] = st.session_state["_planting_prefill"]["variant"]
+
     sub_variants = _resolve_sub_variants(map_variant, varloc_code)
+    current = st.session_state.get("active_variant")
+    if current not in sub_variants:
+        current = sub_variants[0]
+    # ``active_variant`` is the single source of truth for the sub-variant.
+    # Seed the keyed selectbox from it every run so an upstream change (the
+    # Site Selection chooser) propagates here. A keyed widget's stored value
+    # otherwise overrides the ``index=`` default whenever it is still a valid
+    # option (e.g. switching NC_1 <-> NC_2), silently pinning the variant and
+    # with it the species list and the variant actually run. ``on_change``
+    # pushes user picks back into ``active_variant`` so this never clobbers a
+    # fresh selection.
+    st.session_state["planting_sub_variant"] = current
+
     if len(sub_variants) > 1:
+        st.info("Multiple FVS variants cover this location — choose one:")
         variant = st.selectbox(
-            "Sub-variant",
+            "FVS Variant",
             options=sub_variants,
-            index=0,
-            key="selected_sub_variant",
+            format_func=format_variant_label,
+            key="planting_sub_variant",
+            on_change=_sync_active_variant,
+            help=H("planting.variant_label"),
         )
     else:
         variant = sub_variants[0]
+        st.markdown(
+            f"**FVS Variant:** {format_variant_label(variant)}",
+            unsafe_allow_html=False,
+            help=H("planting.variant_label"),
+            width="stretch",
+        )
     st.session_state["active_variant"] = variant
 
     if variant not in presets:
         st.warning(f"Variant '{variant}' not found in presets. Falling back to 'PN'.")
     preset = presets.get(variant, presets.get("PN", {}))
-
-    st.markdown(f"**FVS Variant:** {map_variant}", unsafe_allow_html=False, help=H("planting.variant_label"), width="stretch")
-    st.markdown(f"**FVS Location Name:** {varloc_name}", unsafe_allow_html=False, help=H("planting.varloc_label"), width="stretch")
-    st.markdown(f"**FVS Location Code:** {varloc_code}", unsafe_allow_html=False, help=H("planting.varcode_label"), width="stretch")
+    st.markdown(
+        f"**FVS Location Name:** {varloc_name}",
+        unsafe_allow_html=False,
+        help=H("planting.varloc_label"),
+        width="stretch",
+    )
+    st.markdown(
+        f"**FVS Location Code:** {varloc_code}",
+        unsafe_allow_html=False,
+        help=H("planting.varcode_label"),
+        width="stretch",
+    )
 
     sp_keys = _species_keys(variant)
 
@@ -175,28 +908,88 @@ def planting_sliders():
 
     # Initialize presets ONLY if the variant truly changed
     _init_planting_state(variant, preset)
+    _apply_planting_prefill(variant, sp_keys)
+
+    # Per-variant input bounds. Clamp before rendering to avoid Streamlit value errors.
+    bounds = slider_bounds(preset)
+    st.session_state["si"] = clamp(
+        int(st.session_state.get("si", bounds["si_min"])),
+        bounds["si_min"],
+        bounds["si_max"],
+    )
+    st.session_state["survival"] = clamp(
+        int(st.session_state.get("survival", bounds["survival_min"])),
+        bounds["survival_min"],
+        bounds["survival_max"],
+    )
 
     st.number_input(
-        "Net Acres:",
+        "Planted Acres:",
         min_value=1,
         step=100,
         key="net_acres",
-        help=H("number.inputs.acres")
+        help=H("number.inputs.acres"),
     )
     st.caption(f"{int(st.session_state.get('net_acres', 0)):,} acres")
-    st.slider("Survival Percentage", 40, 90, key="survival", help=H("planting.slider_survival"))
-    st.slider("Site Index", 96, 137, key="si", help=H("planting.slider_si"))
+    st.number_input(
+        "Survival Percentage",
+        min_value=bounds["survival_min"],
+        max_value=bounds["survival_max"],
+        step=1,
+        key="survival",
+        help=H("planting.slider_survival"),
+    )
+    si_locked = variant.split("_")[0] in SI_INSENSITIVE_VARIANTS
+    st.number_input(
+        "Site Index",
+        min_value=bounds["si_min"],
+        max_value=bounds["si_max"],
+        step=1,
+        key="si",
+        disabled=si_locked,
+        help=H("planting.slider_si_disabled") if si_locked else H("planting.slider_si"),
+    )
 
-    st.markdown("Species Mix (TPA)", unsafe_allow_html=False, help=H("planting.species_mix_header"), width="stretch")
-    tpa_cap = preset.get("_tpa_cap", 435)
+    st.markdown(
+        "Species Mix (TPA)",
+        unsafe_allow_html=False,
+        # help=H("planting.species_mix_header"),
+        width="stretch",
+    )
+
+    st.markdown(
+            "Set trees per acre (TPA) for each species.",
+            unsafe_allow_html=False,
+            width="stretch",
+        )
+
+    tpa_cap = int(preset.get("_tpa_cap", 435))
     for i, spk in enumerate(sp_keys):
-        st.slider(_species_label(variant, i), 0, tpa_cap, key=spk)
+        st.number_input(
+            _species_label(variant, i),
+            min_value=0,
+            max_value=tpa_cap,
+            step=1,
+            key=spk,
+        )
 
     # Summary
     total_tpa = sum(int(st.session_state.get(k, 0)) for k in sp_keys)
-    st.markdown(f"**Total TPA:** {total_tpa}", unsafe_allow_html=False, help=H("planting.total_tpa_label"), width="stretch")
+    st.markdown(
+        f"**Total TPA:** {total_tpa}",
+        unsafe_allow_html=False,
+        help=H("planting.total_tpa_label"),
+        width="stretch",
+    )
     if total_tpa > tpa_cap:
-        st.warning(f"Total initial TPA exceeds {tpa_cap} and may present an unrealistic scenario. Consider adjusting sliders.")
+        st.warning(
+            f"Total initial TPA exceeds {tpa_cap} and may present an unrealistic scenario. Consider adjusting species TPA values."
+        )
+    elif total_tpa == 0:
+        st.error(
+            "Set at least one species above 0 TPA. A planting design with no trees "
+            "produces no carbon."
+        )
 
     # Store as positional list for the API
     st.session_state["species_tpa"] = [int(st.session_state.get(k, 0)) for k in sp_keys]
@@ -204,8 +997,11 @@ def planting_sliders():
     # Backup latest values so they're available if user navigates away and back
     _backup_keys(["survival", "si", "net_acres", *sp_keys])
 
+
 def carbon_chart():
-    if not all(k in st.session_state for k in ["survival", "si", "net_acres", "species_tpa"]):
+    if not all(
+        k in st.session_state for k in ["survival", "si", "net_acres", "species_tpa"]
+    ):
         st.info("Adjust Planting Design sliders to see the carbon output.")
         return
 
@@ -214,10 +1010,16 @@ def carbon_chart():
         st.info("Set at least one species TPA value.")
         return
 
-    variant = st.session_state.get("active_variant", st.session_state.get("selected_variant", "PN"))
+    variant = st.session_state.get(
+        "active_variant", st.session_state.get("selected_variant", "PN")
+    )
     loccode = st.session_state.get("selected_varloc_code", "609")
 
-    _PCT_LABELS = {"PCT0": "None", "PCT1": "Light", "PCT2": "Moderate"}
+    _PCT_LABELS = HELP.get("planting.pct_level", {}).get("labels") or {
+        "PCT0": "None - no pre-commercial thinning",
+        "PCT1": "Light thinning",
+        "PCT2": "Moderate thinning",
+    }
     # Fetch available PCT levels with retention percentages for this variant/location
     try:
         _pct_resp = requests.get(
@@ -232,10 +1034,13 @@ def carbon_chart():
 
     _pct_options = sorted(_pct_info.keys())
 
+    if "pct_level" in st.session_state and st.session_state["pct_level"] not in _pct_options:
+        st.session_state.pop("pct_level")
+
     def _fmt_pct(code: str) -> str:
         label = _PCT_LABELS.get(code, code)
         ret = _pct_info.get(code)
-        return f"{label} — {ret}%" if ret is not None else label
+        return f"{label} ({ret}% of trees retained)" if ret is not None else label
 
     pct_level = st.selectbox(
         "Pre-commercial Thin (PCT)",
@@ -267,25 +1072,81 @@ def carbon_chart():
     result = resp.json()
     df = pd.DataFrame(result["carbon_df"])
     st.session_state.carbon_df = df
+    st.session_state["carbon_curve_signature"] = _carbon_curve_signature(df)
     model_source = result.get("model_source", "coefficients")
 
     # Metric definitions: label, column, unit (per-acre), unit (project), scales_with_acres
     METRIC_DEFS = {
-        "ABLD_C":  {"label": "Aboveground live biomass carbon", "unit": "tons",       "unit_project": "tons",     "scales": True},
-        "BA":      {"label": "Basal area",                      "unit": "sq ft/acre", "unit_project": "sq ft",    "scales": True},
-        "QMD":     {"label": "Quadratic mean diameter",         "unit": "inches",     "unit_project": "inches",   "scales": False},
-        "SDI":     {"label": "Stand density index",             "unit": "index",      "unit_project": "index",    "scales": False},
-        "TCuFt":   {"label": "Total cubic volume",             "unit": "cu ft/acre", "unit_project": "cu ft",    "scales": True},
-        "MCuFt":   {"label": "Merchantable cubic volume",      "unit": "cu ft/acre", "unit_project": "cu ft",    "scales": True},
-        "Tpa":     {"label": "Trees per acre",                  "unit": "trees/acre", "unit_project": "trees/acre", "scales": False},
+        "CO2e": {
+            "label": "CO2e",
+            "unit": "tons",
+            "unit_project": "tons",
+            "scales": True,
+        },
+        "BA": {
+            "label": "Basal area",
+            "unit": "sq ft/acre",
+            "unit_project": "sq ft",
+            "scales": True,
+        },
+        "ABLD_C": {
+            "label": "Aboveground live biomass carbon",
+            "unit": "tons",
+            "unit_project": "tons",
+            "scales": True,
+        },
+        "QMD": {
+            "label": "Quadratic mean diameter",
+            "unit": "inches",
+            "unit_project": "inches",
+            "scales": False,
+        },
+        "SDI": {
+            "label": "Stand density index",
+            "unit": "index",
+            "unit_project": "index",
+            "scales": False,
+        },
+        "TCuFt": {
+            "label": "Total cubic volume",
+            "unit": "cu ft/acre",
+            "unit_project": "cu ft",
+            "scales": True,
+        },
+        "MCuFt": {
+            "label": "Merchantable cubic volume",
+            "unit": "cu ft/acre",
+            "unit_project": "cu ft",
+            "scales": True,
+        },
+        "Tpa": {
+            "label": "Trees per acre",
+            "unit": "",
+            "unit_project": "",
+            "scales": False,
+        },
     }
+
+    # Convert aboveground live biomass carbon to CO2e
+    if "ABLD_C" in df.columns:
+        df["CO2e"] = df["ABLD_C"] * 3.667
 
     available = {col: METRIC_DEFS[col] for col in METRIC_DEFS if col in df.columns}
 
-    toggle_oc = st.toggle('Show Total Project Acreage', True, 'toggle_oc', H("toggle.inputs.acres"))
+    acreage_mode_oc = st.radio(
+        "Acreage Display",
+        ["Total Project", "Per Acre"],
+        index=0,
+        horizontal=True,
+        key="acreage_mode_oc",
+        help=H("toggle.inputs.acres"),
+    )
+    toggle_oc = acreage_mode_oc == "Total Project"
+    st.session_state["toggle_oc"] = toggle_oc
     net_acres = st.session_state["net_acres"]
 
     plot_df = df.copy()
+
     if toggle_oc:
         for col, meta in available.items():
             if meta["scales"]:
@@ -316,239 +1177,581 @@ def carbon_chart():
         def _render_metric(label: str):
             col = metric_labels[label]
             meta = available[col]
-            unit = meta["unit_project"] if (toggle_oc and meta["scales"]) else meta["unit"]
-            df_m = _prepend_zero_year_row(plot_df[["Year", col]].copy(), value_col=col, base_year=CHART_BASE_YEAR)
-            inc = _five_year_values(df_m["Year"].max(), start_year=CHART_BASE_YEAR)
-            df_m = df_m[df_m["Year"].isin(inc)]
+            unit = (
+                meta["unit_project"] if (toggle_oc and meta["scales"]) else meta["unit"]
+            )
+            # df_m = _prepend_zero_year_row(
+            #     plot_df[["Year", col]].copy(), value_col=col, base_year=CHART_BASE_YEAR
+            # )
+            # df_m, inc = _regrid_series_to_five_year_intervals(
+            #     df_m, value_col=col, year_col="Year", start_year=CHART_BASE_YEAR
+            # )
+
+            df_m = plot_df[["Year", col]].copy()
+            df_m, chart_start_year = _prepend_dynamic_zero_row(
+                df_m,
+                value_col=col,
+                year_col="Year",
+            )
+
+            df_m, inc = _regrid_series_to_five_year_intervals(
+                df_m,
+                value_col=col,
+                year_col="Year",
+                start_year=chart_start_year,
+            )
+
             chart = (
-                alt.Chart(df_m).mark_line(point=True).encode(
-                    x=alt.X("Year:Q", title="Year", axis=alt.Axis(values=inc, format="d", labelAngle=30),
-                            scale=alt.Scale(domain=[CHART_BASE_YEAR, max(inc)])),
-                    y=alt.Y(f"{col}:Q", title=f"{label} ({unit})"),
+                alt.Chart(df_m)
+                .mark_line(point=True)
+                .encode(
+                    x=alt.X(
+                        "Year:Q",
+                        title="Year",
+                        axis=alt.Axis(values=inc, format="d", labelAngle=30),
+                        # scale=alt.Scale(domain=[CHART_BASE_YEAR, max(inc)]),
+                        scale=alt.Scale(domain=[chart_start_year, max(inc)]),
+                    ),
+                    y=alt.Y(f"{col}:Q", title=label if not unit else f"{label} ({unit})"),
                     tooltip=["Year", col],
-                ).properties(title=label, height=350)
+                )
+                .properties(title=label, height=350)
             )
             st.altair_chart(chart, use_container_width=True)
             # QMD disclaimer per Dave: 2029 values are unreliable
             if col == "QMD":
-                st.caption("Note: QMD predictions at year 2029 are unreliable and should be interpreted with caution.")
+                st.caption(
+                    "Note: QMD predictions at year 2029 are unreliable and should be interpreted with caution."
+                )
 
         _render_metric(primary_label)
         st.divider()
         _render_metric(secondary_label)
     else:
         # Coefficient fallback: single ABLD_C chart
-        chart_title = "Onsite Carbon (tons/project)" if toggle_oc else "Onsite Carbon (tons/acre)"
-        plot_df = _prepend_zero_year_row(plot_df, value_col="ABLD_C", base_year=CHART_BASE_YEAR)
-        include_years = _five_year_values(plot_df["Year"].max(), start_year=CHART_BASE_YEAR)
-        plot_df = plot_df[plot_df["Year"].isin(include_years)]
+        chart_title = (
+            "Onsite Carbon (tons/project)" if toggle_oc else "Onsite Carbon (tons/acre)"
+        )
+        # plot_df = _prepend_zero_year_row(
+        #     plot_df, value_col="ABLD_C", base_year=CHART_BASE_YEAR
+        # )
+        # plot_df, include_years = _regrid_series_to_five_year_intervals(
+        #     plot_df, value_col="ABLD_C", year_col="Year", start_year=CHART_BASE_YEAR
+        # )
 
-        line = alt.Chart(plot_df).mark_line(point=True).encode(
-            x=alt.X('Year:Q', title='Year',
-                     axis=alt.Axis(values=include_years, format='d', labelAngle=30),
-                     scale=alt.Scale(domain=[CHART_BASE_YEAR, max(include_years)])),
-            y=alt.Y('ABLD_C:Q', title=chart_title),
-            tooltip=['Year', 'ABLD_C']
-        ).properties(title="Cumulative " + chart_title, width=600, height=400)
+        plot_df, chart_start_year = _prepend_dynamic_zero_row(
+            plot_df,
+            value_col="ABLD_C",
+            year_col="Year",
+        )
+
+        plot_df, include_years = _regrid_series_to_five_year_intervals(
+            plot_df,
+            value_col="ABLD_C",
+            year_col="Year",
+            start_year=chart_start_year,
+        )
+
+        line = (
+            alt.Chart(plot_df)
+            .mark_line(point=True)
+            .encode(
+                x=alt.X(
+                    "Year:Q",
+                    title="Year",
+                    axis=alt.Axis(values=include_years, format="d", labelAngle=30),
+                    # scale=alt.Scale(domain=[CHART_BASE_YEAR, max(include_years)]),
+                    scale=alt.Scale(domain=[chart_start_year, max(include_years)]),
+                ),
+                y=alt.Y("ABLD_C:Q", title=chart_title),
+                tooltip=["Year", "ABLD_C"],
+            )
+            .properties(title="Cumulative " + chart_title, width=600, height=400)
+        )
         st.altair_chart(line, use_container_width=True)
 
     # Summary output
     if "ABLD_C" in plot_df.columns:
-        st.success(f"Final Carbon Output (year {int(plot_df['Year'].max())}): {plot_df['ABLD_C'].iloc[-1]:,.2f}")
+        final_co2e_unit = "tons"
+        selected_protocols = st.session_state.get(
+            "carbon_units_protocols",
+            st.session_state.get("carbon_units_inputs", {}).get(
+                "protocols",
+                ["ACR", "CAR", "VERRA"],
+            ),
+        )
+        selected_protocols = list(selected_protocols or [])
+        protocol_average_result = _protocol_adjusted_average_from_carbon_curve(
+            st.session_state.get("carbon_df"),
+            selected_protocols,
+            net_acres=net_acres,
+            show_total_project_acreage=toggle_oc,
+            horizon=100,
+        )
+
+        if protocol_average_result is not None:
+            final_year, final_value, protocol_average_df, base_year = protocol_average_result
+            st.session_state["protocol_average_cumulative_co2e_df"] = protocol_average_df
+            st.session_state["protocol_average_cumulative_co2e_base_year"] = base_year
+            st.session_state["protocol_average_cumulative_co2e_protocols"] = list(selected_protocols)
+            st.session_state["protocol_average_cumulative_co2e_toggle_total"] = toggle_oc
+            st.session_state["protocol_average_cumulative_co2e_net_acres"] = net_acres
+            st.session_state["protocol_average_cumulative_co2e_carbon_signature"] = (
+                st.session_state.get("carbon_curve_signature")
+            )
+            # st.success(
+            #     "Final CO2e Output - Average of Selected Protocols "
+            #     f"(year {final_year}): "
+            #     f"{final_value:,.2f} {final_co2e_unit}"
+            # )
 
     if model_source == "coefficients":
-        st.caption("Using coefficient-based estimates. Add FVS model files for richer predictions.")
+        st.caption(
+            "Using coefficient-based estimates. Add FVS model files for richer predictions."
+        )
 
 def carbon_units():
-        if "carbon_df" not in st.session_state:
-            st.error("No carbon data found.")
-            st.stop()
+    if "carbon_df" not in st.session_state:
+        st.error("No carbon data found.")
+        st.stop()
 
-        protocols = st.session_state.get(
-            "carbon_units_inputs", {}
-        ).get("protocols", [])
+    protocols = st.session_state.get("carbon_units_inputs", {}).get("protocols", [])
 
-        if not protocols:
-            st.info("Select at least one protocol.")
-            return
+    if not protocols:
+        st.info("Select at least one protocol.")
+        return
 
-        payload = {
-            "carbon_rows": st.session_state.carbon_df[
-                ["Year", "ABLD_C"]
-            ].to_dict(orient="records"),
-            "protocols": protocols,
-        }
+    # payload = {
+    #     "carbon_rows": st.session_state.carbon_df[["Year", "ABLD_C"]].to_dict(
+    #         orient="records"
+    #     ),
+    #     "protocols": protocols,
+    # }
+    
+    carbon_rows_df = st.session_state.carbon_df[["Year", "ABLD_C"]].copy()
+    carbon_years = pd.to_numeric(carbon_rows_df["Year"], errors="coerce").dropna()
+    if carbon_years.empty:
+        st.error("No valid carbon estimate years found.")
+        return
+    carbon_baseline_year = int(carbon_years.min())
 
-        json.dumps(payload) 
+    payload = {
+        "carbon_rows": carbon_rows_df.to_dict(orient="records"),
+        "protocols": protocols,
+    }
 
-        resp = requests.post(
-            f"{API_BASE_URL}/carbon/units",
-            json=payload,
-            timeout=10,
+    json.dumps(payload)
+
+    resp = requests.post(
+        f"{API_BASE_URL}/carbon/units",
+        json=payload,
+        timeout=10,
+    )
+    resp.raise_for_status()
+
+    final_df = pd.DataFrame(resp.json()["rows"])
+
+    if final_df.empty:
+        st.error("No protocols selected or no data available to plot.")
+        return
+
+    zero_cu_rows = pd.DataFrame(
+        [{"Year": carbon_baseline_year, "Protocol": protocol, "CU": 0.0} for protocol in protocols]
+    )
+    final_df = pd.concat([zero_cu_rows, final_df], ignore_index=True)
+    final_df = final_df.sort_values(["Protocol", "Year"]).reset_index(drop=True)
+
+    st.session_state.merged_df = final_df
+
+    toggle_ce = st.session_state.get("toggle_ce", True)
+    net_acres = st.session_state.get("net_acres", 1)
+
+    # Adjust values based on toggle.
+    # final_df["CU"] is per-acre, matching Planting Parameters behavior.
+    # Only multiply by net_acres when showing total project acreage.
+    plot_df = final_df.copy()
+
+    if toggle_ce:
+        plot_df["CU"] = plot_df["CU"] * net_acres
+
+    accumulation_mode_label = "Total Project" if toggle_ce else "Per Acre"
+    co2e_unit_label = "tons"
+    chart_title = f"{accumulation_mode_label} ({co2e_unit_label})"
+
+
+    # Add synthetic base-year zero rows
+    # plot_df = _prepend_zero_year_rows_by_group(
+    #     plot_df,
+    #     group_col="Protocol",
+    #     value_col="CU",
+    #     base_year=CHART_BASE_YEAR,
+    # )
+
+    # Sort before cumulative calculations
+    plot_df = plot_df.sort_values(["Protocol", "Year"])
+
+    # Calculate cumulative CO2e values for each protocol
+    plot_df["Cumulative_CU"] = plot_df.groupby("Protocol")["CU"].cumsum()
+
+    chart_start_year = int(plot_df["Year"].min())
+
+    protocol_average_summary_df = _average_protocol_adjusted_cumulative_co2e(
+        final_df,
+        protocols,
+        net_acres=net_acres,
+        show_total_project_acreage=toggle_ce,
+    )
+    summary_df = _co2e_accumulation_summary(
+        protocol_average_summary_df,
+        value_col="Cumulative_CU",
+        base_year=chart_start_year,
+    )
+
+    st.session_state["protocol_average_cumulative_co2e_df"] = protocol_average_summary_df
+    st.session_state["protocol_average_cumulative_co2e_base_year"] = chart_start_year
+    st.session_state["protocol_average_cumulative_co2e_protocols"] = list(protocols)
+    st.session_state["protocol_average_cumulative_co2e_toggle_total"] = toggle_ce
+    st.session_state["protocol_average_cumulative_co2e_net_acres"] = net_acres
+    st.session_state["protocol_average_cumulative_co2e_carbon_signature"] = (
+        st.session_state.get("carbon_curve_signature")
+    )
+
+    horizon_result = _interpolated_protocol_average_horizon_value(
+        protocol_average_summary_df,
+        chart_start_year,
+        horizon=100,
+    )
+    if horizon_result is not None:
+        final_year, final_value = horizon_result
+        st.success(
+            "Final CO2e Output - Average of Selected Protocols "
+            f"(year {final_year}): "
+            + _format_nearest_hundred(final_value, suffix=f" {co2e_unit_label}")
         )
-        resp.raise_for_status()
 
-        final_df = pd.DataFrame(resp.json()["rows"])
-
-        if final_df.empty:
-            st.error("No protocols selected or no data available to plot.")
-            return
-        
-        st.session_state.merged_df = final_df
-
-        toggle_ce = st.toggle('Show Total Project Acreage', True, 'toggle_ce', H("toggle.inputs.acres"))
-
-        # Adjust chart values based on toggle
-        plot_df = final_df.copy()
-        if toggle_ce:
-            plot_df['CU'] = plot_df['CU'] * st.session_state["net_acres"]
-
-        chart_title = "(tons/project)" if toggle_ce else "(tons/acre)"
-
-        plot_df = _prepend_zero_year_rows_by_group(
-            plot_df,
-            group_col='Protocol',
-            value_col='CU',
-            base_year=CHART_BASE_YEAR,
+    if not summary_df.empty:
+        st.markdown("**CO2e Accumulation Summary**")
+        cu_txt = """
+        CO2e represents the carbon dioxide equivalent of the carbon sequestered by the project. The reported CO2e values account for applicable deductions, including leakage (emissions that occur outside the project boundary as a result of project activities), buffer pool contributions for risk mitigation, and any other required adjustments under the relevant accounting framework. As a result, CO2e reflects the net climate benefit attributable to the project after these considerations.
+        """
+        st.markdown(cu_txt)
+        st.caption(
+            "Modeled CO2e accumulation is averaged across the selected protocols, "
+            "interpolated at 10-, 50-, and 100-year project horizons, "
+            f"and shown in {co2e_unit_label}."
         )
-        include_years = _five_year_values(plot_df['Year'].max(), start_year=CHART_BASE_YEAR)
-        plot_df = plot_df[plot_df['Year'].isin(include_years)]
+        st.dataframe(summary_df, use_container_width=True, hide_index=True)
 
-        CU_chart = alt.Chart(plot_df).mark_line(point=True).encode(
-            x=alt.X(
-                'Year:Q',
-                title='Year',
-                axis=alt.Axis(values=include_years, format='d', labelAngle=30),
-                scale=alt.Scale(domain=[CHART_BASE_YEAR, max(include_years)])
+    # Filter to 5-year intervals for chart/table display
+    # plot_df, include_years = _filter_to_five_year_intervals(
+    #     plot_df, year_col="Year", start_year=CHART_BASE_YEAR
+    # )
+
+    plot_df, include_years = _filter_to_five_year_intervals(
+        plot_df, year_col="Year", start_year=chart_start_year
+    )
+
+    # ----------------------------
+    # Annual CO2e chart
+    # ----------------------------
+    _plot_fading_line_chart(
+        data=plot_df,
+        x_col="Year",
+        y_col="CU",
+        title=f"Annual CO2e Estimates - {chart_title}",
+        y_title=f"Annual CO2e ({co2e_unit_label})",
+        include_years=include_years,
+        series_col="Protocol",
+        show_future_hatch=True,
+    )
+
+    # Annual CO2e table
+    annual_table_df = (
+        plot_df.pivot_table(
+            index="Year",
+            columns="Protocol",
+            values="CU",
+            aggfunc="first",
+        )
+        .reindex(columns=protocols)
+        .reset_index()
+        .sort_values("Year")
+    )
+
+    if not annual_table_df.empty:
+        annual_table_df["Year"] = annual_table_df["Year"].astype(int)
+        st.markdown(f"**Annual CO2e Estimates - {chart_title}**")
+        st.dataframe(
+            annual_table_df.style.format(
+                {col: lambda x: _format_nearest_hundred(x) for col in annual_table_df.columns if col != "Year"}
             ),
-            y=alt.Y('CU:Q', title='CUs ' + chart_title),
-            color=alt.Color(
-                'Protocol:N',
-                title='Protocol',
-                scale=_protocol_color_scale(protocols),
-            ),
-            tooltip=['Year', 'CU', 'Protocol']
-        ).properties(
-            title='Annual CU Estimates ' + chart_title,
-            width=600,
-            height=400
-        ).configure_axis(grid=True, gridOpacity=0.3)
-
-        st.altair_chart(CU_chart, use_container_width=True)
-
-        # Display the same interval-filtered values from the chart in table form.
-        table_df = (
-            plot_df.pivot_table(index="Year", columns="Protocol", values="CU", aggfunc="first")
-            .reindex(columns=protocols)
-            .reset_index()
-            .sort_values("Year")
+            use_container_width=True,
+            hide_index=True,
         )
 
-        if not table_df.empty:
-            table_df["Year"] = table_df["Year"].astype(int)
-            st.markdown("**Annual CU Estimates**")
-            st.dataframe(
-                table_df.style.format({col: "{:,.2f}" for col in table_df.columns if col != "Year"}),
-                use_container_width=True,
-                hide_index=True,
-            )
+    st.divider()
+
+    # ----------------------------
+    # Cumulative CO2e chart
+    # ----------------------------
+    _plot_fading_line_chart(
+        data=plot_df,
+        x_col="Year",
+        y_col="Cumulative_CU",
+        title=f"Cumulative CO2e Estimates - {chart_title}",
+        y_title=f"Cumulative CO2e ({co2e_unit_label})",
+        include_years=include_years,
+        series_col="Protocol",
+        show_future_hatch=True,
+    )
+
+    # Cumulative CO2e table
+    cumulative_table_df = (
+        plot_df.pivot_table(
+            index="Year",
+            columns="Protocol",
+            values="Cumulative_CU",
+            aggfunc="first",
+        )
+        .reindex(columns=protocols)
+        .reset_index()
+        .sort_values("Year")
+    )
+
+    if not cumulative_table_df.empty:
+        cumulative_table_df["Year"] = cumulative_table_df["Year"].astype(int)
+        st.markdown(f"**Cumulative CO2e Estimates - {chart_title}**")
+        st.dataframe(
+            cumulative_table_df.style.format(
+                {col: lambda x: _format_nearest_hundred(x) for col in cumulative_table_df.columns if col != "Year"}
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+
 
 def credits_inputs(prefix: str = "credits_") -> dict:
     """
-    Render per-protocol Proforma inputs as an editable table and return
-    a mapping of protocol -> typed parameter dictionary.
+    Render per-protocol Proforma inputs with editable assumptions separated
+    from fixed assumptions, and return protocol -> typed parameter dictionary.
     """
     protocols = st.session_state.get("carbon_units_inputs", {}).get("protocols", [])
 
     if not protocols:
-        st.info("Select at least one protocol in Carbon Estimates to edit project financial assumptions.")
+        st.info(
+            "Select at least one protocol in Carbon Estimates to edit project financial assumptions."
+        )
         return {}
 
-    defaults = _load_proforma_defaults()
+    defaults = _proforma_base_defaults()
+    PRICE_OPTIONS = [15.0, 25.0, 35.0, 45.0, 55.0]
+
+    def _nearest_price_option(value):
+        return min(PRICE_OPTIONS, key=lambda x: abs(x - float(value)))
+
+    net_acres = float(st.session_state.get("net_acres", 0) or 0)
+    synced_num_plots = 200 if net_acres <= 10000 else 250
     table_state_key = f"{prefix}protocol_params"
     protocol_state = st.session_state.get(table_state_key, {})
 
-    # Keep values only for selected protocols, and seed defaults for any newly selected ones.
+    # Keep values only for selected protocols, and seed defaults for newly selected ones.
     protocol_state = {p: protocol_state[p] for p in protocols if p in protocol_state}
+    fixed_financial_keys = [
+        "cost_per_cfi_plot",
+        "credit_price_increase",
+        "registry_fees",
+        "validation_cost",
+        "verification_cost",
+        "issuance_fee_per_ert",
+        "anticipated_inflation",
+        "discount_rate",
+    ]
+
     for protocol in protocols:
+        protocol_defaults = _proforma_defaults_for_protocol(protocol)
+
         if protocol not in protocol_state:
             protocol_state[protocol] = {
-                "num_plots": defaults.get("num_plots", 250),
-                "cost_per_cfi_plot": defaults.get("cost_per_cfi_plot", 150),
-                "price_per_ert_initial": defaults.get("price_per_ert_initial", 25.0),
-                "credit_price_increase": defaults.get("credit_price_increase", 2.0),
-                "registry_fees": defaults.get("registry_fees", 500),
-                "validation_cost": defaults.get("validation_cost", 45000),
-                "verification_cost": defaults.get("verification_cost", 25000),
-                "issuance_fee_per_ert": defaults.get("issuance_fee_per_ert", 0.15),
-                "anticipated_inflation": defaults.get("anticipated_inflation", 0.0),
-                "discount_rate": defaults.get("discount_rate", 6.0),
-                "planting_cost": defaults.get("planting_cost", 1000),
+                "num_plots": synced_num_plots,
+                "cost_per_cfi_plot": protocol_defaults.get("cost_per_cfi_plot", defaults.get("cost_per_cfi_plot", 150)),
+                "price_per_ert_initial": protocol_defaults.get("price_per_ert_initial", defaults.get("price_per_ert_initial", 25.0)),
+                "credit_price_increase": protocol_defaults.get("credit_price_increase", defaults.get("credit_price_increase", 2.0)),
+                "registry_fees": protocol_defaults.get("registry_fees", defaults.get("registry_fees", 500)),
+                "validation_cost": protocol_defaults.get("validation_cost", defaults.get("validation_cost", 45000)),
+                "verification_cost": protocol_defaults.get("verification_cost", defaults.get("verification_cost", 25000)),
+                "issuance_fee_per_ert": protocol_defaults.get("issuance_fee_per_ert", defaults.get("issuance_fee_per_ert", 0.15)),
+                "anticipated_inflation": protocol_defaults.get("anticipated_inflation", defaults.get("anticipated_inflation", 0.0)),
+                "discount_rate": protocol_defaults.get("discount_rate", defaults.get("discount_rate", 6.0)),
+                "planting_cost": protocol_defaults.get("planting_cost", defaults.get("planting_cost", 1000)),
             }
 
-    st.session_state[table_state_key] = protocol_state
-    st.markdown("Financial Options by Protocol", help=H("credits.expander_subheader"))
+        # Always sync Number of Plots to the current net acres threshold.
+        protocol_state[protocol]["num_plots"] = synced_num_plots
 
-    table_df = pd.DataFrame(
+        # Fixed assumptions should always reflect the current protocol-specific
+        # preset file. Editable assumptions are intentionally not overwritten
+        # after they have been seeded, so user edits persist.
+        for key in fixed_financial_keys:
+            if key in protocol_defaults:
+                protocol_state[protocol][key] = protocol_defaults[key]
+
+    # Apply a one-shot Solver prefill of the editable fields, after seeding
+    fin_prefill = st.session_state.pop("_credits_prefill", None)
+    if fin_prefill and fin_prefill.get("protocol") in protocol_state:
+        entry = protocol_state[fin_prefill["protocol"]]
+        if fin_prefill.get("planting_cost") is not None:
+            entry["planting_cost"] = fin_prefill["planting_cost"]
+        if fin_prefill.get("price_per_ert_initial") is not None:
+            entry["price_per_ert_initial"] = _nearest_price_option(
+                fin_prefill["price_per_ert_initial"]
+            )
+        st.session_state.pop(f"{prefix}editable_financials_table", None)
+
+    st.session_state[table_state_key] = protocol_state
+
+    st.markdown("Financial Options by Protocol", help=H("credits.expander_subheader"))
+    st.caption("For more information on a specific assumption, hover your cursor over the column header you'd like more details on.")
+    # st.info(
+    #     "Edit **Initial Planting Cost / Acre** and **Initial Price / CO2e** on the left. "
+    #     "The values on the right are fixed assumptions used by the financial model."
+    # )
+
+    editable_df = pd.DataFrame(
+        [
+            {
+                "Protocol": protocol,
+                "planting_cost": protocol_state[protocol]["planting_cost"],
+                "price_per_ert_initial": _nearest_price_option(
+                    protocol_state[protocol]["price_per_ert_initial"]
+                ),
+            }
+            for protocol in protocols
+        ]
+    )
+
+    fixed_df = pd.DataFrame(
         [
             {
                 "Protocol": protocol,
                 "num_plots": protocol_state[protocol]["num_plots"],
                 "cost_per_cfi_plot": protocol_state[protocol]["cost_per_cfi_plot"],
                 "registry_fees": protocol_state[protocol]["registry_fees"],
-                "issuance_fee_per_ert": protocol_state[protocol]["issuance_fee_per_ert"],
+                "issuance_fee_per_ert": protocol_state[protocol][
+                    "issuance_fee_per_ert"
+                ],
                 "validation_cost": protocol_state[protocol]["validation_cost"],
                 "verification_cost": protocol_state[protocol]["verification_cost"],
-                "anticipated_inflation": protocol_state[protocol]["anticipated_inflation"],
+                "anticipated_inflation": protocol_state[protocol][
+                    "anticipated_inflation"
+                ],
                 "discount_rate": protocol_state[protocol]["discount_rate"],
-                "price_per_ert_initial": protocol_state[protocol]["price_per_ert_initial"],
-                "credit_price_increase": protocol_state[protocol]["credit_price_increase"],
-                "planting_cost": protocol_state[protocol]["planting_cost"],
+                "credit_price_increase": protocol_state[protocol][
+                    "credit_price_increase"
+                ],
             }
             for protocol in protocols
         ]
     )
 
-    edited_df = st.data_editor(
-        table_df,
-        key=f"{prefix}financials_table",
-        use_container_width=True,
-        hide_index=True,
-        num_rows="fixed",
-        disabled=["Protocol"],
-        column_config={
-            "Protocol": st.column_config.TextColumn("Protocol"),
-            "num_plots": st.column_config.NumberColumn("Plots", min_value=1, step=1, format="%d", help=H("credits.inputs.num_plots")),
-            "cost_per_cfi_plot": st.column_config.NumberColumn("Cost/CFI Plot", min_value=1, step=1, format="$ %.2f", help=H("credits.inputs.cost_per_cfi_plot")),
-            "registry_fees": st.column_config.NumberColumn("Registry Fee", min_value=0.0, step=1, format="$ %.2f", help=H("credits.inputs.registry_fees")),
-            "issuance_fee_per_ert": st.column_config.NumberColumn("Issuance Fee", min_value=0.0, step=0.01, format="$ %.4f", help=H("credits.inputs.issuance_fee_per_ert")),
-            "validation_cost": st.column_config.NumberColumn("Validation Cost", min_value=0.0, step=1, format="$ %.2f", help=H("credits.inputs.validation_cost")),
-            "verification_cost": st.column_config.NumberColumn("Verification Cost", min_value=0.0, step=1, format="$ %.2f", help=H("credits.inputs.verification_cost")),
-            "anticipated_inflation": st.column_config.NumberColumn("Anticipated Inflation", min_value=0.0, step=0.1, format="%.2f", help=H("credits.inputs.anticipated_inflation")),
-            "discount_rate": st.column_config.NumberColumn("Discount Rate", min_value=0.0, step=0.1, format="%.2f", help=H("credits.inputs.discount_rate")),
-            "price_per_ert_initial": st.column_config.NumberColumn("Initial Price / CU", min_value=0.0, step=0.1, format="$ %.2f", help=H("credits.inputs.price_per_ert_initial")),
-            "credit_price_increase": st.column_config.NumberColumn("Credit Price Increase", min_value=0.0, step=0.1, format="%.2f", help=H("credits.inputs.credit_price_increase")),
-            "planting_cost": st.column_config.NumberColumn("Initial Planting Cost", min_value=0.0, step=100, format="$ %.2f", help=H("credits.inputs.planting_cost")),
-        },
-    )
+    left, right = st.columns([1, 2], gap="large")
 
-    # Persist edited values by protocol.
-    protocol_state = {
-        row["Protocol"]: {
-            "num_plots": int(row["num_plots"]),
-            "cost_per_cfi_plot": float(row["cost_per_cfi_plot"]),
-            "price_per_ert_initial": float(row["price_per_ert_initial"]),
-            "credit_price_increase": float(row["credit_price_increase"]),
-            "registry_fees": float(row["registry_fees"]),
-            "validation_cost": float(row["validation_cost"]),
-            "verification_cost": float(row["verification_cost"]),
-            "issuance_fee_per_ert": float(row["issuance_fee_per_ert"]),
-            "anticipated_inflation": float(row["anticipated_inflation"]),
-            "discount_rate": float(row["discount_rate"]),
-            "planting_cost": float(row["planting_cost"]),
-        }
-        for _, row in edited_df.iterrows()
-    }
+    with left:
+        st.subheader("Editable Inputs")
+        st.caption("Adjust these assumptions for each selected protocol.")
+
+        edited_df = st.data_editor(
+            editable_df,
+            key=f"{prefix}editable_financials_table",
+            use_container_width=True,
+            hide_index=True,
+            num_rows="fixed",
+            disabled=["Protocol"],
+            column_config={
+                "Protocol": st.column_config.TextColumn("Protocol"),
+                "planting_cost": st.column_config.NumberColumn(
+                    "Initial Planting Cost / Acre",
+                    min_value=0.0,
+                    step=100,
+                    format="$ %.2f",
+                    help=H("credits.inputs.planting_cost"),
+                ),
+                "price_per_ert_initial": st.column_config.SelectboxColumn(
+                    "Initial Price / CO2e",
+                    options=PRICE_OPTIONS,
+                    required=True,
+                    help=H("credits.inputs.price_per_ert_initial"),
+                ),
+            },
+        )
+
+    with right:
+        st.subheader("Fixed Financial Assumptions")
+        st.caption("These values are shown for reference and are not editable.")
+
+        st.dataframe(
+            fixed_df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Protocol": st.column_config.TextColumn("Protocol"),
+                "num_plots": st.column_config.NumberColumn(
+                    "Plots",
+                    format="%d",
+                    help=H("credits.inputs.num_plots"),
+                ),
+                "cost_per_cfi_plot": st.column_config.NumberColumn(
+                    "Cost / CFI Plot",
+                    format="$ %.2f",
+                    help=H("credits.inputs.cost_per_cfi_plot"),
+                ),
+                "registry_fees": st.column_config.NumberColumn(
+                    "Registry Fee",
+                    format="$ %.2f",
+                    help=H("credits.inputs.registry_fees"),
+                ),
+                "issuance_fee_per_ert": st.column_config.NumberColumn(
+                    "Issuance Fee / CO2e",
+                    format="$ %.4f",
+                    help=H("credits.inputs.issuance_fee_per_ert"),
+                ),
+                "validation_cost": st.column_config.NumberColumn(
+                    "Validation Cost",
+                    format="$ %.2f",
+                    help=H("credits.inputs.validation_cost"),
+                ),
+                "verification_cost": st.column_config.NumberColumn(
+                    "Verification Cost",
+                    format="$ %.2f",
+                    help=H("credits.inputs.verification_cost"),
+                ),
+                "anticipated_inflation": st.column_config.NumberColumn(
+                    "Anticipated Inflation",
+                    format="%.2f",
+                    help=H("credits.inputs.anticipated_inflation"),
+                ),
+                "discount_rate": st.column_config.NumberColumn(
+                    "Discount Rate",
+                    format="%.2f",
+                    help=H("credits.inputs.discount_rate"),
+                ),
+                "credit_price_increase": st.column_config.NumberColumn(
+                    "Credit Price Increase",
+                    format="%.2f",
+                    help=H("credits.inputs.credit_price_increase"),
+                ),
+            },
+        )
+
+    # Persist edited values by protocol while keeping fixed values unchanged.
+    edited_by_protocol = {row["Protocol"]: row for _, row in edited_df.iterrows()}
+
+    for protocol in protocols:
+        row = edited_by_protocol[protocol]
+        protocol_state[protocol]["planting_cost"] = float(row["planting_cost"])
+        protocol_state[protocol]["price_per_ert_initial"] = float(
+            row["price_per_ert_initial"]
+        )
+
     st.session_state[table_state_key] = protocol_state
 
     # Keep legacy single-value keys populated for report/export compatibility.
@@ -556,27 +1759,44 @@ def credits_inputs(prefix: str = "credits_") -> dict:
     first_row = protocol_state[first_protocol]
     st.session_state[f"{prefix}num_plots"] = first_row["num_plots"]
     st.session_state[f"{prefix}cost_per_cfi_plot"] = first_row["cost_per_cfi_plot"]
-    st.session_state[f"{prefix}price_per_ert_initial"] = first_row["price_per_ert_initial"]
-    st.session_state[f"{prefix}credit_price_increase"] = first_row["credit_price_increase"]
+    st.session_state[f"{prefix}price_per_ert_initial"] = first_row[
+        "price_per_ert_initial"
+    ]
+    st.session_state[f"{prefix}credit_price_increase"] = first_row[
+        "credit_price_increase"
+    ]
     st.session_state[f"{prefix}registry_fees"] = first_row["registry_fees"]
     st.session_state[f"{prefix}validation_cost"] = first_row["validation_cost"]
     st.session_state[f"{prefix}verification_cost"] = first_row["verification_cost"]
-    st.session_state[f"{prefix}issuance_fee_per_ert"] = first_row["issuance_fee_per_ert"]
-    st.session_state[f"{prefix}anticipated_inflation"] = first_row["anticipated_inflation"]
+    st.session_state[f"{prefix}issuance_fee_per_ert"] = first_row[
+        "issuance_fee_per_ert"
+    ]
+    st.session_state[f"{prefix}anticipated_inflation"] = first_row[
+        "anticipated_inflation"
+    ]
     st.session_state[f"{prefix}discount_rate"] = first_row["discount_rate"]
     st.session_state[f"{prefix}planting_cost"] = first_row["planting_cost"]
 
-    # NPV year-horizon selector — applies to every protocol in this run.
+    # NPV year-horizon selector applies to every protocol in this run.
     npv_year = st.selectbox(
         "NPV Year Horizon",
         options=[10, 15, 20, 25, 30, 35, 40],
-        index=6,  # default to 40
+        index=6,
         key=f"{prefix}npv_year",
-        help=H("credits.inputs.npv_year") or "Number of years from project start over which to discount cashflows for NPV.",
+        help=H("credits.inputs.npv_year")
+        or "Number of years from project start over which to discount cashflows for NPV.",
     )
 
-    # constants (constrained by modeling backend)
-    year_start = 2024
+    # constants constrained by modeling backend
+    # year_start = 2026
+
+    merged_df = st.session_state.get("merged_df")
+    if merged_df is None or merged_df.empty or "Year" not in merged_df.columns:
+        st.error("No carbon estimate years found. Run Carbon Estimates before Credits.")
+        st.stop()
+
+    year_start = int(pd.to_numeric(merged_df["Year"], errors="coerce").dropna().min())
+
     years_advance = 35
     net_acres = st.session_state["net_acres"]
 
@@ -601,22 +1821,27 @@ def credits_inputs(prefix: str = "credits_") -> dict:
         for protocol, values in protocol_state.items()
     }
 
+
 def credits_results(params: dict, prefix: str = "credits_") -> dict:
     """
     Execute the proforma model, summarize financial outputs, render revenue
     charts, generate summary tables, and provide formatted CSV export.
     """
     if "merged_df" not in st.session_state:
-        st.error("No carbon data found. Return to the Carbon Units Estimate section first.")
+        st.error(
+            "No carbon data found. Return to the CO2e Estimate section first."
+        )
         st.stop()
 
-    # Extract merged CU data per protocol
-    df_ert_ac_all = st.session_state.merged_df[['Year', 'CU', 'Protocol']].copy()
+    # Extract merged CO2e data per protocol
+    df_ert_ac_all = st.session_state.merged_df[["Year", "CU", "Protocol"]].copy()
     df_ert_ac_all = df_ert_ac_all.replace([np.inf, -np.inf], np.nan)
-    df_ert_ac_all = df_ert_ac_all.dropna(subset=['CU'])
+    df_ert_ac_all = df_ert_ac_all.dropna(subset=["CU"])
 
     if not params:
-        st.info("No protocol financial assumptions available. Select at least one protocol.")
+        st.info(
+            "No protocol financial assumptions available. Select at least one protocol."
+        )
         return None
 
     proforma_frames = []
@@ -650,101 +1875,153 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
     df_pf = pd.concat(proforma_frames, ignore_index=True)
 
     # Drop rows with NaN Net_Revenue to avoid chart issues
-    df_pf = df_pf.dropna(subset=['Net_Revenue'])
+    df_pf = df_pf.dropna(subset=["Net_Revenue"])
 
     # Store proforma outputs for report generation
     st.session_state["proforma_df"] = df_pf.copy()
 
     # Summary metrics per protocol
     first_params = next(iter(params.values()))
-    year_start = first_params['year_start']
-    year_stop = int(df_pf['Year'].max())
+    year_start = first_params["year_start"]
+    year_stop = int(df_pf["Year"].max())
 
     summaries_df = pd.concat(summary_frames, ignore_index=True)
 
-    # Chart alignment: start at 2024 (0), then show every 5 years
-    include_years = _five_year_values(year_stop, start_year=CHART_BASE_YEAR)
-    df_chart = _prepend_zero_year_rows_by_group(
+    # Chart alignment: start at base year (2026), then show every 5 years
+    # include_years = _five_year_values(year_stop, start_year=CHART_BASE_YEAR)
+    # df_chart = _prepend_zero_year_rows_by_group(
+    #     df_pf,
+    #     group_col="Protocol",
+    #     value_col="Net_Revenue",
+    #     base_year=CHART_BASE_YEAR,
+    # )
+    # df_chart, include_years = _filter_to_five_year_intervals(
+    #     df_chart, year_col="Year", start_year=CHART_BASE_YEAR
+    # )
+
+    # chart_start_year = int(pd.to_numeric(df_pf["Year"], errors="coerce").min())
+
+    chart_start_year = int(year_start)
+
+    protocols_for_chart = df_pf["Protocol"].dropna().unique().tolist()
+
+    # Keep the real start-year financial value when it exists.
+    # If a synthetic 0 and a real negative planting-cost value both exist at the
+    # same start year, keep the lower value so the chart starts at the true upfront cost.
+    df_pf = df_pf.sort_values(["Protocol", "Year"]).reset_index(drop=True)
+
+    start_year_rows = []
+    for protocol in protocols_for_chart:
+        mask = (df_pf["Protocol"] == protocol) & (df_pf["Year"] == chart_start_year)
+
+        if mask.any():
+            start_value = min(0.0, float(df_pf.loc[mask, "Net_Revenue"].min()))
+            df_pf = df_pf.loc[~mask].copy()
+        else:
+            start_value = 0.0
+
+        start_year_rows.append(
+            {
+                "Year": chart_start_year,
+                "Protocol": protocol,
+                "Net_Revenue": start_value,
+            }
+        )
+
+    start_year_df = pd.DataFrame(start_year_rows)
+    df_pf = pd.concat([start_year_df, df_pf], ignore_index=True)
+    df_pf = df_pf.sort_values(["Protocol", "Year"]).reset_index(drop=True)
+
+    include_years = _five_year_values(year_stop, start_year=chart_start_year)
+
+    df_chart, include_years = _filter_to_five_year_intervals(
         df_pf,
-        group_col='Protocol',
-        value_col='Net_Revenue',
-        base_year=CHART_BASE_YEAR,
+        year_col="Year",
+        start_year=chart_start_year,
     )
-    df_chart = df_chart[df_chart['Year'].isin(include_years)]
 
     plot_df = df_chart.copy()
 
-    toggle_nr = st.toggle('Show Total Project Acreage', True, 'toggle_nr', H("toggle.inputs.acres"))
+    acreage_mode_nr = st.radio(
+        "Acreage Display",
+        ["Total Project", "Per Acre"],
+        index=0,
+        horizontal=True,
+        key="acreage_mode_nr",
+        help=H("toggle.inputs.acres"),
+    )
+    toggle_nr = acreage_mode_nr == "Total Project"
+    st.session_state["toggle_nr"] = toggle_nr
 
     if toggle_nr:
-        plot_df['Net_Revenue'] = plot_df['Net_Revenue']
-    else :
-        plot_df['Net_Revenue'] = plot_df['Net_Revenue'] / first_params["net_acres"]
+        plot_df["Net_Revenue"] = plot_df["Net_Revenue"].round(-1)
+    else:
+        plot_df["Net_Revenue"] = (
+            plot_df["Net_Revenue"] / first_params["net_acres"]
+        ).round(-1)
 
     chart_title = "Total" if toggle_nr else "Per Acre"
 
-    chart = (
-        alt.Chart(plot_df)
-        .mark_line(point=True)
-        .encode(
-            x=alt.X(
-                'Year:Q',
-                title='Year',
-                axis=alt.Axis(values=include_years, format='d', labelAngle=30),
-                scale=alt.Scale(domain=[CHART_BASE_YEAR, max(include_years)])
-            ),
-            y=alt.Y('Net_Revenue:Q', title= chart_title + ' Net Revenue'),
-            color=alt.Color(
-                'Protocol:N',
-                title='Protocol',
-                scale=_protocol_color_scale(list(params.keys())),
-            ),
-            tooltip=['Year', 'Net_Revenue', 'Protocol']
-        )
-        .properties(
-            title= chart_title + f' Estimated Credits for {first_params["net_acres"]:,} acres project',
-            width=600,
-            height=400
-        )
-        .configure_axis(grid=True, gridOpacity=0.3)
+    _plot_fading_line_chart(
+        data=plot_df,
+        x_col="Year",
+        y_col="Net_Revenue",
+        title=chart_title
+        + f" Net Revenue of Total Estimated Credits for {first_params['net_acres']:,} acres project",
+        y_title=chart_title + " Net Revenue",
+        include_years=include_years,
+        series_col="Protocol",
+        show_future_hatch=True,
     )
 
-    st.altair_chart(chart, use_container_width=True)
-
     summaries_df_display = summaries_df.copy()
-    npv_year_label = int(summaries_df_display['npv_year'].iloc[0])
-    npv_col = f'NPV (Year {npv_year_label})'
-    npv_per_acre_col = f'NPV (Year {npv_year_label}) / Acre'
+    npv_year_label = int(summaries_df_display["npv_year"].iloc[0])
+    npv_col = f"NPV (Year {npv_year_label})"
+    npv_per_acre_col = f"NPV (Year {npv_year_label}) / Acre"
 
-    summaries_df_display['Total Net Revenue, $'] = summaries_df_display['total_net'].map('${:,.2f}'.format)
-    summaries_df_display[npv_col] = summaries_df_display['npv_yr'].map('${:,.2f}'.format)
-    summaries_df_display[npv_per_acre_col] = summaries_df_display['npv_per_acre'].map('${:,.2f}'.format)
+    summaries_df_display["Total Net Revenue, $"] = summaries_df_display[
+        "total_net"
+    ].map(lambda x: _format_nearest_hundred(x, prefix="$"))
+    summaries_df_display[npv_col] = summaries_df_display["npv_yr"].map(
+        lambda x: _format_nearest_hundred(x, prefix="$")
+    )
+    summaries_df_display[npv_per_acre_col] = summaries_df_display["npv_per_acre"].map(
+        lambda x: _format_nearest_hundred(x, prefix="$")
+    )
 
     # Keep only the columns to show
-    summaries_df_display = summaries_df_display[['Protocol', 'Total Net Revenue, $', npv_col, npv_per_acre_col]]
+    summaries_df_display = summaries_df_display[
+        ["Protocol", "Total Net Revenue, $", npv_col, npv_per_acre_col]
+    ]
 
-    st.subheader("Project Financials Summary", anchor=None, help=H("credits.summary_subheader"), divider=False, width="stretch")
-    st.table(summaries_df_display.set_index('Protocol'))
+    st.subheader(
+        "Project Financials Summary",
+        anchor=None,
+        help=H("credits.summary_subheader"),
+        divider=False,
+        width="stretch",
+    )
+    st.table(summaries_df_display.set_index("Protocol"))
 
     # CSV download
     st.download_button(
-        label="⬇️ Download Proforma table (CSV)",
+        label="Download Proforma table (CSV)",
         data=df_pf.to_csv(index=False).encode("utf-8"),
         file_name="credits_proforma.csv",
         mime="text/csv",
         use_container_width=True,
-        help=H("credits.download_button")
+        help=H("credits.download_button"),
     )
 
     st.markdown(
         "Generate a comprehensive PDF report of your project analysis.",
-        help=H("reports.generate_report_description")
+        help=H("reports.generate_report_description"),
     )
     if st.button(
         "Generate Project Report",
         use_container_width=True,
         type="primary",
-        help=H("reports.generate_report_button")
+        help=H("reports.generate_report_button"),
     ):
         pdf_data = generate_report()
         if pdf_data:
@@ -761,6 +2038,7 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
             key="download_project_report_pdf",
         )
 
+
 def generate_report():
     """
     Collect project data and request PDF report from the Quarto API.
@@ -773,68 +2051,157 @@ def generate_report():
         st.error("No carbon data found. Return to the Carbon Estimates section first.")
         return None
     if "proforma_df" not in st.session_state:
-        st.error("No financial data found. Return to the Project Financials section first.")
+        st.error(
+            "No financial data found. Return to the Project Financials section first."
+        )
         return None
-    
-    
-    
+
     # Collect data for the report
     # Planting design - using static values for now (can be made dynamic later)
+    report_variant = st.session_state.get(
+        "active_variant", st.session_state.get("selected_variant", "PN")
+    )
     planting_design = [
         {"column1": "Reforestation Strategy", "column2": "Mixed Species Planting"},
-        {"column1": "Variant", "column2": st.session_state.get("selected_variant", "PN")},
-        {"column1": "Location Name", "column2": st.session_state.get("selected_varloc_name", "Olympic National Forest")},
-        {"column1": "Location Code", "column2": st.session_state.get("selected_varloc_code", "609")},
-        {"column1": "Area, acres", "column2": str(st.session_state.get('net_acres', 10000))},
-        {"column1": "Survival Rate, %", "column2": st.session_state.get('survival', 70)},
-        {"column1": "Site Index", "column2": str(st.session_state.get('si', 120))},
-        {"column1": "Included Protocols", "column2": ", ".join(st.session_state.get("carbon_units_inputs", {}).get("protocols", []))},
+        {
+            "column1": "Variant",
+            "column2": format_variant_label(report_variant),
+        },
+        {
+            "column1": "Location Name",
+            "column2": st.session_state.get(
+                "selected_varloc_name", "Olympic National Forest"
+            ),
+        },
+        {
+            "column1": "Location Code",
+            "column2": st.session_state.get("selected_varloc_code", "609"),
+        },
+        {
+            "column1": "Area, acres",
+            "column2": str(st.session_state.get("net_acres", 10000)),
+        },
+        {
+            "column1": "Survival Rate, %",
+            "column2": st.session_state.get("survival", 70),
+        },
+        {"column1": "Site Index", "column2": str(st.session_state.get("si", 120))},
+        {
+            "column1": "Included Protocols",
+            "column2": ", ".join(
+                st.session_state.get("carbon_units_inputs", {}).get("protocols", [])
+            ),
+        },
         {"column1": "PCT Level", "column2": st.session_state.get("pct_level", "PCT0")},
-        {"column1": "PCT Retention, %", "column2": str(st.session_state.get("pct_retention", ""))},
+        {
+            "column1": "PCT Retention, %",
+            "column2": str(st.session_state.get("pct_retention", "")),
+        },
     ]
 
-    # Species mix — built dynamically from variant species config
+    # Species mix built dynamically from variant species config
     species_mix = []
-    species_mix.append({"column1": "Species", "column2": "TPA#footnote[Trees per Acre]"})
-    selected_variant = st.session_state.get("selected_variant", "PN")
-    sp_keys = _species_keys(selected_variant)
+    species_mix.append(
+        {"column1": "Species", "column2": "TPA#footnote[Trees per Acre]"}
+    )
+    report_variant = st.session_state.get(
+        "active_variant", st.session_state.get("selected_variant", "PN")
+    )
+    sp_keys = _species_keys(report_variant)
     for i, key in enumerate(sp_keys):
         value = st.session_state.get(key, 0)
         if value > 0:
-            label = _species_label(selected_variant, i)
+            label = _species_label(report_variant, i)
             species_mix.append({"column1": label, "column2": str(value)})
 
     # Financial options 1
     financial_options1 = [
-        {"column1": "Number of Plots", "column2": str(st.session_state.get('credits_num_plots', 1))},
-        {"column1": "Cost per CFI Plot, $", "column2": str(st.session_state.get('credits_cost_per_cfi_plot', 1))},
-        {"column1": "Initial Price per CU, $", "column2": str(st.session_state.get('credits_price_per_ert_initial', 1.0))},
-        {"column1": "Credit Price Increase, %", "column2": str(st.session_state.get('credits_credit_price_increase', 0.0))},
-        {"column1": "Validation Cost, $", "column2": str(st.session_state.get('credits_validation_cost', 1))},
-        {"column1": "Verification Cost, $", "column2": str(st.session_state.get('credits_verification_cost', 1))},        
+        {
+            "column1": "Number of Plots",
+            "column2": str(st.session_state.get("credits_num_plots", 1)),
+        },
+        {
+            "column1": "Cost per CFI Plot, $",
+            "column2": str(st.session_state.get("credits_cost_per_cfi_plot", 1)),
+        },
+        {
+            "column1": "Initial Price per CO2e, $",
+            "column2": str(st.session_state.get("credits_price_per_ert_initial", 1.0)),
+        },
+        {
+            "column1": "Credit Price Increase, %",
+            "column2": str(st.session_state.get("credits_credit_price_increase", 0.0)),
+        },
+        {
+            "column1": "Validation Cost, $",
+            "column2": str(st.session_state.get("credits_validation_cost", 1)),
+        },
+        {
+            "column1": "Verification Cost, $",
+            "column2": str(st.session_state.get("credits_verification_cost", 1)),
+        },
     ]
 
     # Financial options 2
     financial_options2 = [
-        {"column1": "Registry Fees, $", "column2": str(st.session_state.get('credits_registry_fees', 1))},
-        {"column1": "Issuance Fee per CU, $", "column2": str(st.session_state.get('credits_issuance_fee_per_ert', 0.0))},
-        {"column1": "Anticipated Inflation, %", "column2": str(st.session_state.get('credits_anticipated_inflation', 0.0))},
-        {"column1": "Discount Rate, %", "column2": str(st.session_state.get('credits_discount_rate', 0.0))},
-        {"column1": "Initial Planting Cost, $", "column2": str(st.session_state.get('credits_planting_cost', 1000))},
+        {
+            "column1": "Registry Fees, $",
+            "column2": str(st.session_state.get("credits_registry_fees", 1)),
+        },
+        {
+            "column1": "Issuance Fee per CO2e, $",
+            "column2": str(st.session_state.get("credits_issuance_fee_per_ert", 0.0)),
+        },
+        {
+            "column1": "Anticipated Inflation, %",
+            "column2": str(st.session_state.get("credits_anticipated_inflation", 0.0)),
+        },
+        {
+            "column1": "Discount Rate, %",
+            "column2": str(st.session_state.get("credits_discount_rate", 0.0)),
+        },
+        {
+            "column1": "Initial Planting Cost per Acre, $",
+            "column2": str(st.session_state.get("credits_planting_cost", 1000)),
+        },
     ]
 
     # Carbon data from merged_df - map to expected column names
-    carbon_df = st.session_state.merged_df[['Year', 'CU', 'Protocol']].copy()
-    carbon_df = carbon_df.rename(columns={'CU': 'CUs'})
+    carbon_df = st.session_state.merged_df[["Year", "CU", "Protocol"]].copy()
+    carbon_df = carbon_df.rename(columns={"CU": "CO2e"})
 
-    # Annual CO2 per acre derived from carbon scores (no protocol split)
-    carbon_scores = st.session_state.carbon_df[["Year", "Annual_ABLD_C"]].copy()
-    carbon_scores["Annual CO2 per acre"] = carbon_scores["Annual_ABLD_C"] * 3.667
-    carbon_scores["Annual CO2"] = carbon_scores["Annual CO2 per acre"] * st.session_state.get("net_acres", 0)
-    carbon_scores = carbon_scores[["Year", "Annual CO2 per acre", "Annual CO2"]]
+    # Report chart alignment: derive cumulative onsite CO2 from carbon curve and
+    # interpolate onto report years to avoid zero-fills from year-grid mismatch.
+    report_years = sorted(carbon_df["Year"].dropna().astype(int).unique().tolist())
+    carbon_curve = st.session_state.carbon_df[["Year", "ABLD_C"]].copy()
+    carbon_curve = carbon_curve.dropna(subset=["Year", "ABLD_C"]).sort_values("Year")
+
+    if not carbon_curve.empty and report_years:
+        x = carbon_curve["Year"].astype(float).to_numpy()
+        y = carbon_curve["ABLD_C"].astype(float).to_numpy() * 3.667
+        xi = np.array(report_years, dtype=float)
+        yi = np.interp(xi, x, y)
+        carbon_scores = pd.DataFrame(
+            {
+                "Year": xi.astype(int),
+                # Keep existing report column names for compatibility with report.ipynb
+                "Annual CO2e per acre": yi,
+                "Annual CO2e": yi * st.session_state.get("net_acres", 0),
+            }
+        )
+    else:
+        carbon_scores = pd.DataFrame(
+            {
+                "Year": report_years,
+                "Annual CO2e per acre": [0.0] * len(report_years),
+                "Annual CO2e": [0.0] * len(report_years),
+            }
+        )
 
     # Financials per protocol/year from proforma outputs
-    proforma_df = st.session_state.proforma_df[["Year", "Protocol", "Total_Revenue", "Total_Costs", "Net_Revenue"]].copy()
+    proforma_df = st.session_state.proforma_df[
+        ["Year", "Protocol", "Total_Revenue", "Total_Costs", "Net_Revenue"]
+    ].copy()
     proforma_df = proforma_df.rename(
         columns={
             "Total_Revenue": "TotalRevenue",
@@ -845,15 +2212,34 @@ def generate_report():
 
     carbon_df = carbon_df.merge(carbon_scores, on="Year", how="left")
     carbon_df = carbon_df.merge(proforma_df, on=["Year", "Protocol"], how="left")
-    carbon_df[["Annual CO2 per acre", "Annual CO2", "NetRevenue", "TotalCosts", "TotalRevenue"]] = (
-        carbon_df[["Annual CO2 per acre", "Annual CO2", "NetRevenue", "TotalCosts", "TotalRevenue"]].fillna(0)
-    )
+    carbon_df[
+        [
+            "Annual COer per acre",
+            "Annual CO2e",
+            "NetRevenue",
+            "TotalCosts",
+            "TotalRevenue",
+        ]
+    ] = carbon_df[
+        [
+            "Annual CO2e per acre",
+            "Annual CO2e",
+            "NetRevenue",
+            "TotalCosts",
+            "TotalRevenue",
+        ]
+    ].fillna(0)
 
     carbon_data = carbon_df.to_dict(orient="records")
 
-    # Get selected variant
-    selected_variant = st.session_state.get("selected_variant", "PN")
-    selected_varloc_name = st.session_state.get("selected_varloc_name", "Olympic National Forest")
+    # Use the concrete chosen variant (set by the Site Selection chooser), not the
+    # base map variant, so the report's species/model match the run.
+    selected_variant = st.session_state.get(
+        "active_variant", st.session_state.get("selected_variant", "PN")
+    )
+    selected_varloc_name = st.session_state.get(
+        "selected_varloc_name", "Olympic National Forest"
+    )
     selected_varloc_code = st.session_state.get("selected_varloc_code", "609")
 
     payload = {
@@ -881,52 +2267,175 @@ def generate_report():
         st.error(f"Failed to generate report: {str(e)}")
         return None
 
+
 @st.fragment
 def run_chart():
     """
-    Top-level workflow controller. Runs planting sliders, carbon chart, 
-    carbon unit chart, financial inputs, and financial results.
+    Top-level workflow controller. Runs planting sliders, carbon chart,
+    CO2e chart, financial inputs, and financial results.
     """
     # Row 1: Planting sliders | Carbon chart
     with st.expander(label="Planting Parameters", expanded=True):
-        col1, col2 = st.columns([1,2], gap="large")
+        st.markdown(
+        f"**Planting Parameters Summary**"
+                                )
+        p_txt ="""
+        Planting Parameters define the reforestation design and site assumptions used to model forest growth over time. These inputs include project acreage, species mix, planting density, survival rate, site index, and management treatments. The resulting forest-growth estimates provide the basis for calculating carbon accumulation and financial outcomes in later sections.
+        """
+        st.markdown(p_txt)
+        col1, col2 = st.columns([1, 2], gap="large")
         with col1:
             planting_sliders()
         with col2:
             carbon_chart()
 
     # Row 2: Protocol selector -> acreage toggle -> Carbon units chart
+    # with st.expander(label="Carbon Estimates", expanded=True):
+    #     if "carbon_df" not in st.session_state:
+    #         st.error("No carbon data found. Adjust sliders above first.")
+    #         st.stop()
+
+    #     # carbon_summary_df = st.session_state.carbon_df.copy()
+    #     # if "ABLD_C" in carbon_summary_df.columns:
+    #     #     carbon_summary_df["CO2e"] = (
+    #     #         pd.to_numeric(carbon_summary_df["ABLD_C"], errors="coerce") * 3.667
+    #     #     )
+    #     #     carbon_summary_df["CO2e"] = carbon_summary_df["CO2e"] * st.session_state.get(
+    #     #         "net_acres", 1
+    #     #     )
+    #     #     # summary_df = _co2e_accumulation_summary(carbon_summary_df)
+    #     #     summary_base_year = int(pd.to_numeric(carbon_summary_df["Year"], errors="coerce").min())
+    #     #     summary_df = _co2e_accumulation_summary(
+    #     #         carbon_summary_df,
+    #     #         base_year=summary_base_year,
+    #     #     )
+            
+    #     #     if not summary_df.empty:
+    #     #         st.markdown("**CO2e Accumulation Summary**")
+    #     #         cu_txt = '''
+    #     #         COâ‚‚e represents the carbon dioxide equivalent of the carbon sequestered by the project. The reported COâ‚‚e values account for applicable deductions, including leakage (emissions that occur outside the project boundary as a result of project activities), buffer pool contributions for risk mitigation, and any other required adjustments under the relevant accounting framework. As a result, COâ‚‚e reflects the net climate benefit attributable to the project after these considerations.
+    #     #         '''
+    #     #         st.markdown(cu_txt)
+    #     #         st.caption(
+    #     #             "Modeled CO2e accumulation is interpolated from aboveground live biomass carbon "
+    #     #             "at 10-, 50-, and 100-year project horizons and shown in tons CO2e."
+    #     #         )
+    #     #         st.dataframe(summary_df, use_container_width=True, hide_index=True)
+    #     #         # st.divider()
+
+    #     carbon_summary_df = st.session_state.carbon_df.copy()
+    #     if "ABLD_C" in carbon_summary_df.columns:
+    #         show_total_project_acreage = st.session_state.get("toggle_ce", True)
+    #         co2e_unit_label = (
+    #             "tons CO2e"
+    #             if show_total_project_acreage
+    #             else "tons CO2e/acre"
+    #         )
+
+    #         carbon_summary_df["CO2e"] = (
+    #             pd.to_numeric(carbon_summary_df["ABLD_C"], errors="coerce") * 3.667
+    #         )
+
+    #         if show_total_project_acreage:
+    #             carbon_summary_df["CO2e"] = carbon_summary_df["CO2e"] * st.session_state.get(
+    #                 "net_acres", 1
+    #             )
+
+    #         summary_base_year = int(
+    #             pd.to_numeric(carbon_summary_df["Year"], errors="coerce").min()
+    #         )
+    #         summary_df = _co2e_accumulation_summary(
+    #             carbon_summary_df,
+    #             base_year=summary_base_year,
+    #         )
+            
+    #         if not summary_df.empty:
+    #             st.markdown("**CO2e Accumulation Summary**")
+    #             cu_txt = '''
+    #             COâ‚‚e represents the carbon dioxide equivalent of the carbon sequestered by the project. The reported COâ‚‚e values account for applicable deductions, including leakage (emissions that occur outside the project boundary as a result of project activities), buffer pool contributions for risk mitigation, and any other required adjustments under the relevant accounting framework. As a result, COâ‚‚e reflects the net climate benefit attributable to the project after these considerations.
+    #             '''
+    #             st.markdown(cu_txt)
+    #             st.caption(
+    #                 "Modeled CO2e accumulation is interpolated from aboveground live biomass carbon "
+    #                 f"at 10-, 50-, and 100-year project horizons and shown in {co2e_unit_label}."
+    #             )
+    #             st.dataframe(summary_df, use_container_width=True, hide_index=True)
+    #             # st.divider()
+
+    #     # restore backup and init state for CO2e estimates
+    #     _restore_backup(_carbon_units_keys(), backup_name="_carbon_units_backup")
+    #     _init_carbon_units_state()
+
+    #     # render widget using key only to enable restoring backups
+    #     protocols = st.multiselect(
+    #         "Select Protocol(s)",
+    #         options=["ACR", "CAR", "VERRA", "GS", "ISO"],
+    #         key="carbon_units_protocols",
+    #         help=H("carbon.protocols_multiselect"),
+    #     )
+
+    #     st.session_state["carbon_units_inputs"] = {"protocols": protocols}
+
+    #     # backup latest selections for CO2e estimates
+    #     _backup_keys(_carbon_units_keys(), backup_name="_carbon_units_backup")
+
+    #     carbon_units()
+    
+    # Row 2: Protocol selector -> acreage toggle -> Carbon units chart
     with st.expander(label="Carbon Estimates", expanded=True):
         if "carbon_df" not in st.session_state:
             st.error("No carbon data found. Adjust sliders above first.")
             st.stop()
 
-        # restore backup and init state for carbon units
+        acreage_mode_ce = st.radio(
+            "Acreage Display",
+            ["Total Project", "Per Acre"],
+            index=0,
+            horizontal=True,
+            key="acreage_mode_ce",
+            help=H("toggle.inputs.acres"),
+        )
+        toggle_ce = acreage_mode_ce == "Total Project"
+        st.session_state["toggle_ce"] = toggle_ce
+
+        show_total_project_acreage = toggle_ce
+        net_acres = st.session_state.get("net_acres", 1)
+
+        accumulation_mode_label = (
+            "Total Project"
+            if show_total_project_acreage
+            else "Per Acre"
+        )
+        co2e_unit_label = "tons"
+
+        # restore backup and init state for CO2e estimates
         _restore_backup(_carbon_units_keys(), backup_name="_carbon_units_backup")
         _init_carbon_units_state()
 
         # render widget using key only to enable restoring backups
         protocols = st.multiselect(
             "Select Protocol(s)",
-            options=["ACR",
-                     "CAR",
-                     "VERRA",
-                     "GS",  
-                     "ISO"],
+            options=["ACR", "CAR", "VERRA", "GS", "ISO"],
             key="carbon_units_protocols",
-            help=H("carbon.protocols_multiselect")
+            help=H("carbon.protocols_multiselect"),
         )
 
         st.session_state["carbon_units_inputs"] = {"protocols": protocols}
 
-        # backup latest selections for carbon units
+        # backup latest selections for CO2e estimates
         _backup_keys(_carbon_units_keys(), backup_name="_carbon_units_backup")
 
         carbon_units()
 
+
     # Row 3: Proforma inputs | Credits chart + summary
     with st.expander(label="Project Financials", expanded=True):
+        st.markdown(
+        f"**Project Financials Summary**"
+                        )
+        pf_txt ="""
+        Project Financials estimate the potential revenue, costs, and net financial performance of the project using the selected carbon estimates and financial assumptions. Revenue is based on projected credited COâ‚‚e and assumed credit prices, while costs include items such as planting, monitoring, verification, validation, and registry fees. These results help evaluate project viability through metrics such as Total Net Revenue and Net Present Value.
+        """
+        st.markdown(pf_txt)
         proforma_params = credits_inputs(prefix="credits_")
         credits_results(proforma_params)
-
-    

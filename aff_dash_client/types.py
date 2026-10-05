@@ -90,6 +90,95 @@ class ScenarioResult:
 
 
 @dataclass
+class TpaInterval:
+    lo: float
+    hi: float
+    lo_clipped: bool  # feasible region runs off the low edge of the swept grid
+    hi_clipped: bool  # ...off the high edge
+
+    @classmethod
+    def from_api(cls, d: dict) -> "TpaInterval":
+        return cls(
+            lo=float(d["lo"]),
+            hi=float(d["hi"]),
+            lo_clipped=bool(d["lo_clipped"]),
+            hi_clipped=bool(d["hi_clipped"]),
+        )
+
+    def as_tuple(self) -> tuple[float, float]:
+        return (self.lo, self.hi)
+
+
+@dataclass
+class TpaRangeResult:
+    """Feasible TPA range for one swept dimension (a species, or the mix multiplier)."""
+
+    species_index: int | None  # required for per-species and fixed-species modes
+    species_code: str | None
+    variable: str  # "k" for mix multiplier, "tpa" for species TPA
+    range: TpaInterval | None  # outer min/max box; None if nothing feasible
+    intervals: list[TpaInterval]  # feasible region(s)
+    curve: pd.DataFrame | None = None
+
+    @classmethod
+    def from_api(cls, d: dict) -> "TpaRangeResult":
+        rng = d.get("range")
+        return cls(
+            species_index=d.get("species_index"),
+            species_code=d.get("species_code"),
+            variable=d["variable"],
+            range=TpaInterval.from_api(rng) if rng else None,
+            intervals=[TpaInterval.from_api(iv) for iv in d.get("intervals", [])],
+            curve=_rows_to_df(d.get("curve")),
+        )
+
+
+@dataclass
+class TpaSweepResult:
+    """Result of a ``solve_tpa_range`` call.
+
+    ``results`` is one entry per swept dimension: a single entry for ``scalar``
+    and ``species`` modes, one per species for ``per_species``. Use ``box()``
+    to get the ``{species_code: (lo, hi)}`` mapping that seeds a Q2 optimizer.
+    """
+
+    mode: str
+    op: str
+    target_npv: float
+    metric: str
+    base_species_tpa: list[float]
+    species_codes: list[str]
+    results: list[TpaRangeResult]
+
+    @classmethod
+    def from_api(cls, payload: dict) -> "TpaSweepResult":
+        return cls(
+            mode=payload["mode"],
+            op=payload["op"],
+            target_npv=float(payload["target_npv"]),
+            metric=payload.get("metric", ""),
+            base_species_tpa=[float(x) for x in payload["base_species_tpa"]],
+            species_codes=list(payload["species_codes"]),
+            results=[TpaRangeResult.from_api(r) for r in payload["results"]],
+        )
+
+    def box(self) -> dict[str, tuple[float, float]]:
+        """Per-species ``(lo, hi)`` feasible TPA bounds, keyed by species code.
+
+        Only meaningful for ``per_species`` mode. A non-binding species (feasible
+        across the whole grid) shows up at the grid edges; check its
+        ``range.lo_clipped``/``hi_clipped`` to tell.
+        """
+        out: dict[str, tuple[float, float]] = {}
+        for r in self.results:
+            if r.range is None:
+                continue
+            key = r.species_code or f"SP{(r.species_index or 0) + 1}"
+            out[key] = r.range.as_tuple()
+        return out
+
+
+@dataclass
 class Defaults:
     """Defaults for a (variant, loccode) pair, ready to feed into ``run``."""
 

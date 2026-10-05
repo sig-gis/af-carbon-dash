@@ -1,13 +1,15 @@
 import json
 import logging
+import re
+from datetime import date
 from functools import lru_cache
 from pathlib import Path
+from typing import Dict, List
 
 import joblib
-import pandas as pd
 import numpy as np
 import numpy_financial as npf
-from typing import List, Dict
+import pandas as pd
 from scipy.interpolate import make_interp_spline
 from sklearn.preprocessing import PolynomialFeatures
 
@@ -19,6 +21,126 @@ APP_ROOT = Path(__file__).resolve().parent.parent
 BASE_PATH = APP_ROOT / "conf" / "base"
 
 FVS_MODEL_CACHE_SIZE = 16
+
+
+def current_projection_start_year() -> int:
+    """Return the calendar year used as the first displayed projection year."""
+    return date.today().year
+
+
+def align_projection_years(
+    df: pd.DataFrame,
+    start_year: int | None = None,
+    year_col: str = "Year",
+    horizon_years: int = 100,
+    step_years: int = 5,
+) -> pd.DataFrame:
+    """Assign ordered model outputs onto the current 100-year calendar grid.
+
+    Model output years are treated as ordering keys only, not as meaningful
+    calendar years.  Values are mapped by position onto
+    ``start_year, start_year + 5, ..., start_year + 100``.
+
+    Supported shapes:
+      * 21 five-year values including year 0 -> assign directly.
+      * 20 five-year values missing year 0 -> prepend a zero baseline.
+      * 101 annual values including year 0 -> select every 5th value.
+      * 96 annual values missing year 0 -> prepend zero and select every 5th.
+    """
+    if df.empty or year_col not in df.columns:
+        return df
+
+    aligned = df.copy()
+    source_years = pd.to_numeric(aligned[year_col], errors="coerce")
+    if source_years.dropna().empty:
+        return aligned
+
+    target_start = int(start_year if start_year is not None else current_projection_start_year())
+    if horizon_years is None or step_years is None or step_years <= 0:
+        aligned[year_col] = source_years.astype("Int64")
+        return aligned
+
+    target_years = list(range(
+        target_start,
+        target_start + int(horizon_years) + 1,
+        int(step_years),
+    ))
+    target_count = len(target_years)
+
+    aligned = (
+        aligned.assign(_source_order_year=source_years)
+        .dropna(subset=["_source_order_year"])
+        .sort_values("_source_order_year")
+        .drop(columns=["_source_order_year"])
+        .reset_index(drop=True)
+    )
+
+    source_count = len(aligned)
+
+    if source_count == target_count:
+        selected = aligned.copy()
+        selected[year_col] = target_years
+        return selected
+
+    if source_count == target_count - 1:
+        selected = aligned.copy()
+        selected[year_col] = target_years[1:]
+        return pd.concat(
+            [_zero_projection_row(selected, target_years[0], year_col), selected],
+            ignore_index=True,
+        )
+
+    annual_with_baseline_count = int(horizon_years) + 1
+    annual_without_baseline_count = int(horizon_years) - int(step_years) + 1
+
+    if source_count == annual_with_baseline_count:
+        selected = aligned.iloc[:: int(step_years)].copy().reset_index(drop=True)
+        selected[year_col] = target_years
+        return selected
+
+    if source_count == annual_without_baseline_count:
+        selected = aligned.iloc[:: int(step_years)].copy().reset_index(drop=True)
+        selected[year_col] = target_years[1:]
+        return pd.concat(
+            [_zero_projection_row(selected, target_years[0], year_col), selected],
+            ignore_index=True,
+        )
+
+    logger.warning(
+        "align_projection_years: unexpected row count %s; assigning by position "
+        "onto the %s-point projection grid.",
+        source_count,
+        target_count,
+    )
+    selected = aligned.iloc[:target_count].copy().reset_index(drop=True)
+    selected[year_col] = target_years[: len(selected)]
+    return selected
+
+
+def _zero_projection_row(
+    template: pd.DataFrame,
+    year: int,
+    year_col: str = "Year",
+) -> pd.DataFrame:
+    """Return one zero-valued baseline row shaped like ``template``."""
+    zero_row = {}
+    for col in template.columns:
+        if col == year_col:
+            zero_row[col] = int(year)
+        elif pd.api.types.is_numeric_dtype(template[col]):
+            zero_row[col] = 0.0
+        else:
+            zero_row[col] = template[col].dropna().iloc[0] if template[col].notna().any() else None
+    return pd.DataFrame([zero_row])
+
+
+def recompute_annual_carbon_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Recompute annual carbon deltas after projection-year normalization."""
+    if df.empty or "ABLD_C" not in df.columns:
+        return df
+    out = df.sort_values("Year").reset_index(drop=True).copy()
+    out["Annual_ABLD_C"] = out["ABLD_C"].diff().fillna(out["ABLD_C"].iloc[0])
+    return out
 
 
 def _load_registry() -> list[dict]:
@@ -37,16 +159,21 @@ def get_fvs_models(variant: str, loccode: str, pct_level: str = "PCT0") -> dict 
     """
     registry = _load_registry()
     entry = next(
-        (m for m in registry
-         if m["variant"] == variant
-         and m["loccode"] == loccode
-         and m.get("pct_level", "PCT0") == pct_level),
+        (
+            m
+            for m in registry
+            if m["variant"] == variant
+            and m["loccode"] == loccode
+            and m.get("pct_level", "PCT0") == pct_level
+        ),
         None,
     )
     if entry is None:
         logger.warning(
             "No model registry entry for variant=%s loccode=%s pct=%s",
-            variant, loccode, pct_level,
+            variant,
+            loccode,
+            pct_level,
         )
         return None
 
@@ -62,6 +189,52 @@ def get_fvs_models(variant: str, loccode: str, pct_level: str = "PCT0") -> dict 
 
     logger.info("Loaded FVS models from %s (%d entries)", model_path, len(models))
     return models
+
+
+_UNKNOWN_FEATURE_WARNED: set[tuple[str, ...]] = set()
+
+
+def _build_feature_row(
+    feature_names: list[str],
+    survival: float,
+    si: float,
+    species_tpa: list[float],
+) -> dict[str, float]:
+    """Map a model's expected feature names to scenario inputs.
+
+    Known names are filled deterministically; unknown names default to 0 with a
+    one-time warning per unique set so the gap is visible without log spam.
+    Add new mappings here when Dave introduces new feature names.
+    """
+    total_tpa = float(sum(species_tpa))
+    padded = (list(species_tpa) + [0, 0, 0, 0])[:4]
+    known = {
+        "Survival": float(survival),
+        "SI": float(si),
+        "total_TPA": total_tpa,
+        "SP1_TPA": float(padded[0]),
+        "SP2_TPA": float(padded[1]),
+        "SP3_TPA": float(padded[2]),
+        "SP4_TPA": float(padded[3]),
+    }
+    row: dict[str, float] = {}
+    unknown: list[str] = []
+    for name in feature_names:
+        if name in known:
+            row[name] = known[name]
+        else:
+            row[name] = 0.0
+            unknown.append(name)
+    if unknown:
+        key = tuple(sorted(unknown))
+        if key not in _UNKNOWN_FEATURE_WARNED:
+            _UNKNOWN_FEATURE_WARNED.add(key)
+            logger.warning(
+                "predict_fvs_metrics: unknown feature(s) %s in model schema; "
+                "defaulting to 0. Update _build_feature_row to map them.",
+                key,
+            )
+    return row
 
 
 def predict_fvs_metrics(
@@ -84,34 +257,30 @@ def predict_fvs_metrics(
     -------
     Wide-format DataFrame: Year, ABLD_C, BA, QMD, SDI, TCuFt, MCuFt, ...
     """
-    total_tpa = sum(species_tpa)
-    # Pad to exactly 4 species slots (SP1–SP4) as the pipelines expect
-    padded = (list(species_tpa) + [0, 0, 0, 0])[:4]
-
-    X_raw = np.array(
-        [[float(survival), float(total_tpa), *[float(s) for s in padded], float(si)]],
-        dtype=float,
-    )
-
-    # Detect model type: v3 (plain LinearRegression, expects 119 poly features)
-    # vs v4 (Pipeline with built-in transform, expects 7 raw features)
     sample_model = next(iter(models.values()))
-    needs_poly = getattr(sample_model, "n_features_in_", 7) > len(X_raw[0])
 
-    if needs_poly:
-        poly = PolynomialFeatures(degree=3, include_bias=False)
-        X = poly.fit_transform(X_raw)
+    # Schema detection: v4 Pipelines carry their own PolynomialFeatures and
+    # expose ``feature_names_in_`` on the first step. v3 bare estimators don't —
+    # they expect the polynomial-expanded feature matrix directly.
+    first_step = None
+    if hasattr(sample_model, "steps") and sample_model.steps:
+        first_step = sample_model.steps[0][1]
+    feature_names = getattr(first_step, "feature_names_in_", None)
+
+    if feature_names is not None:
+        # guard for 8-feature scenarios
+        row = _build_feature_row(list(feature_names), survival, si, species_tpa)
+        X = pd.DataFrame([row])[list(feature_names)]
     else:
-        # v4 pipelines expect named DataFrame
-        X = pd.DataFrame([{
-            "Survival": float(survival),
-            "total_TPA": float(total_tpa),
-            "SP1_TPA": float(padded[0]),
-            "SP2_TPA": float(padded[1]),
-            "SP3_TPA": float(padded[2]),
-            "SP4_TPA": float(padded[3]),
-            "SI": float(si),
-        }])
+        # bare estimator trained on the polynomial-expanded canonical
+        # 7-feature scenario
+        total_tpa = float(sum(species_tpa))
+        padded = (list(species_tpa) + [0, 0, 0, 0])[:4]
+        X_raw = np.array(
+            [[float(survival), total_tpa, *[float(s) for s in padded], float(si)]],
+            dtype=float,
+        )
+        X = PolynomialFeatures(degree=3, include_bias=False).fit_transform(X_raw)
 
     rows = []
     for (year, var), model in models.items():
@@ -126,60 +295,64 @@ def predict_fvs_metrics(
     wide = wide.sort_values("Year").reset_index(drop=True)
     return wide
 
+
 def compute_proforma(df_ert_ac: pd.DataFrame, p: dict) -> pd.DataFrame:
     results = []
 
     for protocol, subdf in df_ert_ac.groupby("Protocol"):
-        df = subdf[['Year', 'CU']].copy()
-        df = df.rename(columns={'CU': 'CU_ac'})
-        df['Project_acres'] = p['net_acres']
-        df['CU'] = df['CU_ac'] * p['net_acres']
+        df = subdf[["Year", "CU"]].copy()
+        df = df.rename(columns={"CU": "CU_ac"})
+        df["Project_acres"] = p["net_acres"]
+        df["CU"] = df["CU_ac"] * p["net_acres"]
 
         # credit volume: sell every 5th year including start year
-        df['CUs_Sold'] = 0.0
+        df["CUs_Sold"] = 0.0
         for i, row in df.iterrows():
-            if (
-                row['Year'] == p['year_start']
-                or ((row['Year'] - p['year_start']) % 5 == 0 and row['Year'] > p['year_start'])
+            if row["Year"] == p["year_start"] or (
+                (row["Year"] - p["year_start"]) % 5 == 0
+                and row["Year"] > p["year_start"]
             ):
-                df.loc[i, 'CUs_Sold'] = df.loc[max(0, i - 4):i, 'CU'].sum()
+                df.loc[i, "CUs_Sold"] = df.loc[max(0, i - 4) : i, "CU"].sum()
 
         # revenue
-        df['CU_Credit_Price'] = (
-            p['price_per_ert_initial']
-            * ((1 + p['credit_price_increase']) ** (df['Year'] - p['year_start']))
+        df["CU_Credit_Price"] = p["price_per_ert_initial"] * (
+            (1 + p["credit_price_increase"]) ** (df["Year"] - p["year_start"])
         )
-        df['Total_Revenue'] = df['CUs_Sold'] * df['CU_Credit_Price']
+        df["Total_Revenue"] = df["CUs_Sold"] * df["CU_Credit_Price"]
 
         # costs
-        df['Validation_and_Verification'] = 0
-        df.loc[df['Year'] == p['year_start'], 'Validation_and_Verification'] = p['validation_cost']
+        df["Validation_and_Verification"] = 0
+        df.loc[df["Year"] == p["year_start"], "Validation_and_Verification"] = p[
+            "validation_cost"
+        ]
         df.loc[
-            (df['Year'] > p['year_start']) &
-            ((df['Year'] - p['year_start']) % 5 == 0),
-            'Validation_and_Verification'
-        ] = p['verification_cost']
+            (df["Year"] > p["year_start"]) & ((df["Year"] - p["year_start"]) % 5 == 0),
+            "Validation_and_Verification",
+        ] = p["verification_cost"]
 
-        df['Survey_Cost'] = 0
-        df.loc[
-            (df['Year'] - p['year_start']) % 5 == 4,
-            'Survey_Cost'
-        ] = p['num_plots'] * p['cost_per_cfi_plot'] * (1 + p['anticipated_inflation'])
-
-        df['Registry_Fees'] = p['registry_fees']
-        df['Issuance_Fees'] = df['CUs_Sold'] * p['issuance_fee_per_ert']
-        df['Planting_Cost'] = p['planting_cost']
-
-        df['Total_Costs'] = (
-            df['Validation_and_Verification']
-            + df['Survey_Cost']
-            + df['Registry_Fees']
-            + df['Issuance_Fees']
-            + df['Planting_Cost']
+        df["Survey_Cost"] = 0
+        df.loc[(df["Year"] - p["year_start"]) % 5 == 4, "Survey_Cost"] = (
+            p["num_plots"] * p["cost_per_cfi_plot"] * (1 + p["anticipated_inflation"])
         )
 
-        df['Net_Revenue'] = df['Total_Revenue'] - df['Total_Costs']
-        df['Protocol'] = protocol
+        df["Registry_Fees"] = p["registry_fees"]
+        df["Issuance_Fees"] = df["CUs_Sold"] * p["issuance_fee_per_ert"]
+        # df["Planting_Cost"] = p["planting_cost"]
+        df["Planting_Cost"] = 0.0
+        df.loc[df["Year"] == p["year_start"], "Planting_Cost"] = (
+            p["planting_cost"] * p["net_acres"]
+        )
+
+        df["Total_Costs"] = (
+            df["Validation_and_Verification"]
+            + df["Survey_Cost"]
+            + df["Registry_Fees"]
+            + df["Issuance_Fees"]
+            + df["Planting_Cost"]
+        )
+
+        df["Net_Revenue"] = df["Total_Revenue"] - df["Total_Costs"]
+        df["Protocol"] = protocol
         results.append(df)
 
     return pd.concat(results, ignore_index=True)
@@ -205,22 +378,23 @@ def compute_summaries(
 
         total_net = subdf["Net_Revenue"].sum()
 
-        cashflows = subdf[
-            subdf["Year"] <= (year_start + npv_years)
-        ]["Net_Revenue"]
+        cashflows = subdf[subdf["Year"] <= (year_start + npv_years)]["Net_Revenue"]
 
         npv_yr = float(npf.npv(discount_rate, cashflows))
         npv_per_acre = npv_yr / net_acres if net_acres else None
 
-        summaries.append({
-            "Protocol": protocol,
-            "total_net": total_net,
-            "npv_yr": npv_yr,
-            "npv_year": int(npv_years),
-            "npv_per_acre": npv_per_acre,
-        })
+        summaries.append(
+            {
+                "Protocol": protocol,
+                "total_net": total_net,
+                "npv_yr": npv_yr,
+                "npv_year": int(npv_years),
+                "npv_per_acre": npv_per_acre,
+            }
+        )
 
     return pd.DataFrame(summaries)
+
 
 def compute_carbon_scores(
     coefficients: Dict,
@@ -236,7 +410,11 @@ def compute_carbon_scores(
 
     # Extract species-specific coefficient keys (anything starting with TPA_ except TPA_total)
     sample_year = next(iter(sorted(coefficients.keys(), key=int)))
-    sp_coeff_keys = [k for k in coefficients[sample_year] if k.startswith("TPA_") and k != "TPA_total"]
+    sp_coeff_keys = [
+        k
+        for k in coefficients[sample_year]
+        if k.startswith("TPA_") and k != "TPA_total"
+    ]
 
     for year in sorted(coefficients.keys(), key=int):
         c = coefficients[year]
@@ -268,6 +446,7 @@ def compute_carbon_scores(
         for y, c, a in zip(years, c_scores, ann_c_scores)
     ]
 
+
 def compute_carbon_units(
     df_carbon: pd.DataFrame,
     protocols: list[str],
@@ -296,7 +475,6 @@ def compute_carbon_units(
                 "No protocol rules found for selected protocols and no fallback protocol rules are configured."
             )
 
-
         df_base = df_carbon.copy()
         df_base["Onsite_Total_CO2"] = df_base["ABLD_C"] * 3.667 * rules["coeff"]
 
@@ -306,18 +484,28 @@ def compute_carbon_units(
         y = df_poly["Onsite_Total_CO2"].values
 
         spline = make_interp_spline(X, y, k=1)
-        years_interp = np.arange(X.min(), X.max() + 1)
+        # Enforce modeling/report baseline at 2026 for CU generation.
+        # start_year = max(int(X.min()), PROFORMA_YEAR_START)
+        # years_interp = np.arange(start_year, int(X.max()) + 1)
+
+        start_year = int(X.min())
+        years_interp = np.arange(start_year, int(X.max()) + 1)
+
         y_interp = spline(years_interp)
 
-        df_project = pd.DataFrame({
-            "Year": years_interp,
-            "project": y_interp,
-        })
+        df_project = pd.DataFrame(
+            {
+                "Year": years_interp,
+                "project": y_interp,
+            }
+        )
 
-        df_baseline = pd.DataFrame({
-            "Year": years_interp,
-            "baseline": np.zeros_like(years_interp, dtype=float),
-        })
+        df_baseline = pd.DataFrame(
+            {
+                "Year": years_interp,
+                "baseline": np.zeros_like(years_interp, dtype=float),
+            }
+        )
 
         df_project["delta_project"] = df_project["project"].diff()
         df_baseline["delta_baseline"] = df_baseline["baseline"].diff()
@@ -341,9 +529,7 @@ def compute_carbon_units(
         merged = merged.replace([np.inf, -np.inf], np.nan)
         merged = merged.dropna(subset=["CU"])
 
-        all_protocol_dfs.append(
-            merged[["Year", "CU", "Protocol"]]
-        )
+        all_protocol_dfs.append(merged[["Year", "CU", "Protocol"]])
 
     return pd.concat(all_protocol_dfs, ignore_index=True)
 
@@ -352,13 +538,199 @@ def compute_carbon_units(
 # Scenario orchestration: full carbon → CU → proforma pipeline + acreage solver
 # ---------------------------------------------------------------------------
 
-PROFORMA_YEAR_START = 2024
+# PROFORMA_YEAR_START = 2026
 PROFORMA_YEARS_ADVANCE = 35
 
-
+@lru_cache(maxsize=16)
 def _load_base_json(filename: str) -> dict:
     with open(BASE_PATH / filename, "r") as f:
         return json.load(f)
+
+
+def _resolve_variant_for_loccode(
+    variant: str, loccode: str, registry: list[dict]
+) -> str:
+    """Resolve a caller-supplied variant against the live model registry.
+
+    Mirrors the dashboard's ``_resolve_sub_variants`` precedence so that the
+    AFFDashClient / FastAPI run path picks the same sub-variant the UI would
+    for a given (variant, loccode):
+
+    1. Exact ``(variant, loccode)`` registry match → keep as-is.
+    2. Any sub-variant ``variant + "_*"`` registered for this loccode → pick
+       the lexicographically first.
+    3. No registry match → return the original variant so the preset / species
+       lookup error surfaces meaningfully.
+    """
+    if any(
+        m.get("variant") == variant and m.get("loccode") == loccode for m in registry
+    ):
+        return variant
+
+    sub_matches = sorted(
+        {
+            m["variant"]
+            for m in registry
+            if m.get("loccode") == loccode
+            and m.get("variant", "").startswith(variant + "_")
+        }
+    )
+    if sub_matches:
+        return sub_matches[0]
+
+    return variant
+
+
+_SYNTHESIZED_PRESET_DEFAULTS = {
+    "survival": 70,
+    "si": 100,
+    "si_min": 40,
+    "si_max": 160,
+    "survival_min": 50,
+    "survival_max": 90,
+    "_tpa_cap": 435,
+}
+
+
+def _synthesize_preset(species_count: int) -> dict:
+    """Build a usable preset when the operator hasn't configured one yet.
+
+    Used as a last-resort fallback so any variant with a model registered
+    via admin works out of the box. The operator can later configure proper
+    bounds via Model Management; logged so the gap is visible.
+    """
+    n = max(1, species_count)
+    share = 240 // n
+    return {
+        **_SYNTHESIZED_PRESET_DEFAULTS,
+        "default_tpa": [share] * n,
+    }
+
+
+_SP_TPA_RE = re.compile(r"^SP\d+_TPA$")
+
+
+def species_count_from_features(feature_names) -> int:
+    """Number of ``SP<n>_TPA`` columns in a model's feature list."""
+    return sum(1 for n in feature_names if _SP_TPA_RE.match(str(n)))
+
+
+def species_count_from_model(models: dict) -> int | None:
+    """Species slot count from a loaded model dict.
+
+    Returns ``None`` for v3 bare estimators that expose no ``feature_names_in_``
+    (callers fall back to the legacy 4-slot assumption).
+    """
+    sample = next(iter(models.values()))
+    first_step = sample.steps[0][1] if getattr(sample, "steps", None) else None
+    names = getattr(first_step, "feature_names_in_", None)
+    if names is None:
+        return None
+    return species_count_from_features(names)
+
+
+def reconcile_species_names(typed: list[str], model_count: int) -> tuple[list[str], str | None]:
+    """Force a species-name list to the model's authoritative slot count.
+
+    Pads with ``""`` or truncates; returns ``(codes, warning_or_None)``.
+    """
+    codes = [(c or "").strip() for c in typed][:model_count]
+    named = len([c for c in codes if c])
+    warning = None
+    if len(typed) != model_count:
+        warning = (
+            f"Model expects {model_count} species slot(s); got {named} name(s). "
+            f"Reconciled to {model_count} (model count is authoritative)."
+        )
+    codes += [""] * (model_count - len(codes))
+    return codes, warning
+
+
+def _resolve_preset(variant: str, presets: dict) -> tuple[dict | None, str | None]:
+    """Find the best preset for ``variant`` and report which key supplied it.
+
+    Order: exact match → sibling sub-variant (same base) → base-variant entry.
+    Returns ``(None, None)`` if nothing matches. The source key is returned for
+    diagnostics only; callers should keep using ``variant`` itself for registry
+    / species lookups.
+    """
+    if variant in presets:
+        return presets[variant], variant
+
+    base = variant.split("_", 1)[0]
+    for k in sorted(presets):
+        if k.startswith(base + "_") and k != variant:
+            return presets[k], k
+    if base in presets and base != variant:
+        return presets[base], base
+    return None, None
+
+
+def _resolve_species(variant: str, species_map: dict) -> list[str]:
+    """Look up species codes for ``variant`` with sub-variant / base fallbacks."""
+    codes = species_map.get(variant)
+    if codes:
+        return list(codes)
+    base = variant.split("_", 1)[0]
+    for k in sorted(species_map):
+        if k.startswith(base + "_") and isinstance(species_map[k], list):
+            return list(species_map[k])
+    base_codes = species_map.get(base)
+    if isinstance(base_codes, list):
+        return list(base_codes)
+    return []
+
+
+def _overlay_registry_variants(base_map: dict, registry_variants: dict, field: str) -> dict:
+    """Overlay ``registry_variants[v][field]`` onto ``base_map`` (registry wins).
+
+    Only applies truthy values, so a registry entry that lacks ``field`` (or has
+    an empty list/dict) leaves the legacy entry intact. Non-variant keys in
+    ``base_map`` (e.g. ``_max_species``) are preserved.
+    """
+    merged = dict(base_map)
+    for variant, data in registry_variants.items():
+        value = data.get(field)
+        if value:
+            merged[variant] = list(value) if field == "species" else dict(value)
+    return merged
+
+
+def load_effective_species_map() -> dict:
+    """Legacy variant_species.json with registry.variants species overlaid."""
+    store = get_store()
+    return _overlay_registry_variants(
+        store.get_json("config/variant_species.json"),
+        store.get_json("registry.json").get("variants", {}),
+        "species",
+    )
+
+
+def load_effective_preset_map() -> dict:
+    """Legacy FVSVariant_presets.json with registry.variants presets overlaid."""
+    store = get_store()
+    return _overlay_registry_variants(
+        store.get_json("config/FVSVariant_presets.json"),
+        store.get_json("registry.json").get("variants", {}),
+        "preset",
+    )
+
+
+def _species_count_for_variant(variant: str, registry_models: list[dict]) -> int:
+    """Derive species slot count from any registered model for ``variant``.
+
+    Returns 0 if no model can be loaded/inspected (caller then synthesizes).
+    """
+    entry = next((m for m in registry_models if m.get("variant") == variant), None)
+    if entry is None:
+        return 0
+    try:
+        models = get_fvs_models(variant, entry["loccode"], entry.get("pct_level", "PCT0"))
+        if not models:
+            return 0
+        return species_count_from_model(models) or 0
+    except Exception:
+        return 0
 
 
 def default_scenario(variant: str, loccode: str) -> dict:
@@ -366,28 +738,58 @@ def default_scenario(variant: str, loccode: str) -> dict:
     Compose authoritative default inputs for a (variant, loccode) pair.
     Pulls from FVSVariant_presets.json, variant_species.json, proforma_presets.json.
 
+    The variant is resolved against the live model registry first (same
+    precedence as the dashboard), so callers can pass either a base variant
+    ("PN", "WC") or a specific sub-variant ("WC_2") and the server picks the
+    right one for the loccode. Preset and species lookups fall back to sibling
+    sub-variants when an exact entry is missing so newly-registered variants
+    work without requiring operators to hand-populate every config key.
+
     Returned dict is shaped to feed straight into run_scenario(); callers may
     override any subset of fields.
     """
-    variant_presets = _load_base_json("FVSVariant_presets.json")
-    species_map = _load_base_json("variant_species.json")
+    store = get_store()
+    variant_presets = load_effective_preset_map()
+    species_map = load_effective_species_map()
     proforma_presets = _load_base_json("proforma_presets.json")
+    protocol_overrides = proforma_presets.get("protocol_overrides", {})
+    base_financial_params = {
+        key: value
+        for key, value in proforma_presets.items()
+        if key != "protocol_overrides"
+    }
+    acr_financial_params = {
+        **base_financial_params,
+        **protocol_overrides.get("ACR", {}),
+    }
+    registry = store.get_json("registry.json").get("models", [])
 
-    preset = variant_presets.get(variant)
-    if preset is None:
-        # Fall back to base variant prefix (e.g., "PN" for "PN_1")
-        for key, value in variant_presets.items():
-            if variant.startswith(key) or key.startswith(variant):
-                preset = value
-                variant = key
-                break
-    if preset is None:
-        raise KeyError(f"No variant preset for {variant!r}")
+    resolved_variant = _resolve_variant_for_loccode(variant, loccode, registry)
+    species_codes = _resolve_species(resolved_variant, species_map)
+    if not species_codes:
+        # Model registered but never configured and not in legacy JSON: fall back
+        # to the model's own slot count (blank names; UI renders SP1..SPn).
+        count = _species_count_for_variant(resolved_variant, registry)
+        species_codes = [""] * count
 
-    species_codes = species_map.get(variant) or []
+    preset, preset_source = _resolve_preset(resolved_variant, variant_presets)
+    if preset is None:
+        preset = _synthesize_preset(len(species_codes))
+        preset_source = "<synthesized>"
+        logger.warning(
+            "default_scenario: variant=%s has no preset (exact, sibling, or base); "
+            "using synthesized defaults. Configure presets via Model Management.",
+            resolved_variant,
+        )
+    elif preset_source != resolved_variant:
+        logger.info(
+            "default_scenario: variant=%s using preset from %s (no exact match)",
+            resolved_variant,
+            preset_source,
+        )
 
     return {
-        "variant": variant,
+        "variant": resolved_variant,
         "loccode": loccode,
         "survival": float(preset["survival"]),
         "si": float(preset["si"]),
@@ -397,11 +799,61 @@ def default_scenario(variant: str, loccode: str) -> dict:
         "net_acres": 1000.0,
         "protocols": ["ACR"],
         "financial_params": {
-            "ACR": dict(proforma_presets),
+            "ACR": acr_financial_params,
         },
         "npv_year": 40,
     }
 
+
+@lru_cache(maxsize=512)
+def _carbon_for_inputs_cached(
+    variant: str,
+    loccode: str,
+    survival: float,
+    si: float,
+    species_tpa: tuple[float, ...],
+    pct_level: str,
+) -> tuple[pd.DataFrame, str]:
+    """Hashable-keyed core of ``_carbon_for_inputs`` for memoization."""
+    models = get_fvs_models(variant, loccode, pct_level)
+    if models is not None:
+        wide = predict_fvs_metrics(models, survival, si, list(species_tpa))
+        if not wide.empty and sum(species_tpa) == 0:
+            # No trees planted means no stand, so every projected metric is 0.
+            wide = wide.copy()
+            for col in wide.columns:
+                if col != "Year":
+                    wide[col] = 0.0
+        # if not wide.empty:
+        #     if "ABLD_C" in wide.columns:
+        #         wide["Annual_ABLD_C"] = (
+        #             wide["ABLD_C"].diff().fillna(wide["ABLD_C"].iloc[0])
+        #         )
+        #     zero_row = {col: 0.0 for col in wide.columns}
+        #     zero_row["Year"] = PROFORMA_YEAR_START
+        #     wide = pd.concat([pd.DataFrame([zero_row]), wide], ignore_index=True)
+        #     wide = wide.sort_values("Year").reset_index(drop=True)
+        #     return wide, "fvs"
+        if not wide.empty:
+            wide = align_projection_years(wide)
+            wide = recompute_annual_carbon_columns(wide)
+            return wide.sort_values("Year").reset_index(drop=True), "fvs"
+
+    coefficients = _load_base_json("carbon_model_coefficients.json")
+    rows = compute_carbon_scores(
+        coefficients=coefficients,
+        species_tpa=list(species_tpa),
+        survival=survival,
+        si=si,
+    )
+    if sum(species_tpa) == 0:
+        # ABLD_C is 0 from species since TPA is 0
+        rows = [{**r, "ABLD_C": 0.0, "Annual_ABLD_C": 0.0} for r in rows]
+    # rows.insert(0, {"Year": PROFORMA_YEAR_START, "ABLD_C": 0.0, "Annual_ABLD_C": 0.0})
+    # return pd.DataFrame(rows), "coefficients"
+    df_rows = align_projection_years(pd.DataFrame(rows))
+    df_rows = recompute_annual_carbon_columns(df_rows)
+    return df_rows.sort_values("Year").reset_index(drop=True), "coefficients"
 
 def _carbon_for_inputs(
     variant: str,
@@ -414,28 +866,19 @@ def _carbon_for_inputs(
     """
     Compute the carbon DataFrame for a scenario input set, returning (df, source).
     Tries FVS models first, falls back to coefficient-based prediction.
-    """
-    models = get_fvs_models(variant, loccode, pct_level)
-    if models is not None:
-        wide = predict_fvs_metrics(models, survival, si, species_tpa)
-        if not wide.empty:
-            if "ABLD_C" in wide.columns:
-                wide["Annual_ABLD_C"] = wide["ABLD_C"].diff().fillna(wide["ABLD_C"].iloc[0])
-            zero_row = {col: 0.0 for col in wide.columns}
-            zero_row["Year"] = PROFORMA_YEAR_START
-            wide = pd.concat([pd.DataFrame([zero_row]), wide], ignore_index=True)
-            wide = wide.sort_values("Year").reset_index(drop=True)
-            return wide, "fvs"
 
-    coefficients = _load_base_json("carbon_model_coefficients.json")
-    rows = compute_carbon_scores(
-        coefficients=coefficients,
-        species_tpa=species_tpa,
-        survival=survival,
-        si=si,
+    Memoized: callers receive a fresh copy of the DataFrame so downstream
+    mutation is safe even though the cache reuses the underlying result.
+    """
+    df, source = _carbon_for_inputs_cached(
+        variant,
+        loccode,
+        float(survival),
+        float(si),
+        tuple(float(x) for x in species_tpa),
+        pct_level,
     )
-    rows.insert(0, {"Year": PROFORMA_YEAR_START, "ABLD_C": 0.0, "Annual_ABLD_C": 0.0})
-    return pd.DataFrame(rows), "coefficients"
+    return df.copy(), source
 
 
 def _normalize_financial_params(
@@ -475,12 +918,22 @@ def _proforma_for_protocol(
     npv_year: int,
 ) -> tuple[pd.DataFrame, dict]:
     """Run the proforma + summary for one protocol at a given net_acres value."""
+    # params = {
+    #     **fin_params,
+    #     "net_acres": float(net_acres),
+    #     "year_start": PROFORMA_YEAR_START,
+    #     "years_advance": PROFORMA_YEARS_ADVANCE,
+    # }
+
+    year_start = int(pd.to_numeric(df_cu["Year"], errors="coerce").min())
+
     params = {
         **fin_params,
         "net_acres": float(net_acres),
-        "year_start": PROFORMA_YEAR_START,
+        "year_start": year_start,
         "years_advance": PROFORMA_YEARS_ADVANCE,
     }
+
     df_pf = compute_proforma(df_cu, params)
     df_sum = compute_summaries(df_pf, params, npv_years=npv_year)
     summary_row = df_sum[df_sum["Protocol"] == protocol].iloc[0].to_dict()
@@ -488,36 +941,52 @@ def _proforma_for_protocol(
     return df_pf, summary_row
 
 
-def _solve_acreage_for_tnr(
+_METRIC_TO_SUMMARY_KEY = {"tnr": "total_net", "npv": "npv_yr"}
+
+
+def _solve_acreage_for_metric(
     df_cu_protocol: pd.DataFrame,
     protocol: str,
     fin_params: dict,
     npv_year: int,
-    target_tnr: float,
+    target_value: float,
+    metric: str = "tnr",
 ) -> float:
     """
-    Closed-form inverse: TNR is exactly linear in net_acres for a fixed
-    protocol and fixed financial params. Run the proforma at acres=1 and
-    acres=10 to recover slope/intercept, then solve.
+    Closed-form inverse: TNR and NPV are both exactly linear in net_acres for a
+    fixed protocol, fixed financial params, and fixed npv_year horizon. Run the
+    proforma at acres=1 and acres=10 to recover slope/intercept, then solve.
+
+    For metric="npv" the result is the acreage that hits target_value at the
+    given npv_year horizon under the supplied financial params.
     """
+    if metric not in _METRIC_TO_SUMMARY_KEY:
+        raise ValueError(
+            f"Unsupported solve metric {metric!r}; expected one of "
+            f"{sorted(_METRIC_TO_SUMMARY_KEY)}."
+        )
+    key = _METRIC_TO_SUMMARY_KEY[metric]
+
     _, s1 = _proforma_for_protocol(df_cu_protocol, protocol, fin_params, 1.0, npv_year)
-    _, s10 = _proforma_for_protocol(df_cu_protocol, protocol, fin_params, 10.0, npv_year)
+    _, s10 = _proforma_for_protocol(
+        df_cu_protocol, protocol, fin_params, 10.0, npv_year
+    )
 
-    tnr_1 = float(s1["total_net"])
-    tnr_10 = float(s10["total_net"])
+    v_1 = float(s1[key])
+    v_10 = float(s10[key])
 
-    slope = (tnr_10 - tnr_1) / 9.0
+    slope = (v_10 - v_1) / 9.0
     if slope == 0:
         raise ValueError(
-            "TNR is invariant to net_acres (slope=0) — cannot solve. "
+            f"{metric.upper()} is invariant to net_acres (slope=0) — cannot solve. "
             "Likely the protocol produces no credits for this scenario."
         )
-    intercept = tnr_1 - slope * 1.0   # so TNR(acres) = slope * acres + intercept
-    target_acres = (target_tnr - intercept) / slope
+    intercept = v_1 - slope * 1.0  # so metric(acres) = slope * acres + intercept
+    target_acres = (target_value - intercept) / slope
     if target_acres <= 0:
         raise ValueError(
             f"Solved acreage is non-positive ({target_acres:.2f}). "
-            f"Target TNR {target_tnr} is unreachable with these inputs."
+            f"Target {metric.upper()} {target_value} is unreachable with these inputs."
         )
     return float(target_acres)
 
@@ -536,15 +1005,23 @@ def run_scenario(inputs: dict) -> dict:
     defaults = default_scenario(inputs["variant"], inputs["loccode"])
 
     resolved = {**defaults}
-    for key in ("survival", "si", "species_tpa", "pct_level", "net_acres",
-                "protocols", "npv_year"):
+    for key in (
+        "survival",
+        "si",
+        "species_tpa",
+        "pct_level",
+        "net_acres",
+        "protocols",
+        "npv_year",
+    ):
         value = inputs.get(key)
         if value is not None:
             resolved[key] = value
 
     fin_overrides = inputs.get("financial_params")
     resolved["financial_params"] = _normalize_financial_params(
-        resolved["protocols"], fin_overrides,
+        resolved["protocols"],
+        fin_overrides,
     )
 
     solve = inputs.get("solve")
@@ -557,9 +1034,12 @@ def run_scenario(inputs: dict) -> dict:
         )
 
     df_carbon, model_source = _carbon_for_inputs(
-        resolved["variant"], resolved["loccode"],
-        resolved["survival"], resolved["si"],
-        resolved["species_tpa"], resolved["pct_level"],
+        resolved["variant"],
+        resolved["loccode"],
+        resolved["survival"],
+        resolved["si"],
+        resolved["species_tpa"],
+        resolved["pct_level"],
     )
     protocol_rules = _load_base_json("protocol_rules.json")
     df_cu = compute_carbon_units(df_carbon, resolved["protocols"], protocol_rules)
@@ -572,24 +1052,44 @@ def run_scenario(inputs: dict) -> dict:
         df_cu_p = df_cu[df_cu["Protocol"] == protocol]
 
         if solve is not None and protocol == resolved["protocols"][0]:
-            target_acres = _solve_acreage_for_tnr(
-                df_cu_p, protocol, fin_params, resolved["npv_year"], solve["value"],
+            target_acres = _solve_acreage_for_metric(
+                df_cu_p,
+                protocol,
+                fin_params,
+                resolved["npv_year"],
+                solve["value"],
+                metric=solve.get("target", "tnr"),
             )
             resolved["net_acres"] = target_acres
 
         net_acres = resolved["net_acres"]
         df_pf, summary_row = _proforma_for_protocol(
-            df_cu_p, protocol, fin_params, net_acres, resolved["npv_year"],
+            df_cu_p,
+            protocol,
+            fin_params,
+            net_acres,
+            resolved["npv_year"],
         )
         summaries.append(summary_row)
         proforma_frames.append(df_pf)
 
     response: dict = {
-        "inputs": {k: resolved[k] for k in (
-            "variant", "loccode", "survival", "si", "species_tpa",
-            "species_codes", "pct_level", "net_acres", "protocols",
-            "npv_year", "financial_params",
-        )},
+        "inputs": {
+            k: resolved[k]
+            for k in (
+                "variant",
+                "loccode",
+                "survival",
+                "si",
+                "species_tpa",
+                "species_codes",
+                "pct_level",
+                "net_acres",
+                "protocols",
+                "npv_year",
+                "financial_params",
+            )
+        },
         "summaries": summaries,
         "model_source": model_source,
     }
