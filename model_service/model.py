@@ -320,15 +320,23 @@ def compute_proforma(df_ert_ac: pd.DataFrame, p: dict) -> pd.DataFrame:
         )
         df["Total_Revenue"] = df["CUs_Sold"] * df["CU_Credit_Price"]
 
-        # costs
-        df["Validation_and_Verification"] = 0
-        df.loc[df["Year"] == p["year_start"], "Validation_and_Verification"] = p[
-            "validation_cost"
-        ]
+        # Project-start costs. compute_carbon_units .diff()s away the year_start
+        # row, so matching it exactly wrote to nothing and planting_cost reached
+        # no caller at all. Falling forward to the earliest surviving year keeps
+        # them undiscounted (row 0 is t=0 for npf.npv) and costs nothing, since
+        # credits don't flow until year 5.
+        at_or_after_start = df.loc[df["Year"] >= p["year_start"], "Year"]
+        upfront_year = at_or_after_start.min() if len(at_or_after_start) else df["Year"].min()
+
+        # Validation is one-time, verification recurring; shared column, so add.
+        df["Validation_and_Verification"] = 0.0
         df.loc[
             (df["Year"] > p["year_start"]) & ((df["Year"] - p["year_start"]) % 5 == 0),
             "Validation_and_Verification",
         ] = p["verification_cost"]
+        df.loc[df["Year"] == upfront_year, "Validation_and_Verification"] += p[
+            "validation_cost"
+        ]
 
         df["Survey_Cost"] = 0
         df.loc[(df["Year"] - p["year_start"]) % 5 == 4, "Survey_Cost"] = (
@@ -337,9 +345,10 @@ def compute_proforma(df_ert_ac: pd.DataFrame, p: dict) -> pd.DataFrame:
 
         df["Registry_Fees"] = p["registry_fees"]
         df["Issuance_Fees"] = df["CUs_Sold"] * p["issuance_fee_per_ert"]
-        # df["Planting_Cost"] = p["planting_cost"]
+        # $/acre, charged once. Scales with acreage but not with density, so it
+        # can't shift where the Q2 optimum lands.
         df["Planting_Cost"] = 0.0
-        df.loc[df["Year"] == p["year_start"], "Planting_Cost"] = (
+        df.loc[df["Year"] == upfront_year, "Planting_Cost"] = (
             p["planting_cost"] * p["net_acres"]
         )
 

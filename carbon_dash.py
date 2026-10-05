@@ -1,6 +1,13 @@
 import os
 import streamlit as st
 
+from utils.functions.frontend import inject_chunk_reload
+
+# Auto-recover from dropped JS chunk fetches when Cloud Run cold-starts from
+# scale-to-zero (otherwise surfaces as "error loading dynamically imported
+# module" on a rerun). Runs on every rerun, before any page renders.
+inject_chunk_reload()
+
 project = st.Page("pages/1_project_builder.py", title="🌲 Project Builder")
 faq = st.Page("pages/2_faq.py", title="❓ Frequently Asked Questions")
 
