@@ -101,13 +101,6 @@ PROTOCOL_COLOR_MAP = {
     "ISO": "#9467bd",
 }
 
-# Cumulative net revenue chart: colour encodes discounting, dash encodes protocol.
-CUMULATIVE_NET_REVENUE_COLOR_MAP = {
-    "Discounted": "#005251",
-    "Undiscounted": "#ff7f0e",
-}
-
-
 def _round_to_nearest_hundred(value):
     """Round numeric display values to the nearest hundreds place."""
     if value is None or pd.isna(value):
@@ -138,6 +131,7 @@ def _add_fading_line_series(
     label: str | None,
     showlegend: bool,
     line_dash: str = "solid",
+    marker_symbol: str = "circle",
 ):
     """Add a single series to a Plotly figure with constant-opacity lines/markers."""
     if series_df.empty:
@@ -154,7 +148,7 @@ def _add_fading_line_series(
                 x=x,
                 y=y,
                 mode="markers",
-                marker=dict(color=[marker_color], size=7),
+                marker=dict(color=[marker_color], size=7, symbol=marker_symbol),
                 customdata=rounded_y,
                 name=label,
                 legendgroup=label,
@@ -192,7 +186,7 @@ def _add_fading_line_series(
             x=x,
             y=y,
             mode="markers",
-            marker=dict(color=marker_colors, size=7),
+            marker=dict(color=marker_colors, size=7, symbol=marker_symbol),
             customdata=rounded_y,
             name=label,
             legendgroup=label,
@@ -215,12 +209,14 @@ def _plot_fading_line_chart(
     show_future_hatch: bool = False,
     color_map: dict[str, str] | None = None,
     dash_map: dict[str, str] | None = None,
+    symbol_map: dict[str, str] | None = None,
     legend_title: str | None = None,
 ):
     """Render a Plotly line chart with optional year-40+ hatch background.
 
-    ``color_map`` / ``dash_map`` override the per-series color and dash style
-    (keyed by series value); otherwise protocol defaults are used.
+    ``color_map`` / ``dash_map`` / ``symbol_map`` override the per-series color,
+    dash style, and marker symbol (keyed by series value); otherwise protocol
+    defaults are used.
     """
     if data.empty or x_col not in data.columns or y_col not in data.columns:
         st.info(f"No data available for {title}.")
@@ -315,6 +311,11 @@ def _plot_fading_line_chart(
                 line_dash = protocol_dash_map.get(str(s), "solid")
             else:
                 line_dash = "solid"
+            marker_symbol = (
+                symbol_map[str(s)]
+                if symbol_map and str(s) in symbol_map
+                else "circle"
+            )
             _add_fading_line_series(
                 fig=fig,
                 series_df=s_df,
@@ -324,6 +325,7 @@ def _plot_fading_line_chart(
                 label=str(s),
                 showlegend=True,
                 line_dash=line_dash,
+                marker_symbol=marker_symbol,
             )
     else:
         _add_fading_line_series(
@@ -2061,17 +2063,21 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
             plot_df[value_col] / first_params["net_acres"]
         ).round(-1)
 
-    # One legend entry per protocol x discounting. Colour encodes discounting
-    # (two colours); dash style encodes protocol, as on the other charts.
+    # One legend entry per protocol x discounting. Colour encodes protocol so
+    # selected protocols stay visually distinct; dash style and marker shape
+    # encode discounted vs. undiscounted values within each protocol.
     plot_df["Series"] = plot_df["Protocol"].astype(str) + " - " + plot_df["Discounting"]
-    protocol_dash_map = {"ACR": "dash", "CAR": "longdash", "VERRA": "dot"}
     series_color_map: dict[str, str] = {}
     series_dash_map: dict[str, str] = {}
+    series_symbol_map: dict[str, str] = {}
+    discounting_dash_map = {"Discounted": "solid", "Undiscounted": "dash"}
+    discounting_symbol_map = {"Discounted": "circle", "Undiscounted": "diamond"}
     for protocol in protocols_for_chart:
         for flavour in ("Discounted", "Undiscounted"):
             key = f"{protocol} - {flavour}"
-            series_color_map[key] = CUMULATIVE_NET_REVENUE_COLOR_MAP[flavour]
-            series_dash_map[key] = protocol_dash_map.get(str(protocol), "solid")
+            series_color_map[key] = PROTOCOL_COLOR_MAP.get(str(protocol), "#7f7f7f")
+            series_dash_map[key] = discounting_dash_map[flavour]
+            series_symbol_map[key] = discounting_symbol_map[flavour]
     ordered_protocols = [p for p in PROTOCOL_ORDER if p in protocols_for_chart] + sorted(
         p for p in protocols_for_chart if p not in PROTOCOL_ORDER
     )
@@ -2098,6 +2104,7 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
         show_future_hatch=True,
         color_map=series_color_map,
         dash_map=series_dash_map,
+        symbol_map=series_symbol_map,
         legend_title="Protocol - Discounting",
     )
 
