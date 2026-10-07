@@ -2539,16 +2539,13 @@ def run_chart():
         _restore_backup(_carbon_units_keys(), backup_name="_carbon_units_backup")
         _init_carbon_units_state()
 
-        # render widget using key only to enable restoring backups.
-        # Single protocol so the CO2e and financial charts stay focused on one
-        # protocol; downstream code still consumes a one-element list.
-        protocol = st.selectbox(
-            "Select Protocol",
+        # render widget using key only to enable restoring backups
+        protocols = st.multiselect(
+            "Select Protocol(s)",
             options=PROTOCOL_ORDER,
-            key="carbon_units_protocol",
-            help=H("carbon.protocol_selectbox"),
+            key="carbon_units_protocols",
+            help=H("carbon.protocols_multiselect"),
         )
-        protocols = [protocol] if protocol else []
 
         st.session_state["carbon_units_inputs"] = {"protocols": protocols}
 

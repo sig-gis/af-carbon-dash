@@ -79,10 +79,10 @@
         "component": "Back button from Planting Scenario to Site Selection",
         "help": "Return to Site Selection map"
     },
-    "carbon.protocol_selectbox": {
-      "streamlit_function": "selectbox",
+    "carbon.protocols_multiselect": {
+      "streamlit_function": "multiselect",
       "component": "Protocol selector for CO₂e / Project Financials",
-      "help": "Select the protocol used to estimate CO₂e and Project Financials. One protocol is shown at a time so the charts stay focused."
+      "help": "Select one or more protocols to estimate CO₂e and Project Financials."
     },
     "credits.expander_subheader": {
       "streamlit_function": "expander",

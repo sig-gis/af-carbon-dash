@@ -51,7 +51,7 @@ def _planting_keys():
 
 def _carbon_units_keys() -> list[str]:
     """Return the set of session-state keys that should persist for the Carbon Units section."""
-    return ["carbon_units_protocol", "carbon_units_inputs"]
+    return ["carbon_units_protocols", "carbon_units_inputs"]
 
 
 def _init_planting_state(variant: str, preset: dict):
@@ -106,7 +106,7 @@ def _apply_planting_prefill(variant: str, sp_keys: list[str]):
 
     protocol = prefill.get("protocol")
     if protocol:
-        st.session_state["carbon_units_protocol"] = protocol
+        st.session_state["carbon_units_protocols"] = [protocol]
         st.session_state["carbon_units_inputs"] = {"protocols": [protocol]}
         # Editable financials are seeded per protocol inside credits_inputs()
         st.session_state["_credits_prefill"] = {
@@ -121,26 +121,26 @@ def _apply_planting_prefill(variant: str, sp_keys: list[str]):
 
 
 def _init_carbon_units_state():
-    """Initialize Carbon Units inputs ONLY if missing.
-
-    A single protocol is selected at a time; ``carbon_units_inputs["protocols"]``
-    keeps its one-element list shape for downstream consumers.
-    """
-    default_protocol = "ACR"
+    """Initialize Carbon Units inputs ONLY if missing."""
+    default_protocols = ["ACR", "CAR", "VERRA", "GS", "ISO"]
 
     if "carbon_units_inputs" not in st.session_state:
-        st.session_state["carbon_units_inputs"] = {"protocols": [default_protocol]}
+        st.session_state["carbon_units_inputs"] = {"protocols": default_protocols}
 
-    if "carbon_units_protocol" not in st.session_state:
-        # Tolerate stale multi-protocol state from older sessions: keep the first.
-        legacy = st.session_state.pop("carbon_units_protocols", None)
-        stored = st.session_state["carbon_units_inputs"].get("protocols") or legacy or []
-        st.session_state["carbon_units_protocol"] = (
-            stored[0] if isinstance(stored, list) and stored else default_protocol
-        )
-        st.session_state["carbon_units_inputs"] = {
-            "protocols": [st.session_state["carbon_units_protocol"]]
-        }
+    if "carbon_units_protocols" not in st.session_state:
+        # Tolerate stale single-protocol state from sessions created while this
+        # widget was temporarily a selectbox.
+        legacy_single = st.session_state.pop("carbon_units_protocol", None)
+        stored = st.session_state["carbon_units_inputs"].get("protocols") or []
+        if legacy_single and not stored:
+            stored = [legacy_single]
+
+        if not isinstance(stored, list):
+            stored = [stored]
+
+        protocols = [p for p in stored if p in default_protocols] or default_protocols
+        st.session_state["carbon_units_protocols"] = protocols
+        st.session_state["carbon_units_inputs"] = {"protocols": protocols}
 
 
 def _backup_keys(keys, backup_name: str = "_planting_backup"):
