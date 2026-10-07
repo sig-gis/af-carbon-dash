@@ -21,45 +21,11 @@ import streamlit.components.v1 as components
 # window hosting Streamlit's Vite bundle. A time-based guard prevents reload
 # loops while still allowing recovery from a later, unrelated chunk failure.
 _RELOAD_ON_PRELOAD_ERROR = """
-<style>
-html, body, iframe {
-  width: 0 !important;
-  height: 0 !important;
-  min-width: 0 !important;
-  min-height: 0 !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  overflow: hidden !important;
-}
-</style>
 <script>
 (function () {
   var w = window.parent || window;
   if (w.__afPreloadReloadHooked) return;  // attach once per top window
   w.__afPreloadReloadHooked = true;
-
-  // Streamlit wraps components in normal block layout even when the iframe is
-  // height=0. Collapse this component's iframe and its nearby wrappers so the
-  // recovery hook does not create a blank row above the page content.
-  try {
-    var frame = window.frameElement;
-    var node = frame;
-    for (var i = 0; node && i < 3; i += 1) {
-      var style = node.style;
-      if (style) {
-        if (i === 0) {
-          style.setProperty("display", "block", "important");
-        }
-        style.setProperty("height", "0", "important");
-        style.setProperty("min-height", "0", "important");
-        style.setProperty("margin", "0", "important");
-        style.setProperty("padding", "0", "important");
-        style.setProperty("overflow", "hidden", "important");
-      }
-      node = node.parentElement;
-    }
-  } catch (_) {}
-
   w.addEventListener("vite:preloadError", function (event) {
     try { event.preventDefault(); } catch (_) {}  // suppress Vite's rethrow
     var KEY = "__afViteReloadedAt";
@@ -78,7 +44,7 @@ html, body, iframe {
 def inject_chunk_reload() -> None:
     """Auto-recover from failed dynamic chunk imports (Cloud Run cold starts).
 
-    Call once per run, before the page renders. The helper renders a component
-    iframe, then hides its Streamlit wrapper so it is visually/layout inert.
+    Call once per run, before the page renders. Renders a zero-height iframe,
+    so it is visually inert.
     """
     components.html(_RELOAD_ON_PRELOAD_ERROR, height=0, width=0)
