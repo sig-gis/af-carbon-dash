@@ -11,6 +11,11 @@ ENV UV_NO_DEV=1
 COPY ./pyproject.toml ./uv.lock ./.python-version /app/
 RUN uv sync --locked --no-install-project
 
+# Patch Streamlit's frontend shell so stale Vite/JS chunk fetches reload the
+# page without rendering a hidden Streamlit component that affects page layout.
+COPY scripts/inject_streamlit_preload_hook.py /app/scripts/
+RUN python /app/scripts/inject_streamlit_preload_hook.py
+
 # Copy dashboard app code
 COPY carbon_dash.py /app/
 COPY pages/ /app/pages/
