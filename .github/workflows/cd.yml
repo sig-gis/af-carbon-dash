@@ -103,7 +103,34 @@ jobs:
             --project="${{ env.GCP_PROJECT_ID }}" \
             --config=/tmp/cloudbuild-dash.yaml
 
-      # ── Deploy API first (dashboard needs its URL) ────────────────
+      # ── Deploy order ──────────────────────────────────────────────
+      # The API requires a bearer key; the dashboard reads that key from the
+      # shared model store. On an UPGRADE we deploy the dashboard first: the
+      # new dashboard sends a key the old API simply ignores, so there is no
+      # window where an old, keyless dashboard is rejected by a new API. On a
+      # FIRST deploy there is no dashboard yet, so the API goes first to
+      # produce the URL the dashboard needs.
+      - name: Look up existing API URL
+        id: api_url
+        run: |
+          URL=$(gcloud run services describe "${{ env.API_SERVICE }}" \
+            --region ${{ env.REGION }} \
+            --format="value(status.url)" 2>/dev/null || true)
+          echo "url=${URL}" >> "$GITHUB_OUTPUT"
+          if [[ -n "$URL" ]]; then echo "exists=true" >> "$GITHUB_OUTPUT"; else echo "exists=false" >> "$GITHUB_OUTPUT"; fi
+
+      - name: "Deploy Dashboard to Cloud Run (upgrade: before API)"
+        if: steps.api_url.outputs.exists == 'true'
+        run: |
+          API_URL="${{ steps.api_url.outputs.url }}"
+          gcloud run deploy "${{ env.DASH_SERVICE }}" \
+            --image "${{ env.DASH_IMAGE }}" \
+            --platform managed \
+            --region ${{ env.REGION }} \
+            --allow-unauthenticated \
+            --service-account="${{ secrets.GCP_SERVICE_ACCOUNT }}" \
+            --set-env-vars "CARBON_API_BASE_URL=${API_URL},ENV=${{ steps.env.outputs.env_name }},GCP_PROJECT=${{ env.GCP_PROJECT_ID }},MODEL_STORE_BACKEND=gcs,MODEL_STORE_BUCKET=${{ env.MODEL_BUCKET }},GOOGLE_SERVICE_ACCOUNT_EMAIL=${{ secrets.GCP_SERVICE_ACCOUNT }},SITE_UPLOAD_BUCKET=${{ env.UPLOAD_BUCKET }}"
+
       - name: Deploy API to Cloud Run
         run: |
           gcloud run deploy "${{ env.API_SERVICE }}" \
@@ -115,23 +142,18 @@ jobs:
             --timeout=3600 \
             --cpu=4 \
             --memory=4Gi \
-            --set-env-vars "GCP_PROJECT=${{ env.GCP_PROJECT_ID }},MODEL_STORE_BACKEND=gcs,MODEL_STORE_BUCKET=${{ env.MODEL_BUCKET }},BULK_WORKERS=4,BULK_WORKER_MODE=process"
+            --set-env-vars "ENV=${{ steps.env.outputs.env_name }},GCP_PROJECT=${{ env.GCP_PROJECT_ID }},MODEL_STORE_BACKEND=gcs,MODEL_STORE_BUCKET=${{ env.MODEL_BUCKET }},BULK_WORKERS=4,BULK_WORKER_MODE=process"
 
-      - name: Get API URL
-        id: api_url
+      - name: "Deploy Dashboard to Cloud Run (first deploy: after API)"
+        if: steps.api_url.outputs.exists != 'true'
         run: |
-          URL=$(gcloud run services describe "${{ env.API_SERVICE }}" \
+          API_URL=$(gcloud run services describe "${{ env.API_SERVICE }}" \
             --region ${{ env.REGION }} \
             --format="value(status.url)")
-          echo "url=${URL}" >> "$GITHUB_OUTPUT"
-
-      # ── Deploy Dashboard ──────────────────────────────────────────
-      - name: Deploy Dashboard to Cloud Run
-        run: |
           gcloud run deploy "${{ env.DASH_SERVICE }}" \
             --image "${{ env.DASH_IMAGE }}" \
             --platform managed \
             --region ${{ env.REGION }} \
             --allow-unauthenticated \
             --service-account="${{ secrets.GCP_SERVICE_ACCOUNT }}" \
-            --set-env-vars "CARBON_API_BASE_URL=${{ steps.api_url.outputs.url }},ENV=${{ steps.env.outputs.env_name }},GCP_PROJECT=${{ env.GCP_PROJECT_ID }},MODEL_STORE_BACKEND=gcs,MODEL_STORE_BUCKET=${{ env.MODEL_BUCKET }},GOOGLE_SERVICE_ACCOUNT_EMAIL=${{ secrets.GCP_SERVICE_ACCOUNT }},SITE_UPLOAD_BUCKET=${{ env.UPLOAD_BUCKET }}"
+            --set-env-vars "CARBON_API_BASE_URL=${API_URL},ENV=${{ steps.env.outputs.env_name }},GCP_PROJECT=${{ env.GCP_PROJECT_ID }},MODEL_STORE_BACKEND=gcs,MODEL_STORE_BUCKET=${{ env.MODEL_BUCKET }},GOOGLE_SERVICE_ACCOUNT_EMAIL=${{ secrets.GCP_SERVICE_ACCOUNT }},SITE_UPLOAD_BUCKET=${{ env.UPLOAD_BUCKET }}"

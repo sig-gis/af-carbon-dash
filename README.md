@@ -107,3 +107,46 @@ uv run streamlit run carbon_dash.py
 $env:CARBON_API_BASE_URL = "https://YOUR-CLOUD-RUN-URL"
 uv run streamlit run carbon_dash.py
 ```
+
+The hosted API requires a key. The dashboard reads its own key from the model
+store automatically (see below), so nothing else is needed when both services
+share a store. To point at an API whose store you can't read, set
+`CARBON_API_KEY` alongside the URL (env var or `.streamlit/secrets.toml`).
+
+---
+
+## 7. API authentication
+
+The model service authenticates calling *systems* with static bearer keys; it
+has no notion of users. Full details, including how an external system should
+integrate, are in `model_service_documentation.md` under "Authentication".
+
+**Nothing to set up.** Keys live in the model store as `api_keys.json`, next to
+`registry.json`. Whichever process starts first (service or dashboard) creates
+the file with one admin key for the dashboard client, and both then use it.
+Locally with the default store that file is `./api_keys.json` (gitignored);
+with MinIO or Cloud Storage it is an object in the bucket, so every deployment
+of an environment reuses the same keys.
+
+**Adding a client** (for example the American Forests dashboard): generate a
+key, add an entry to `api_keys.json` in the store, and hand the key over. The
+service picks up the change on the next request that presents the new key; no
+redeploy. Removing a key takes effect within a minute.
+
+```
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+```json
+{
+  "sig-dashboard": {"keys": ["<dashboard-key>"], "role": "admin"},
+  "af-dashboard":  {"keys": ["<af-key>"], "role": "client"}
+}
+```
+
+**Rotating a client:** add the new key to its `keys` list, let the client
+switch over, then remove the old key.
+
+**Overrides:** `CARBON_API_KEYS` (the same JSON as an env var) replaces the
+store file entirely, for anyone who prefers Secret Manager. `CARBON_API_AUTH=off`
+disables authentication outside production.

@@ -20,7 +20,7 @@ from model_service.main import (
     load_variant_presets,
     load_variant_species,
 )
-from utils.config import get_api_base_url, normalize_params
+from utils.config import api_session, get_api_base_url, normalize_params
 from utils.functions.helper import HELP, H
 from utils.functions.slider_bounds import clamp, slider_bounds
 from utils.functions.statefulness import (
@@ -45,7 +45,7 @@ def _resolve_sub_variants(map_variant: str, loccode: str) -> list[str]:
     Falls back to species config prefix matching if no registry entries found.
     """
     try:
-        resp = requests.get(f"{get_api_base_url()}/models/registry", timeout=5)
+        resp = api_session().get(f"{get_api_base_url()}/models/registry", timeout=5)
         resp.raise_for_status()
         registry = resp.json().get("models", [])
     except Exception:
@@ -101,7 +101,6 @@ PROTOCOL_COLOR_MAP = {
     "ISO": "#9467bd",
 }
 
-
 def _round_to_nearest_hundred(value):
     """Round numeric display values to the nearest hundreds place."""
     if value is None or pd.isna(value):
@@ -132,6 +131,7 @@ def _add_fading_line_series(
     label: str | None,
     showlegend: bool,
     line_dash: str = "solid",
+    marker_symbol: str = "circle",
 ):
     """Add a single series to a Plotly figure with constant-opacity lines/markers."""
     if series_df.empty:
@@ -148,7 +148,7 @@ def _add_fading_line_series(
                 x=x,
                 y=y,
                 mode="markers",
-                marker=dict(color=[marker_color], size=7),
+                marker=dict(color=[marker_color], size=7, symbol=marker_symbol),
                 customdata=rounded_y,
                 name=label,
                 legendgroup=label,
@@ -186,7 +186,7 @@ def _add_fading_line_series(
             x=x,
             y=y,
             mode="markers",
-            marker=dict(color=marker_colors, size=7),
+            marker=dict(color=marker_colors, size=7, symbol=marker_symbol),
             customdata=rounded_y,
             name=label,
             legendgroup=label,
@@ -207,8 +207,17 @@ def _plot_fading_line_chart(
     include_years: list[int],
     series_col: str | None = None,
     show_future_hatch: bool = False,
+    color_map: dict[str, str] | None = None,
+    dash_map: dict[str, str] | None = None,
+    symbol_map: dict[str, str] | None = None,
+    legend_title: str | None = None,
 ):
-    """Render a Plotly line chart with optional year-40+ hatch background."""
+    """Render a Plotly line chart with optional year-40+ hatch background.
+
+    ``color_map`` / ``dash_map`` / ``symbol_map`` override the per-series color,
+    dash style, and marker symbol (keyed by series value); otherwise protocol
+    defaults are used.
+    """
     if data.empty or x_col not in data.columns or y_col not in data.columns:
         st.info(f"No data available for {title}.")
         return
@@ -284,27 +293,39 @@ def _plot_fading_line_chart(
         # Keep protocol colors stable regardless of selection order.
         palette = qualitative.Plotly
         fallback_cycle = iter(palette)
-        color_map: dict[str, str] = {}
+        resolved_colors: dict[str, str] = {}
         for s in series_vals:
             key = str(s)
-            if key in PROTOCOL_COLOR_MAP:
-                color_map[s] = PROTOCOL_COLOR_MAP[key]
+            if color_map and key in color_map:
+                resolved_colors[s] = color_map[key]
+            elif key in PROTOCOL_COLOR_MAP:
+                resolved_colors[s] = PROTOCOL_COLOR_MAP[key]
             else:
-                color_map[s] = next(fallback_cycle, "#7f7f7f")
+                resolved_colors[s] = next(fallback_cycle, "#7f7f7f")
 
         for s in series_vals:
             s_df = data[data[series_col] == s].sort_values(x_col)
+            if dash_map and str(s) in dash_map:
+                line_dash = dash_map[str(s)]
+            elif series_col == "Protocol":
+                line_dash = protocol_dash_map.get(str(s), "solid")
+            else:
+                line_dash = "solid"
+            marker_symbol = (
+                symbol_map[str(s)]
+                if symbol_map and str(s) in symbol_map
+                else "circle"
+            )
             _add_fading_line_series(
                 fig=fig,
                 series_df=s_df,
                 x_col=x_col,
                 y_col=y_col,
-                color=color_map[s],
+                color=resolved_colors[s],
                 label=str(s),
                 showlegend=True,
-                line_dash=protocol_dash_map.get(str(s), "solid")
-                if series_col == "Protocol"
-                else "solid",
+                line_dash=line_dash,
+                marker_symbol=marker_symbol,
             )
     else:
         _add_fading_line_series(
@@ -322,7 +343,7 @@ def _plot_fading_line_chart(
         template="plotly_white",
         height=400,
         margin=dict(l=20, r=20, t=50, b=20),
-        legend_title=series_col if series_col else None,
+        legend_title=legend_title or (series_col if series_col else None),
     )
     fig.update_xaxes(
         title_text="Year",
@@ -597,7 +618,7 @@ def _protocol_adjusted_average_from_carbon_curve(
         "protocols": protocols,
     }
 
-    resp = requests.post(
+    resp = api_session().post(
         f"{API_BASE_URL}/carbon/units",
         json=payload,
         timeout=10,
@@ -1022,7 +1043,7 @@ def carbon_chart():
     }
     # Fetch available PCT levels with retention percentages for this variant/location
     try:
-        _pct_resp = requests.get(
+        _pct_resp = api_session().get(
             f"{API_BASE_URL}/models/pct-info",
             params={"variant": variant, "loccode": loccode},
             timeout=5,
@@ -1062,7 +1083,7 @@ def carbon_chart():
         "pct_level": pct_level,
     }
 
-    resp = requests.post(
+    resp = api_session().post(
         f"{API_BASE_URL}/carbon/calculate",
         json=payload,
         timeout=10,
@@ -1273,12 +1294,8 @@ def carbon_chart():
     # Summary output
     if "ABLD_C" in plot_df.columns:
         final_co2e_unit = "tons"
-        selected_protocols = st.session_state.get(
-            "carbon_units_protocols",
-            st.session_state.get("carbon_units_inputs", {}).get(
-                "protocols",
-                ["ACR", "CAR", "VERRA"],
-            ),
+        selected_protocols = st.session_state.get("carbon_units_inputs", {}).get(
+            "protocols", [PROTOCOL_ORDER[0]]
         )
         selected_protocols = list(selected_protocols or [])
         protocol_average_result = _protocol_adjusted_average_from_carbon_curve(
@@ -1342,7 +1359,7 @@ def carbon_units():
 
     json.dumps(payload)
 
-    resp = requests.post(
+    resp = api_session().post(
         f"{API_BASE_URL}/carbon/units",
         json=payload,
         timeout=10,
@@ -1530,6 +1547,35 @@ def carbon_units():
         )
 
 
+def _absorb_editable_financials(
+    widget_key: str, table_state_key: str, protocols: list[str], price_options: list[float]
+):
+    """data_editor on_change: fold pending edits into protocol state, then clear
+    the widget's edit state.
+
+    Rebuilding the editor's source dataframe from values that came out of the
+    editor, while the widget still holds those same edits, makes Streamlit drop
+    every second edit (streamlit/streamlit#7354, #7749). Absorbing the edit here
+    and popping the widget key means the next render starts from an up-to-date
+    source with no pending edits, so consecutive edits all stick.
+    """
+    edits = st.session_state.get(widget_key, {}).get("edited_rows", {})
+    protocol_state = st.session_state.get(table_state_key, {})
+    for row, changes in edits.items():
+        row_idx = int(row)
+        if row_idx >= len(protocols) or protocols[row_idx] not in protocol_state:
+            continue
+        entry = protocol_state[protocols[row_idx]]
+        if changes.get("planting_cost") is not None:
+            entry["planting_cost"] = float(changes["planting_cost"])
+        if changes.get("price_per_ert_initial") is not None:
+            entry["price_per_ert_initial"] = min(
+                price_options, key=lambda x: abs(x - float(changes["price_per_ert_initial"]))
+            )
+    st.session_state[table_state_key] = protocol_state
+    st.session_state.pop(widget_key, None)
+
+
 def credits_inputs(prefix: str = "credits_") -> dict:
     """
     Render per-protocol Proforma inputs with editable assumptions separated
@@ -1659,9 +1705,17 @@ def credits_inputs(prefix: str = "credits_") -> dict:
         st.subheader("Editable Inputs")
         st.caption("Adjust these assumptions for each selected protocol.")
 
+        editable_table_key = f"{prefix}editable_financials_table"
         edited_df = st.data_editor(
             editable_df,
-            key=f"{prefix}editable_financials_table",
+            key=editable_table_key,
+            on_change=_absorb_editable_financials,
+            kwargs={
+                "widget_key": editable_table_key,
+                "table_state_key": table_state_key,
+                "protocols": list(protocols),
+                "price_options": PRICE_OPTIONS,
+            },
             use_container_width=True,
             hide_index=True,
             num_rows="fixed",
@@ -1858,7 +1912,7 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
         }
 
         json.dumps(payload)
-        resp = requests.post(
+        resp = api_session().post(
             f"{API_BASE_URL}/proforma/compute",
             json=payload,
             timeout=10,
@@ -1879,6 +1933,28 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
 
     # Store proforma outputs for report generation
     st.session_state["proforma_df"] = df_pf.copy()
+
+    # Cumulative net revenue, two flavours per protocol:
+    #  - Cumulative_Net_Revenue: running total of each year's Net_Revenue
+    #    discounted at (anticipated_inflation + discount_rate), matching
+    #    compute_summaries' NPV definition. The discount exponent is the offset
+    #    from each protocol's first proforma year, mirroring npf.npv's
+    #    positional t=0 indexing, so this curve's value at the NPV horizon
+    #    equals the NPV shown in the summary table and the year it crosses
+    #    zero is the project's true (discounted) break-even year.
+    #  - Cumulative_Net_Revenue_Undiscounted: plain running total of nominal
+    #    Net_Revenue; its final value equals Total Net Revenue in the summary.
+    cum_frames = []
+    for protocol, sub in df_pf.groupby("Protocol"):
+        pp = params.get(protocol) or next(iter(params.values()))
+        rate = pp["anticipated_inflation"] + pp["discount_rate"]
+        sub = sub.sort_values("Year").copy()
+        periods = sub["Year"].astype(float) - float(sub["Year"].min())
+        discounted = sub["Net_Revenue"] / (1.0 + rate) ** periods
+        sub["Cumulative_Net_Revenue"] = discounted.cumsum()
+        sub["Cumulative_Net_Revenue_Undiscounted"] = sub["Net_Revenue"].cumsum()
+        cum_frames.append(sub)
+    df_pf = pd.concat(cum_frames, ignore_index=True)
 
     # Summary metrics per protocol
     first_params = next(iter(params.values()))
@@ -1916,15 +1992,26 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
 
         if mask.any():
             start_value = min(0.0, float(df_pf.loc[mask, "Net_Revenue"].min()))
+            start_cum = min(
+                0.0, float(df_pf.loc[mask, "Cumulative_Net_Revenue"].min())
+            )
+            start_cum_undiscounted = min(
+                0.0,
+                float(df_pf.loc[mask, "Cumulative_Net_Revenue_Undiscounted"].min()),
+            )
             df_pf = df_pf.loc[~mask].copy()
         else:
             start_value = 0.0
+            start_cum = 0.0
+            start_cum_undiscounted = 0.0
 
         start_year_rows.append(
             {
                 "Year": chart_start_year,
                 "Protocol": protocol,
                 "Net_Revenue": start_value,
+                "Cumulative_Net_Revenue": start_cum,
+                "Cumulative_Net_Revenue_Undiscounted": start_cum_undiscounted,
             }
         )
 
@@ -1953,25 +2040,72 @@ def credits_results(params: dict, prefix: str = "credits_") -> dict:
     toggle_nr = acreage_mode_nr == "Total Project"
     st.session_state["toggle_nr"] = toggle_nr
 
+    # Long form: one row per (Protocol, Year, discount flavour) so both the
+    # discounted and undiscounted running totals are drawn on the same chart.
+    plot_df = df_chart.melt(
+        id_vars=["Year", "Protocol"],
+        value_vars=["Cumulative_Net_Revenue", "Cumulative_Net_Revenue_Undiscounted"],
+        var_name="Discounting",
+        value_name="Cumulative_Net_Revenue_Value",
+    )
+    plot_df["Discounting"] = plot_df["Discounting"].map(
+        {
+            "Cumulative_Net_Revenue": "Discounted",
+            "Cumulative_Net_Revenue_Undiscounted": "Undiscounted",
+        }
+    )
+    value_col = "Cumulative_Net_Revenue_Value"
+
     if toggle_nr:
-        plot_df["Net_Revenue"] = plot_df["Net_Revenue"].round(-1)
+        plot_df[value_col] = plot_df[value_col].round(-1)
     else:
-        plot_df["Net_Revenue"] = (
-            plot_df["Net_Revenue"] / first_params["net_acres"]
+        plot_df[value_col] = (
+            plot_df[value_col] / first_params["net_acres"]
         ).round(-1)
 
+    # One legend entry per protocol x discounting. Colour encodes protocol so
+    # selected protocols stay visually distinct; dash style and marker shape
+    # encode discounted vs. undiscounted values within each protocol.
+    plot_df["Series"] = plot_df["Protocol"].astype(str) + " - " + plot_df["Discounting"]
+    series_color_map: dict[str, str] = {}
+    series_dash_map: dict[str, str] = {}
+    series_symbol_map: dict[str, str] = {}
+    discounting_dash_map = {"Discounted": "solid", "Undiscounted": "dash"}
+    discounting_symbol_map = {"Discounted": "circle", "Undiscounted": "diamond"}
+    for protocol in protocols_for_chart:
+        for flavour in ("Discounted", "Undiscounted"):
+            key = f"{protocol} - {flavour}"
+            series_color_map[key] = PROTOCOL_COLOR_MAP.get(str(protocol), "#7f7f7f")
+            series_dash_map[key] = discounting_dash_map[flavour]
+            series_symbol_map[key] = discounting_symbol_map[flavour]
+    ordered_protocols = [p for p in PROTOCOL_ORDER if p in protocols_for_chart] + sorted(
+        p for p in protocols_for_chart if p not in PROTOCOL_ORDER
+    )
+    series_order = [
+        f"{p} - {f}" for p in ordered_protocols for f in ("Discounted", "Undiscounted")
+    ]
+    plot_df["Series"] = pd.Categorical(
+        plot_df["Series"], categories=series_order, ordered=True
+    )
+    plot_df = plot_df.sort_values(["Series", "Year"]).reset_index(drop=True)
+
     chart_title = "Total" if toggle_nr else "Per Acre"
+    metric_label = "Cumulative Net Revenue"
 
     _plot_fading_line_chart(
         data=plot_df,
         x_col="Year",
-        y_col="Net_Revenue",
+        y_col=value_col,
         title=chart_title
-        + f" Net Revenue of Total Estimated Credits for {first_params['net_acres']:,} acres project",
-        y_title=chart_title + " Net Revenue",
+        + f" {metric_label} (discounted vs. undiscounted) of Total Estimated Credits for {first_params['net_acres']:,} acres project",
+        y_title=chart_title + " " + metric_label,
         include_years=include_years,
-        series_col="Protocol",
+        series_col="Series",
         show_future_hatch=True,
+        color_map=series_color_map,
+        dash_map=series_dash_map,
+        symbol_map=series_symbol_map,
+        legend_title="Protocol - Discounting",
     )
 
     summaries_df_display = summaries_df.copy()
@@ -2255,7 +2389,7 @@ def generate_report():
 
     try:
         with st.spinner("Generating report..."):
-            resp = requests.post(
+            resp = api_session().post(
                 f"{API_BASE_URL}/reports/generate",
                 json=payload,
                 timeout=300,  # Longer timeout for report generation
@@ -2415,7 +2549,7 @@ def run_chart():
         # render widget using key only to enable restoring backups
         protocols = st.multiselect(
             "Select Protocol(s)",
-            options=["ACR", "CAR", "VERRA", "GS", "ISO"],
+            options=PROTOCOL_ORDER,
             key="carbon_units_protocols",
             help=H("carbon.protocols_multiselect"),
         )

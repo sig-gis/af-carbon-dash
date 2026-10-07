@@ -23,13 +23,14 @@ import pandas as pd
 import requests
 import streamlit as st
 
-from model_service.main import _load_proforma_defaults, load_variant_presets
-from utils.config import get_api_base_url, normalize_params
+from model_service.main import load_variant_presets
+from utils.config import api_session, get_api_base_url, normalize_params
 from utils.functions.helper import H
 from utils.functions.plant_design import (
     PROTOCOL_ORDER,
     _format_nearest_hundred,
     _round_to_nearest_hundred,
+    _proforma_defaults_for_protocol,
     _resolve_sub_variants,
 )
 from utils.functions.slider_bounds import clamp, slider_bounds
@@ -233,7 +234,7 @@ def _breakeven_acres(result: dict | None) -> float | None:
 # --------------------------------------------------------------------------- #
 def _run_scenario(scenario: dict) -> dict:
     """POST one solve scenario to /scenario/run. Raises on HTTP error."""
-    resp = requests.post(f"{API_BASE_URL}/scenario/run", json=scenario, timeout=30)
+    resp = api_session().post(f"{API_BASE_URL}/scenario/run", json=scenario, timeout=30)
     resp.raise_for_status()
     return resp.json()
 
@@ -244,7 +245,7 @@ def _run_bulk(scenarios: list[dict]) -> tuple[list[dict | None], list[dict]]:
     Returns ``(results, errors)`` aligned to the input order, matching the
     shape of ``aff_dash_client.run_many``.
     """
-    resp = requests.post(
+    resp = api_session().post(
         f"{API_BASE_URL}/scenario/bulk",
         json={"scenarios": scenarios},
         timeout=120,
@@ -256,7 +257,7 @@ def _run_bulk(scenarios: list[dict]) -> tuple[list[dict | None], list[dict]]:
 
 def _run_solve_tpa(scenario: dict) -> dict:
     """POST one TPA-breakeven scenario to /scenario/solve-tpa. Raises on HTTP error."""
-    resp = requests.post(
+    resp = api_session().post(
         f"{API_BASE_URL}/scenario/solve-tpa", json=scenario, timeout=120
     )
     resp.raise_for_status()
@@ -294,7 +295,7 @@ def _pct_selectbox(variant: str, loccode: str) -> str:
     """Render the PCT selector (own key); options come from the model registry."""
     _PCT_LABELS = {"PCT0": "None", "PCT1": "Light", "PCT2": "Moderate"}
     try:
-        resp = requests.get(
+        resp = api_session().get(
             f"{API_BASE_URL}/models/pct-info",
             params={"variant": variant, "loccode": loccode},
             timeout=5,
@@ -372,9 +373,13 @@ def _render_financial_field(field: str, defaults: dict):
     )
 
 
-def _financial_form() -> dict:
-    """Render the single-protocol financial inputs (percent fields stay percent)."""
-    defaults = _load_proforma_defaults()
+def _financial_form(protocol: str) -> dict:
+    """Render the single-protocol financial inputs (percent fields stay percent).
+
+    Inputs are seeded from the protocol's proforma preset the first time they
+    render; user edits persist after that.
+    """
+    defaults = _proforma_defaults_for_protocol(protocol)
     values: dict = {}
 
     group_cols = st.columns(3)
@@ -488,7 +493,7 @@ def _solver_inputs() -> dict | None:
             key="solver_npv_year",
             help=H("credits.inputs.npv_year"),
         )
-    financial_params_pct = _financial_form()
+    financial_params_pct = _financial_form(protocol)
 
     return {
         "variant": variant,
@@ -540,7 +545,8 @@ def current_solver_prefill() -> dict | None:
     if variant not in sub_variants:
         variant = sub_variants[0]
     sp_keys = [f"solver_sp{i + 1}_tpa" for i in range(len(_species_codes(variant)))]
-    defaults = _load_proforma_defaults()
+    protocol = st.session_state.get("solver_protocol", PROTOCOL_ORDER[0])
+    defaults = _proforma_defaults_for_protocol(protocol)
     return _planting_payload(
         {
             "variant": variant,
@@ -548,7 +554,7 @@ def current_solver_prefill() -> dict | None:
             "survival": int(st.session_state.get("solver_survival", 70)),
             "si": int(st.session_state.get("solver_si", 120)),
             "species_tpa": [int(st.session_state.get(k, 0)) for k in sp_keys],
-            "protocol": st.session_state.get("solver_protocol", PROTOCOL_ORDER[0]),
+            "protocol": protocol,
             "npv_year": int(st.session_state.get("solver_npv_year", 40)),
             "financial_params_pct": {
                 "planting_cost": float(

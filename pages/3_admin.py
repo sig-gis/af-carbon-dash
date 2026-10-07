@@ -12,7 +12,6 @@ import tempfile
 from pathlib import Path
 
 import joblib
-import requests
 import streamlit as st
 
 from model_service.model import (
@@ -22,7 +21,7 @@ from model_service.model import (
     load_effective_preset_map,
 )
 from model_service.store import get_store
-from utils.config import get_api_base_url
+from utils.config import api_session, get_api_base_url
 from utils.functions.slider_bounds import slider_bounds
 from utils.functions.variant_labels import format_variant_label
 
@@ -502,7 +501,7 @@ def _render_upload_tab(
         )
 
         try:
-            resp = requests.post(
+            resp = api_session().post(
                 f"{get_api_base_url()}/geo/refresh", timeout=10
             )
             resp.raise_for_status()
@@ -838,7 +837,7 @@ def main() -> None:
 
                     # Refresh GeoJSON + caches
                     try:
-                        resp = requests.post(
+                        resp = api_session().post(
                             f"{get_api_base_url()}/geo/refresh", timeout=10
                         )
                         resp.raise_for_status()
@@ -867,7 +866,7 @@ def main() -> None:
                 st.success(f"Deleted **{label}** from registry.")
 
                 try:
-                    resp = requests.post(
+                    resp = api_session().post(
                         f"{get_api_base_url()}/geo/refresh", timeout=10
                     )
                     resp.raise_for_status()

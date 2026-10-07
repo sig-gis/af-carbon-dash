@@ -21,14 +21,24 @@ class _Backend(Protocol):
 
 
 class HTTPBackend:
-    """Backend that calls /scenario/run and /scenario/defaults over HTTP."""
+    """Backend that calls /scenario/run and /scenario/defaults over HTTP.
 
-    def __init__(self, base_url: str, *, timeout: float = 60.0) -> None:
+    ``api_key`` is sent as ``Authorization: Bearer <api_key>`` on every request.
+    The deployed service requires one; omit it only for a local server running
+    without ``CARBON_API_KEYS``.
+    """
+
+    def __init__(
+        self, base_url: str, *, api_key: str | None = None, timeout: float = 60.0
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self._session = requests.Session()
+        if api_key:
+            self._session.headers["Authorization"] = f"Bearer {api_key}"
 
     def defaults(self, variant: str, loccode: str) -> dict:
-        resp = requests.get(
+        resp = self._session.get(
             f"{self.base_url}/scenario/defaults",
             params={"variant": variant, "loccode": loccode},
             timeout=self.timeout,
@@ -37,7 +47,7 @@ class HTTPBackend:
         return resp.json()
 
     def run(self, payload: dict) -> dict:
-        resp = requests.post(
+        resp = self._session.post(
             f"{self.base_url}/scenario/run",
             json=payload,
             timeout=self.timeout,
@@ -46,7 +56,7 @@ class HTTPBackend:
         return resp.json()
 
     def run_bulk(self, payload: dict, *, timeout: float | None = None) -> dict:
-        resp = requests.post(
+        resp = self._session.post(
             f"{self.base_url}/scenario/bulk",
             json=payload,
             timeout=timeout if timeout is not None else max(self.timeout, 300.0),
@@ -55,7 +65,7 @@ class HTTPBackend:
         return resp.json()
 
     def solve_tpa(self, payload: dict, *, timeout: float | None = None) -> dict:
-        resp = requests.post(
+        resp = self._session.post(
             f"{self.base_url}/scenario/solve-tpa",
             json=payload,
             timeout=timeout if timeout is not None else max(self.timeout, 300.0),
