@@ -48,3 +48,5 @@ model_service/quarto/reports/report_files/*
 # local tooling artifacts
 .DS_Store
 .playwright-mcp/
+
+tests/*
