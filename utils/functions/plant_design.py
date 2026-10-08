@@ -2568,7 +2568,7 @@ def run_chart():
         f"**Project Financials Summary**"
                         )
         pf_txt ="""
-        Project Financials estimate the potential revenue, costs, and net financial performance of the project using the selected carbon estimates and financial assumptions. Revenue is based on projected credited COâ‚‚e and assumed credit prices, while costs include items such as planting, monitoring, verification, validation, and registry fees. These results help evaluate project viability through metrics such as Total Net Revenue and Net Present Value.
+        Project Financials estimate the potential revenue, costs, and net financial performance of the project using the selected carbon estimates and financial assumptions. Revenue is based on projected credited CO2e and assumed credit prices, while costs include items such as planting, monitoring, verification, validation, and registry fees. These results help evaluate project viability through metrics such as Total Net Revenue and Net Present Value.
         """
         st.markdown(pf_txt)
         proforma_params = credits_inputs(prefix="credits_")
