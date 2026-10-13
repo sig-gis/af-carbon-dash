@@ -24,7 +24,7 @@ def load_glossary() -> pd.DataFrame:
 
 glossary_df = load_glossary()
 
-search = st.text_input("Search glossary", placeholder="Search term, definition, alias, or source area")
+search = st.text_input("Search glossary", placeholder="Search term, definition, alias, or repo location")
 categories = sorted(glossary_df["category"].unique())
 selected_categories = st.multiselect("Filter by category", categories)
 
@@ -34,8 +34,16 @@ if selected_categories:
 
 if search.strip():
     query = search.strip().lower()
-    searchable = filtered_df[["term", "definition", "also_known_as", "source_area", "category"]].agg(
-        " ".join,
+    searchable = filtered_df.apply(
+        lambda row: " ".join(
+            [
+                str(row.get("term", "")),
+                str(row.get("definition", "")),
+                str(row.get("also_known_as", "")),
+                str(row.get("category", "")),
+                " ".join(row.get("repo_locations", []) or []),
+            ]
+        ),
         axis=1,
     ).str.lower()
     filtered_df = filtered_df[searchable.str.contains(query, regex=False)]
@@ -53,7 +61,8 @@ else:
                 details = []
                 if row["also_known_as"]:
                     details.append(f"**Also known as:** {row['also_known_as']}")
-                if row["source_area"]:
-                    details.append(f"**Where it appears:** {row['source_area']}")
+                repo_locations = row.get("repo_locations", []) or []
+                if repo_locations:
+                    details.append(f"**Found in repo:** {', '.join(repo_locations)}")
                 if details:
                     st.caption("  \n".join(details))
