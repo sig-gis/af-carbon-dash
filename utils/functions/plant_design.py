@@ -1100,7 +1100,7 @@ def carbon_chart():
     METRIC_DEFS = {
         "CO2e": {
             "label": "CO2e",
-            "chart_label": "Modeled CO2e Before Protocol Adjustments",
+            "chart_label": "Modeled CO2e Before Adjustments",
             "unit": "tons",
             "unit_project": "tons",
             "scales": True,

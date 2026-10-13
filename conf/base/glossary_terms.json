@@ -1,100 +1,84 @@
 [
-  {
-    "term": "API Base URL",
-    "category": "API",
-    "definition": "The base web address used by the dashboard or client package to call the model service API.",
-    "also_known_as": "CARBON_API_BASE_URL",
+    {
+    "term": "FVS",
+    "category": "Site Selection",
+    "definition": "Forest Vegetation Simulator; a forest growth model used as the basis for training or generating dashboard growth and carbon estimates.",
+    "also_known_as": "Forest Vegetation Simulator",
     "repo_locations": [
-      "aff_dash_client/client.py",
-      "utils/config.py",
+      "model_service/model.py",
+      "model_service/main.py",
+      "utils/functions/plant_design.py",
+      "pages/3_faq.py",
       "README.md",
-      ".github/workflows/cd.yml",
-      "aff_dash_client/cli.py",
-      "aff_dash_client/__init__.py"
+      ".github/workflows/cd.yml"
     ]
   },
   {
-    "term": "Carbon Rows",
-    "category": "API",
-    "definition": "API output records containing modeled carbon values by year, commonly including Year, ABLD_C, and Annual_ABLD_C.",
-    "also_known_as": "carbon_df",
+    "term": "FVS Variant",
+    "category": "Site Selection",
+    "definition": "An FVS model variant calibrated for a particular geographic region.",
+    "also_known_as": "Variant",
     "repo_locations": [
-      "model_service/main.py",
-      "aff_dash_client/types.py",
-      "model_service/schemas.py",
+      "pages/1_project_builder.py",
+      "utils/functions/site_select.py",
+      "conf/base/help_text.json",
+      "conf/base/FVSVariant_presets.json",
+      "README.md",
+      "aff_dash_client/backends.py"
+    ]
+  },
+  {
+    "term": "FVS Variant Location",
+    "category": "Site Selection",
+    "definition": "A location within an FVS variant, often representing a National Forest, district, or other regional calibration area.",
+    "also_known_as": "Variant location; varloc",
+    "repo_locations": [
+      "pages/1_project_builder.py",
+      "utils/functions/site_select.py",
+      "conf/base/help_text.json",
+      "conf/base/workflow_steps.json",
       "utils/functions/plant_design.py"
     ]
   },
   {
-    "term": "Scenario Run",
-    "category": "API",
-    "definition": "An API workflow that evaluates carbon, carbon units, financial proforma, and summaries for one scenario.",
-    "also_known_as": "scenario/run",
+    "term": "Variant location code",
+    "category": "Site Selection",
+    "definition": "The FVS variant location code used by the dashboard and API to identify the selected location.",
+    "also_known_as": "Loccode",
     "repo_locations": [
-      "model_service/main.py",
-      "model_service/model.py",
-      "aff_dash_client/client.py",
       "aff_dash_client/backends.py",
-      "tests/test_solver.py",
+      "aff_dash_client/cli.py",
+      "aff_dash_client/client.py",
+      "aff_dash_client/types.py",
+      "aff_dash_client/__init__.py",
+      "conf/base/help_text.json"
+    ]
+  },
+  {
+    "term": "Net Acres",
+    "category": "Site Selection",
+    "definition": "The number of acres enrolled or modeled for the project. Total Project displays scale per-acre values by this acreage.",
+    "also_known_as": "Project acres",
+    "repo_locations": [
+      "aff_dash_client/cli.py",
+      "conf/base/help_text.json",
+      "conf/base/workflow_steps.json",
+      "utils/functions/plant_design.py",
       "utils/functions/solver.py"
     ]
   },
   {
-    "term": "Proforma Rows",
-    "category": "API / Financial",
-    "definition": "API output records containing year-by-year financial calculations used to produce project summaries.",
-    "also_known_as": "proforma_df",
+    "term": "Site Index",
+    "category": "Site",
+    "definition": "A forestry measure of site productivity based on expected tree height at a reference age.",
+    "also_known_as": "SI",
     "repo_locations": [
-      "model_service/main.py",
-      "aff_dash_client/types.py",
-      "utils/functions/plant_design.py"
-    ]
-  },
-  {
-    "term": "Summary Rows",
-    "category": "API / Financial",
-    "definition": "API output records summarizing total net revenue, NPV, NPV per acre, and related results by protocol.",
-    "also_known_as": "summaries",
-    "repo_locations": [
-      "model_service/main.py",
-      "aff_dash_client/types.py",
       "aff_dash_client/cli.py",
-      "model_service/model.py",
-      "model_service/schemas.py",
-      "model_service/tpa_sweep.py"
-    ]
-  },
-  {
-    "term": "Model Source",
-    "category": "API / Modeling",
-    "definition": "Indicates whether results came from FVS-based models or the coefficient fallback path.",
-    "also_known_as": "model_source",
-    "repo_locations": [
+      "aff_dash_client/client.py",
       "aff_dash_client/types.py",
-      "model_service/main.py",
-      "model_service/model.py",
-      "model_service/schemas.py",
-      "utils/functions/plant_design.py"
-    ]
-  },
-  {
-    "term": "Annual CO2e",
-    "category": "Carbon",
-    "definition": "Year-by-year carbon dioxide equivalent estimate shown for selected protocols after carbon-unit calculations.",
-    "also_known_as": "Annual carbon dioxide equivalent",
-    "repo_locations": [
-      "utils/functions/plant_design.py"
-    ]
-  },
-  {
-    "term": "Carbon Estimate",
-    "category": "Carbon",
-    "definition": "A modeled estimate of carbon storage or CO2e for a planting scenario before or after protocol adjustments depending on the chart context.",
-    "also_known_as": "Carbon output",
-    "repo_locations": [
-      "conf/base/help_text.json",
-      "conf/base/workflow_steps.json",
-      "utils/functions/plant_design.py"
+      "conf/base/carbon_model_coefficients.json",
+      "conf/base/FVSVariant_presets.json",
+      "conf/base/help_text.json"
     ]
   },
   {
@@ -111,6 +95,15 @@
     ]
   },
   {
+    "term": "Annual CO2e",
+    "category": "Carbon",
+    "definition": "Year-by-year carbon dioxide equivalent estimate shown for selected protocols after carbon-unit calculations.",
+    "also_known_as": "Annual carbon dioxide equivalent",
+    "repo_locations": [
+      "utils/functions/plant_design.py"
+    ]
+  },
+  {
     "term": "Cumulative CO2e",
     "category": "Carbon",
     "definition": "CO2e accumulated over time. In protocol charts this is the cumulative sum of protocol-adjusted annual carbon units.",
@@ -120,7 +113,18 @@
     ]
   },
   {
-    "term": "Modeled CO2e Before Protocol Adjustments",
+    "term": "Carbon Estimate",
+    "category": "Carbon",
+    "definition": "A modeled estimate of carbon storage or CO2e for a planting scenario before or after protocol adjustments depending on the chart context.",
+    "also_known_as": "Carbon output",
+    "repo_locations": [
+      "conf/base/help_text.json",
+      "conf/base/workflow_steps.json",
+      "utils/functions/plant_design.py"
+    ]
+  },
+  {
+    "term": "Modeled CO2e Before Adjustments",
     "category": "Carbon",
     "definition": "The Planting Parameters CO2e chart value. It is calculated from modeled aboveground live biomass carbon before protocol-specific deductions or adjustments.",
     "also_known_as": "Non-protocol-adjusted modeled CO2e",
@@ -129,10 +133,10 @@
     ]
   },
   {
-    "term": "ABLD_C",
-    "category": "Carbon / API",
+    "term": "Aboveground live biomass carbon",
+    "category": "Carbon",
     "definition": "Aboveground live biomass carbon predicted by the model. The dashboard converts this carbon value to CO2e by multiplying by 3.667.",
-    "also_known_as": "Aboveground live biomass carbon",
+    "also_known_as": "ABLD_C",
     "repo_locations": [
       "model_service/model.py",
       "model_service/main.py",
@@ -143,19 +147,8 @@
     ]
   },
   {
-    "term": "Annual_ABLD_C",
-    "category": "Carbon / API",
-    "definition": "The annual change in aboveground live biomass carbon between modeled years.",
-    "also_known_as": "Annual aboveground live biomass carbon",
-    "repo_locations": [
-      "model_service/model.py",
-      "model_service/main.py",
-      "tests/test_zero_tpa.py"
-    ]
-  },
-  {
     "term": "Carbon Units",
-    "category": "Carbon / API",
+    "category": "Carbon",
     "definition": "Protocol-adjusted carbon values returned by the carbon-unit calculation and used in carbon estimates and financial calculations.",
     "also_known_as": "CU",
     "repo_locations": [
@@ -182,50 +175,6 @@
     "definition": "CO2e after selected protocol rules, coefficients, buffers, leakage, or other adjustments have been applied.",
     "also_known_as": "Creditable CO2e",
     "repo_locations": []
-  },
-  {
-    "term": "FAQ",
-    "category": "Dashboard",
-    "definition": "Frequently Asked Questions page containing longer explanations and methodological notes.",
-    "also_known_as": "Frequently Asked Questions",
-    "repo_locations": [
-      "carbon_dash.py",
-      "pages/1_project_builder.py",
-      "pages/3_faq.py"
-    ]
-  },
-  {
-    "term": "Per Acre",
-    "category": "Dashboard",
-    "definition": "Display mode showing values on a per-acre basis rather than scaled to the full project acreage.",
-    "also_known_as": "Per-acre mode",
-    "repo_locations": [
-      "conf/base/help_text.json",
-      "pages/3_faq.py",
-      "utils/functions/plant_design.py",
-      "utils/functions/solver.py"
-    ]
-  },
-  {
-    "term": "Planting Parameters",
-    "category": "Dashboard",
-    "definition": "The Planting Design section where users choose survival, site index, species mix, TPA, and related design inputs.",
-    "also_known_as": "Planting inputs",
-    "repo_locations": [
-      "conf/base/workflow_steps.json",
-      "pages/3_faq.py",
-      "utils/functions/plant_design.py"
-    ]
-  },
-  {
-    "term": "Total Project",
-    "category": "Dashboard",
-    "definition": "Display mode that scales eligible per-acre values by net project acres.",
-    "also_known_as": "Project total mode",
-    "repo_locations": [
-      "conf/base/help_text.json",
-      "utils/functions/plant_design.py"
-    ]
   },
   {
     "term": "Anticipated Inflation",
@@ -435,7 +384,7 @@
   },
   {
     "term": "ERT",
-    "category": "Financial / Protocols",
+    "category": "Financial",
     "definition": "Emission Reduction Ton or similar credit unit used by some protocols and financial assumptions.",
     "also_known_as": "Carbon credit",
     "repo_locations": [
@@ -501,41 +450,6 @@
     ]
   },
   {
-    "term": "Coefficient Fallback",
-    "category": "Modeling",
-    "definition": "The backup modeling path used when FVS model files are not available; it estimates carbon from configured coefficients.",
-    "also_known_as": "Coefficient model",
-    "repo_locations": [
-      "tests/test_tpa_sweep.py",
-      "utils/functions/plant_design.py"
-    ]
-  },
-  {
-    "term": "FVS",
-    "category": "Modeling",
-    "definition": "Forest Vegetation Simulator; a forest growth model used as the basis for training or generating dashboard growth and carbon estimates.",
-    "also_known_as": "Forest Vegetation Simulator",
-    "repo_locations": [
-      "model_service/model.py",
-      "model_service/main.py",
-      "utils/functions/plant_design.py",
-      "pages/3_faq.py",
-      "README.md",
-      ".github/workflows/cd.yml"
-    ]
-  },
-  {
-    "term": "FVS Model",
-    "category": "Modeling",
-    "definition": "A trained model or model output based on FVS simulations for a selected variant, location, and planting scenario.",
-    "also_known_as": "Forest Vegetation Simulator model",
-    "repo_locations": [
-      "model_service/main.py",
-      "model_service/model.py",
-      "utils/functions/plant_design.py"
-    ]
-  },
-  {
     "term": "Pre-commercial Thin",
     "category": "Planting",
     "definition": "A thinning treatment that removes some young trees before they are merchantable to manage stand density and future growth.",
@@ -590,7 +504,7 @@
   },
   {
     "term": "Species TPA",
-    "category": "Planting / API",
+    "category": "Planting",
     "definition": "A list or set of trees-per-acre values by species used by the dashboard and API.",
     "also_known_as": "species_tpa",
     "repo_locations": [
@@ -600,30 +514,6 @@
       "conf/base/help_text.json",
       "model_service/main.py",
       "model_service/model.py"
-    ]
-  },
-  {
-    "term": "American Carbon Registry",
-    "category": "Protocols",
-    "definition": "American Carbon Registry; one of the carbon accounting protocols supported by the dashboard.",
-    "also_known_as": "ACR",
-    "repo_locations": [
-      "aff_dash_client/cli.py",
-      "conf/base/help_text.json",
-      "conf/base/proforma_presets.json",
-      "conf/base/protocol_rules.json",
-      "model_service/model.py",
-      "pages/3_faq.py"
-    ]
-  },
-  {
-    "term": "Buffer Pool",
-    "category": "Protocols",
-    "definition": "A share of credited carbon set aside to manage reversal or project risk under a protocol.",
-    "also_known_as": "Risk buffer",
-    "repo_locations": [
-      "pages/3_faq.py",
-      "utils/functions/plant_design.py"
     ]
   },
   {
@@ -641,6 +531,20 @@
     ]
   },
   {
+    "term": "American Carbon Registry",
+    "category": "Protocols",
+    "definition": "American Carbon Registry; one of the carbon accounting protocols supported by the dashboard.",
+    "also_known_as": "ACR",
+    "repo_locations": [
+      "aff_dash_client/cli.py",
+      "conf/base/help_text.json",
+      "conf/base/proforma_presets.json",
+      "conf/base/protocol_rules.json",
+      "model_service/model.py",
+      "pages/3_faq.py"
+    ]
+  },
+  {
     "term": "Climate Action Reserve",
     "category": "Protocols",
     "definition": "Climate Action Reserve; one of the carbon accounting protocols supported by the dashboard.",
@@ -652,15 +556,6 @@
       "model_service/model.py",
       "pages/3_faq.py",
       "utils/functions/plant_design.py"
-    ]
-  },
-  {
-    "term": "Crediting Period",
-    "category": "Protocols",
-    "definition": "The period over which a project is assumed to generate carbon credits or carbon-unit revenues.",
-    "also_known_as": "Project period",
-    "repo_locations": [
-      "conf/base/help_text.json"
     ]
   },
   {
@@ -678,6 +573,20 @@
     ]
   },
   {
+    "term": "Verra",
+    "category": "Protocols",
+    "definition": "A carbon standard and registry supported by the dashboard.",
+    "also_known_as": "VCS",
+    "repo_locations": [
+      "conf/base/help_text.json",
+      "conf/base/proforma_presets.json",
+      "conf/base/protocol_rules.json",
+      "model_service/model.py",
+      "pages/3_faq.py",
+      "utils/functions/plant_design.py"
+    ]
+  },
+  {
     "term": "Isometric",
     "category": "Protocols",
     "definition": "A carbon protocol or registry represented as ISO in this dashboard.",
@@ -689,6 +598,25 @@
       "pages/3_faq.py",
       "utils/functions/plant_design.py",
       "utils/functions/statefulness.py"
+    ]
+  },
+  {
+    "term": "Crediting Period",
+    "category": "Protocols",
+    "definition": "The period over which a project is assumed to generate carbon credits or carbon-unit revenues.",
+    "also_known_as": "Project period",
+    "repo_locations": [
+      "conf/base/help_text.json"
+    ]
+  },
+  {
+    "term": "Buffer Pool",
+    "category": "Protocols",
+    "definition": "A share of credited carbon set aside to manage reversal or project risk under a protocol.",
+    "also_known_as": "Risk buffer",
+    "repo_locations": [
+      "pages/3_faq.py",
+      "utils/functions/plant_design.py"
     ]
   },
   {
@@ -718,88 +646,6 @@
     "also_known_as": "Uncertainty deduction",
     "repo_locations": [
       "pages/3_faq.py"
-    ]
-  },
-  {
-    "term": "Verra",
-    "category": "Protocols",
-    "definition": "A carbon standard and registry supported by the dashboard.",
-    "also_known_as": "VCS",
-    "repo_locations": [
-      "conf/base/help_text.json",
-      "conf/base/proforma_presets.json",
-      "conf/base/protocol_rules.json",
-      "model_service/model.py",
-      "pages/3_faq.py",
-      "utils/functions/plant_design.py"
-    ]
-  },
-  {
-    "term": "Loccode",
-    "category": "Site / API",
-    "definition": "The FVS variant location code used by the dashboard and API to identify the selected location.",
-    "also_known_as": "Variant location code",
-    "repo_locations": [
-      "aff_dash_client/backends.py",
-      "aff_dash_client/cli.py",
-      "aff_dash_client/client.py",
-      "aff_dash_client/types.py",
-      "aff_dash_client/__init__.py",
-      "conf/base/help_text.json"
-    ]
-  },
-  {
-    "term": "Net Acres",
-    "category": "Site / Financial",
-    "definition": "The number of acres enrolled or modeled for the project. Total Project displays scale per-acre values by this acreage.",
-    "also_known_as": "Project acres",
-    "repo_locations": [
-      "aff_dash_client/cli.py",
-      "conf/base/help_text.json",
-      "conf/base/workflow_steps.json",
-      "utils/functions/plant_design.py",
-      "utils/functions/solver.py"
-    ]
-  },
-  {
-    "term": "FVS Variant",
-    "category": "Site / Modeling",
-    "definition": "An FVS model variant calibrated for a particular geographic region.",
-    "also_known_as": "Variant",
-    "repo_locations": [
-      "pages/1_project_builder.py",
-      "utils/functions/site_select.py",
-      "conf/base/help_text.json",
-      "conf/base/FVSVariant_presets.json",
-      "README.md",
-      "aff_dash_client/backends.py"
-    ]
-  },
-  {
-    "term": "FVS Variant Location",
-    "category": "Site / Modeling",
-    "definition": "A location within an FVS variant, often representing a National Forest, district, or other regional calibration area.",
-    "also_known_as": "Variant location; varloc",
-    "repo_locations": [
-      "pages/1_project_builder.py",
-      "utils/functions/site_select.py",
-      "conf/base/help_text.json",
-      "conf/base/workflow_steps.json",
-      "utils/functions/plant_design.py"
-    ]
-  },
-  {
-    "term": "Site Index",
-    "category": "Site / Planting",
-    "definition": "A forestry measure of site productivity based on expected tree height at a reference age.",
-    "also_known_as": "SI",
-    "repo_locations": [
-      "aff_dash_client/cli.py",
-      "aff_dash_client/client.py",
-      "aff_dash_client/types.py",
-      "conf/base/carbon_model_coefficients.json",
-      "conf/base/FVSVariant_presets.json",
-      "conf/base/help_text.json"
     ]
   },
   {
