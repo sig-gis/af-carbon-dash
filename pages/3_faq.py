@@ -1,6 +1,6 @@
 import streamlit as st
 
-st.set_page_config(layout="wide", page_title="Home", page_icon="🌲")
+st.set_page_config(layout="wide", page_title="FAQ", page_icon="🌲")
 
 st.title("❓Frequently Asked Questions")
 
