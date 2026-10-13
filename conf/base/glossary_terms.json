@@ -69,7 +69,7 @@
   },
   {
     "term": "Site Index",
-    "category": "Site",
+    "category": "Site Selection",
     "definition": "A forestry measure of site productivity based on expected tree height at a reference age.",
     "also_known_as": "SI",
     "repo_locations": [
@@ -162,7 +162,7 @@
   },
   {
     "term": "Jenkins Biomass Equations",
-    "category": "Carbon / Protocols",
+    "category": "Carbon",
     "definition": "Biomass equations used by the dashboard to estimate biomass-based carbon consistently across supported protocols.",
     "also_known_as": "Jenkins",
     "repo_locations": [
@@ -171,7 +171,7 @@
   },
   {
     "term": "Protocol-Adjusted CO2e",
-    "category": "Carbon / Protocols",
+    "category": "Carbon",
     "definition": "CO2e after selected protocol rules, coefficients, buffers, leakage, or other adjustments have been applied.",
     "also_known_as": "Creditable CO2e",
     "repo_locations": []
