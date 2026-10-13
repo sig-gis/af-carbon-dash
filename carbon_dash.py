@@ -2,9 +2,10 @@ import os
 import streamlit as st
 
 project = st.Page("pages/1_project_builder.py", title="🌲 Project Builder")
-faq = st.Page("pages/2_faq.py", title="❓ Frequently Asked Questions")
+glossary = st.Page("pages/2_glossary.py", title="📘 Glossary")
+faq = st.Page("pages/3_faq.py", title="❓ Frequently Asked Questions")
 
-pages = [project, faq]
+pages = [project, glossary, faq]
 if os.environ.get("ENV") != "production":
     admin = st.Page("pages/3_admin.py", title="⚙️ Model Management")
     pages.append(admin)

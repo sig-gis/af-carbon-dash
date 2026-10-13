@@ -1100,6 +1100,7 @@ def carbon_chart():
     METRIC_DEFS = {
         "CO2e": {
             "label": "CO2e",
+            "chart_label": "Modeled CO2e Before Adjustments",
             "unit": "tons",
             "unit_project": "tons",
             "scales": True,
@@ -1201,6 +1202,9 @@ def carbon_chart():
             unit = (
                 meta["unit_project"] if (toggle_oc and meta["scales"]) else meta["unit"]
             )
+            display_label = meta.get("chart_label", label)
+            if col == "CO2e":
+                display_label = f"{display_label} - {acreage_mode_oc}"
             # df_m = _prepend_zero_year_row(
             #     plot_df[["Year", col]].copy(), value_col=col, base_year=CHART_BASE_YEAR
             # )
@@ -1233,10 +1237,13 @@ def carbon_chart():
                         # scale=alt.Scale(domain=[CHART_BASE_YEAR, max(inc)]),
                         scale=alt.Scale(domain=[chart_start_year, max(inc)]),
                     ),
-                    y=alt.Y(f"{col}:Q", title=label if not unit else f"{label} ({unit})"),
+                    y=alt.Y(
+                        f"{col}:Q",
+                        title=display_label if not unit else f"{display_label} ({unit})",
+                    ),
                     tooltip=["Year", col],
                 )
-                .properties(title=label, height=350)
+                .properties(title=display_label, height=350)
             )
             st.altair_chart(chart, use_container_width=True)
             # QMD disclaimer per Dave: 2029 values are unreliable

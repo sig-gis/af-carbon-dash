@@ -95,7 +95,7 @@ for step in workflow_steps:
                 st.sidebar.caption(line.strip())
 
 st.sidebar.markdown("---")
-st.sidebar.info("Having Trouble? Visit the FAQ page above for more information.")
+st.sidebar.info("Need definitions or help? Visit the Glossary or FAQ pages above.")
 
 if st.session_state.active_tab == "Site Selection Map":
     st.title(
