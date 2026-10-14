@@ -1579,6 +1579,8 @@ def _absorb_editable_financials(
             entry["price_per_ert_initial"] = min(
                 price_options, key=lambda x: abs(x - float(changes["price_per_ert_initial"]))
             )
+        if changes.get("discount_rate") is not None:
+            entry["discount_rate"] = float(changes["discount_rate"])
     st.session_state[table_state_key] = protocol_state
     st.session_state.pop(widget_key, None)
 
@@ -1617,7 +1619,6 @@ def credits_inputs(prefix: str = "credits_") -> dict:
         "verification_cost",
         "issuance_fee_per_ert",
         "anticipated_inflation",
-        "discount_rate",
     ]
 
     for protocol in protocols:
@@ -1658,6 +1659,8 @@ def credits_inputs(prefix: str = "credits_") -> dict:
             entry["price_per_ert_initial"] = _nearest_price_option(
                 fin_prefill["price_per_ert_initial"]
             )
+        if fin_prefill.get("discount_rate") is not None:
+            entry["discount_rate"] = float(fin_prefill["discount_rate"])
         st.session_state.pop(f"{prefix}editable_financials_table", None)
 
     st.session_state[table_state_key] = protocol_state
@@ -1677,6 +1680,7 @@ def credits_inputs(prefix: str = "credits_") -> dict:
                 "price_per_ert_initial": _nearest_price_option(
                     protocol_state[protocol]["price_per_ert_initial"]
                 ),
+                "discount_rate": protocol_state[protocol]["discount_rate"],
             }
             for protocol in protocols
         ]
@@ -1697,7 +1701,6 @@ def credits_inputs(prefix: str = "credits_") -> dict:
                 "anticipated_inflation": protocol_state[protocol][
                     "anticipated_inflation"
                 ],
-                "discount_rate": protocol_state[protocol]["discount_rate"],
                 "credit_price_increase": protocol_state[protocol][
                     "credit_price_increase"
                 ],
@@ -1741,6 +1744,13 @@ def credits_inputs(prefix: str = "credits_") -> dict:
                     options=PRICE_OPTIONS,
                     required=True,
                     help=H("credits.inputs.price_per_ert_initial"),
+                ),
+                "discount_rate": st.column_config.NumberColumn(
+                    "Discount Rate (%)",
+                    min_value=0.0,
+                    step=0.5,
+                    format="%.2f",
+                    help=H("credits.inputs.discount_rate"),
                 ),
             },
         )
@@ -1790,11 +1800,6 @@ def credits_inputs(prefix: str = "credits_") -> dict:
                     format="%.2f",
                     help=H("credits.inputs.anticipated_inflation"),
                 ),
-                "discount_rate": st.column_config.NumberColumn(
-                    "Discount Rate",
-                    format="%.2f",
-                    help=H("credits.inputs.discount_rate"),
-                ),
                 "credit_price_increase": st.column_config.NumberColumn(
                     "Credit Price Increase",
                     format="%.2f",
@@ -1812,6 +1817,7 @@ def credits_inputs(prefix: str = "credits_") -> dict:
         protocol_state[protocol]["price_per_ert_initial"] = float(
             row["price_per_ert_initial"]
         )
+        protocol_state[protocol]["discount_rate"] = float(row["discount_rate"])
 
     st.session_state[table_state_key] = protocol_state
 
@@ -1839,10 +1845,10 @@ def credits_inputs(prefix: str = "credits_") -> dict:
     st.session_state[f"{prefix}planting_cost"] = first_row["planting_cost"]
 
     # NPV year-horizon selector applies to every protocol in this run.
+    st.session_state.setdefault(f"{prefix}npv_year", 40)
     npv_year = st.selectbox(
         "NPV Year Horizon",
         options=[10, 15, 20, 25, 30, 35, 40],
-        index=6,
         key=f"{prefix}npv_year",
         help=H("credits.inputs.npv_year")
         or "Number of years from project start over which to discount cashflows for NPV.",
