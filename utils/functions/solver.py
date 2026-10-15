@@ -354,6 +354,32 @@ _FIN_FIELD_GROUPS = [
 ]
 
 
+def _reseed_fields_for_protocol(protocol: str, defaults: dict):
+    """Refresh the financial inputs when the selected protocol changes.
+
+    Fields are seeded once from the protocol preset and then keep user edits.
+    When the protocol changes, any field whose preset value differs between the
+    old and new protocol (registry fees, issuance fee, validation and
+    verification costs, ...) is re-seeded so the solver runs against the
+    selected registry's fee schedule. Fields the protocol does not drive keep
+    the user's value.
+    """
+    prev = st.session_state.get("_solver_fin_protocol")
+    if prev == protocol:
+        return
+    prev_defaults = _proforma_defaults_for_protocol(prev) if prev else None
+    for field, _label, _is_pct, fmt, _minv, _step in _FIN_FIELDS:
+        key = f"solver_fin_{field}"
+        if key not in st.session_state:
+            continue  # _render_financial_field seeds it
+        if prev_defaults is None:
+            continue  # first render this session: keep restored values
+        if defaults.get(field) != prev_defaults.get(field):
+            cast = int if fmt == "%d" else float
+            st.session_state[key] = cast(defaults.get(field, 0))
+    st.session_state["_solver_fin_protocol"] = protocol
+
+
 def _render_financial_field(field: str, defaults: dict):
     """Render one Solver financial number input and return its current value."""
     label, _is_pct, fmt, minv, step = _FIN_FIELD_BY_NAME[field]
@@ -380,6 +406,7 @@ def _financial_form(protocol: str) -> dict:
     render; user edits persist after that.
     """
     defaults = _proforma_defaults_for_protocol(protocol)
+    _reseed_fields_for_protocol(protocol, defaults)
     values: dict = {}
 
     group_cols = st.columns(3)
@@ -459,8 +486,15 @@ def _solver_inputs() -> dict | None:
     for i, spk in enumerate(sp_keys):
         st.slider(_species_label(variant, i), 0, tpa_cap, key=spk)
     species_tpa = [int(st.session_state.get(k, 0)) for k in sp_keys]
+    total_tpa = sum(species_tpa)
+    st.markdown(f"**Total TPA:** {total_tpa}", help=H("planting.total_tpa_label"))
+    if total_tpa > tpa_cap:
+        st.warning(
+            f"Total initial TPA exceeds {tpa_cap} and may present an unrealistic "
+            "scenario. Consider adjusting species TPA values."
+        )
 
-    if sum(species_tpa) == 0:
+    if total_tpa == 0:
         st.warning(
             "Set at least one species above 0 TPA. A planting design with no trees "
             "produces no carbon, so there is nothing to solve for."
@@ -486,10 +520,10 @@ def _solver_inputs() -> dict | None:
             help=H("solver.target_npv"),
         )
     with c2:
+        st.session_state.setdefault("solver_npv_year", 40)
         npv_year = st.selectbox(
             "NPV Year Horizon",
             options=[10, 15, 20, 25, 30, 35, 40],
-            index=6,
             key="solver_npv_year",
             help=H("credits.inputs.npv_year"),
         )
@@ -526,6 +560,7 @@ def _planting_payload(inputs: dict, *, net_acres=None, species_tpa=None) -> dict
         "npv_year": inputs["npv_year"],
         "planting_cost": fin["planting_cost"],
         "price_per_ert_initial": fin["price_per_ert_initial"],
+        "discount_rate": fin.get("discount_rate"),
     }
     if net_acres is not None:
         payload["net_acres"] = int(net_acres)
@@ -568,6 +603,11 @@ def current_solver_prefill() -> dict | None:
                         defaults.get("price_per_ert_initial", 25.0),
                     )
                 ),
+                "discount_rate": float(
+                    st.session_state.get(
+                        "solver_fin_discount_rate", defaults.get("discount_rate", 6.0)
+                    )
+                ),
             },
         }
     )
@@ -588,7 +628,8 @@ def _apply_button(key: str, payload: dict):
     )
     st.caption(
         "Prefills Planting Design with these inputs and the solved value. "
-        "Fixed financial assumptions there come from protocol presets."
+        "Planting cost, credit price and discount rate carry over; the other "
+        "financial assumptions there come from protocol presets."
     )
 
 
