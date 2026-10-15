@@ -50,3 +50,5 @@ model_service/quarto/reports/report_files/*
 .playwright-mcp/
 
 tests/*
+
+gcs_bucket/*
