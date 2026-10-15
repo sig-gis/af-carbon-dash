@@ -1,0 +1,540 @@
+#+TITLE: Demonstration of Ridge Regression Models of FVS Outputs for AF
+#+AUTHOR: David Schmidt
+#+DATE: 03September2026
+
+* Code
+#+begin_src python :dir /ssh:currawong:/mnt/share/rem/PC585_AF_Refor_data/tangled/ :results output :python /mnt/share/rem/PC585_AF_Refor_data/.venv/bin/python
+import pandas as pd
+import joblib
+import sklearn
+
+pd.set_option("display.max_columns", 100)
+pd.set_option("display.max_rows", 250)
+pd.set_option("display.width", 500)
+
+####################################### SET THESE ##############################################
+################################################################################################
+BASE_DIR = "/mnt/share/rem/PC585_AF_Refor_data/fvs"
+VARIANT = "CR_1"
+LOCATION = "201"
+PCT_LEVEL = "PCT0" # PCT0, PCT1, or PCT2
+VERSION = "v4" # do not change
+EQN_SET = "Jenkins" # do not change
+YEARS = range(2029, 2129, 5) # start, end, step size
+
+# Survival, total_TPA, SP1_TPA, SP2_TPA, SP3_TPA, SP4_TPA, SI
+# pick a set of input values as if you had entered them via the dashboard (note that these values are not sanity-checked here)
+#inputs = [65, 340, 1, 1, 1, 1, 110]
+inputs = [65, 340, 200, 100, 20, 20, 110] # pick a set of input values as if you had entered them via the dashboard
+
+# choose a subset of outputs...
+# ABLD_C = aboveground and belowground live and dead carbon
+# BA = basal area
+# QMD = quadratic mean diameter
+# Tpa = trees per acre
+# SDI = stand density index
+# TCuFt = total cubic feet volume
+# MCuFt = merchantable cubic feet volume
+#TARGETS = ["ABLD_C", "BA", "QMD", "Tpa", "SDI", "TCuFt", "MCuFt"]
+
+# ... or also include varloc-specific species TPA targets if desired (e.g., "DF_TPA"); species are listed in D2_regression_model_manifest.csv
+
+# to reiterate:
+# these are inputs: total_TPA, SP1_TPA, SP2_TPA, SP3_TPA, SP4_TPA
+# these are outputs: Tpa, varloc-specific TPA by species (e.g., PP_TPA)
+TARGETS = ["ABLD_C", "BA", "QMD", "Tpa", "SDI", "TCuFt", "MCuFt", "PP_TPA", "DF_TPA", "SW_TPA", "PM_TPA"]
+################################################################################################
+
+model_file = f"{BASE_DIR}/{VARIANT}/{LOCATION}/{VARIANT}_{VERSION}_{PCT_LEVEL}_{EQN_SET}_{LOCATION}_ridge_models.pkl"
+
+# outputs are unpredictable if the sum of the individual input TPAs doesn't equal the total input TPA (this is handled by the dashboard code in production)
+assert inputs[1] == sum(inputs[2:6])
+
+print("sklearn version: ", sklearn.__version__)
+print("pandas version: ", pd.__version__)
+
+ridge_models = joblib.load(open(model_file, "rb"))
+
+X = pd.DataFrame({"Survival": [inputs[0]], "total_TPA": [inputs[1]], "SP1_TPA": [inputs[2]], "SP2_TPA": [inputs[3]], "SP3_TPA": [inputs[4]], "SP4_TPA": [inputs[5]], "SI": [inputs[6]]}) # wrap the inputs in a dataframe or sklearn will complain
+
+# print the outputs...
+for year in range(2029, 2129, 5):
+    print(year)
+    [print(f"   target: {target:<6}, value: {round(ridge_models[(year, target)].predict(X)[0], 4)}") for target in TARGETS]
+
+# ... or save them in a long-format dataframe for further analysis
+out_df = pd.DataFrame(columns=["Year", "Target", "Value"])
+for year in YEARS:
+    for target in TARGETS:
+        out_df.loc[-1] = [year, target, ridge_models[(year, target)].predict(X)[0]]
+        out_df.index += 1
+
+print(out_df)
+#+end_src
+
+#+RESULTS:
+#+begin_example
+sklearn version:  1.8.0
+pandas version:  2.3.3
+2029
+   target: ABLD_C, value: 0.0118
+   target: BA    , value: 0.0123
+   target: QMD   , value: 0.101
+   target: Tpa   , value: 220.9999
+   target: SDI   , value: 0.0
+   target: TCuFt , value: 0.0
+   target: MCuFt , value: 0.0
+   target: PP_TPA, value: 129.9999
+   target: DF_TPA, value: 65.0
+   target: SW_TPA, value: 13.0
+   target: PM_TPA, value: 13.0
+2034
+   target: ABLD_C, value: 0.0945
+   target: BA    , value: 0.6799
+   target: QMD   , value: 0.7652
+   target: Tpa   , value: 219.4502
+   target: SDI   , value: 3.2728
+   target: TCuFt , value: 0.4901
+   target: MCuFt , value: 0.0
+   target: PP_TPA, value: 128.9785
+   target: DF_TPA, value: 64.6513
+   target: SW_TPA, value: 12.9303
+   target: PM_TPA, value: 12.8901
+2039
+   target: ABLD_C, value: 0.5604
+   target: BA    , value: 4.1788
+   target: QMD   , value: 1.9102
+   target: Tpa   , value: 217.9087
+   target: SDI   , value: 14.7075
+   target: TCuFt , value: 27.649
+   target: MCuFt , value: 0.0
+   target: PP_TPA, value: 127.7084
+   target: DF_TPA, value: 64.5781
+   target: SW_TPA, value: 12.9062
+   target: PM_TPA, value: 12.716
+2044
+   target: ABLD_C, value: 1.8205
+   target: BA    , value: 11.577
+   target: QMD   , value: 3.1724
+   target: Tpa   , value: 216.3706
+   target: SDI   , value: 33.3572
+   target: TCuFt , value: 90.394
+   target: MCuFt , value: 0.0
+   target: PP_TPA, value: 126.5306
+   target: DF_TPA, value: 64.5316
+   target: SW_TPA, value: 12.818
+   target: PM_TPA, value: 12.4905
+2049
+   target: ABLD_C, value: 4.0014
+   target: BA    , value: 22.31
+   target: QMD   , value: 4.367
+   target: Tpa   , value: 214.8351
+   target: SDI   , value: 56.0338
+   target: TCuFt , value: 232.7
+   target: MCuFt , value: 26.0704
+   target: PP_TPA, value: 125.778
+   target: DF_TPA, value: 64.1661
+   target: SW_TPA, value: 12.66
+   target: PM_TPA, value: 12.231
+2054
+   target: ABLD_C, value: 6.8681
+   target: BA    , value: 34.7926
+   target: QMD   , value: 5.4615
+   target: Tpa   , value: 213.3004
+   target: SDI   , value: 79.6856
+   target: TCuFt , value: 466.9835
+   target: MCuFt , value: 239.1889
+   target: PP_TPA, value: 125.0981
+   target: DF_TPA, value: 63.6862
+   target: SW_TPA, value: 12.5294
+   target: PM_TPA, value: 11.9867
+2059
+   target: ABLD_C, value: 10.2797
+   target: BA    , value: 48.3802
+   target: QMD   , value: 6.4606
+   target: Tpa   , value: 211.767
+   target: SDI   , value: 103.5019
+   target: TCuFt , value: 765.2386
+   target: MCuFt , value: 536.1104
+   target: PP_TPA, value: 124.4287
+   target: DF_TPA, value: 63.1749
+   target: SW_TPA, value: 12.4023
+   target: PM_TPA, value: 11.7611
+2064
+   target: ABLD_C, value: 14.1316
+   target: BA    , value: 62.7184
+   target: QMD   , value: 7.3859
+   target: Tpa   , value: 210.2355
+   target: SDI   , value: 127.3114
+   target: TCuFt , value: 1132.8503
+   target: MCuFt , value: 901.168
+   target: PP_TPA, value: 123.7673
+   target: DF_TPA, value: 62.6404
+   target: SW_TPA, value: 12.276
+   target: PM_TPA, value: 11.5517
+2069
+   target: ABLD_C, value: 18.3895
+   target: BA    , value: 77.6846
+   target: QMD   , value: 8.2457
+   target: Tpa   , value: 208.6957
+   target: SDI   , value: 151.0323
+   target: TCuFt , value: 1574.3196
+   target: MCuFt , value: 1295.3976
+   target: PP_TPA, value: 123.0968
+   target: DF_TPA, value: 62.0868
+   target: SW_TPA, value: 12.1559
+   target: PM_TPA, value: 11.3562
+2074
+   target: ABLD_C, value: 22.9465
+   target: BA    , value: 92.9184
+   target: QMD   , value: 9.0468
+   target: Tpa   , value: 207.0364
+   target: SDI   , value: 174.2237
+   target: TCuFt , value: 2074.2377
+   target: MCuFt , value: 1775.1978
+   target: PP_TPA, value: 122.3257
+   target: DF_TPA, value: 61.4993
+   target: SW_TPA, value: 12.0378
+   target: PM_TPA, value: 11.1735
+2079
+   target: ABLD_C, value: 27.7673
+   target: BA    , value: 108.2108
+   target: QMD   , value: 9.8046
+   target: Tpa   , value: 204.9596
+   target: SDI   , value: 196.6443
+   target: TCuFt , value: 2628.6046
+   target: MCuFt , value: 2310.5416
+   target: PP_TPA, value: 121.2627
+   target: DF_TPA, value: 60.8031
+   target: SW_TPA, value: 11.9072
+   target: PM_TPA, value: 10.9865
+2084
+   target: ABLD_C, value: 32.79
+   target: BA    , value: 123.2024
+   target: QMD   , value: 10.5256
+   target: Tpa   , value: 202.0194
+   target: SDI   , value: 217.7147
+   target: TCuFt , value: 3225.4436
+   target: MCuFt , value: 2852.0925
+   target: PP_TPA, value: 119.7399
+   target: DF_TPA, value: 59.7874
+   target: SW_TPA, value: 11.7271
+   target: PM_TPA, value: 10.7651
+2089
+   target: ABLD_C, value: 37.7914
+   target: BA    , value: 137.2394
+   target: QMD   , value: 11.1963
+   target: Tpa   , value: 198.2626
+   target: SDI   , value: 236.6832
+   target: TCuFt , value: 3827.8342
+   target: MCuFt , value: 3421.7745
+   target: PP_TPA, value: 117.8611
+   target: DF_TPA, value: 58.4252
+   target: SW_TPA, value: 11.4766
+   target: PM_TPA, value: 10.4997
+2094
+   target: ABLD_C, value: 42.8999
+   target: BA    , value: 150.768
+   target: QMD   , value: 11.8509
+   target: Tpa   , value: 193.7378
+   target: SDI   , value: 254.193
+   target: TCuFt , value: 4453.6994
+   target: MCuFt , value: 4033.399
+   target: PP_TPA, value: 115.6532
+   target: DF_TPA, value: 56.7688
+   target: SW_TPA, value: 11.1513
+   target: PM_TPA, value: 10.1646
+2099
+   target: ABLD_C, value: 47.9778
+   target: BA    , value: 163.5217
+   target: QMD   , value: 12.4838
+   target: Tpa   , value: 188.7233
+   target: SDI   , value: 270.0508
+   target: TCuFt , value: 5085.9378
+   target: MCuFt , value: 4624.2121
+   target: PP_TPA, value: 113.2767
+   target: DF_TPA, value: 54.9242
+   target: SW_TPA, value: 10.7618
+   target: PM_TPA, value: 9.7608
+2104
+   target: ABLD_C, value: 52.9769
+   target: BA    , value: 175.4705
+   target: QMD   , value: 13.0991
+   target: Tpa   , value: 183.3936
+   target: SDI   , value: 284.3144
+   target: TCuFt , value: 5723.605
+   target: MCuFt , value: 5248.2766
+   target: PP_TPA, value: 110.7278
+   target: DF_TPA, value: 52.9875
+   target: SW_TPA, value: 10.3557
+   target: PM_TPA, value: 9.3226
+2109
+   target: ABLD_C, value: 57.8434
+   target: BA    , value: 186.5282
+   target: QMD   , value: 13.6936
+   target: Tpa   , value: 177.9201
+   target: SDI   , value: 296.9847
+   target: TCuFt , value: 6352.9232
+   target: MCuFt , value: 5839.7295
+   target: PP_TPA, value: 108.0665
+   target: DF_TPA, value: 51.0173
+   target: SW_TPA, value: 9.9609
+   target: PM_TPA, value: 8.8754
+2114
+   target: ABLD_C, value: 62.4872
+   target: BA    , value: 196.455
+   target: QMD   , value: 14.2678
+   target: Tpa   , value: 172.2678
+   target: SDI   , value: 307.7177
+   target: TCuFt , value: 6957.9125
+   target: MCuFt , value: 6421.536
+   target: PP_TPA, value: 105.2202
+   target: DF_TPA, value: 49.029
+   target: SW_TPA, value: 9.5912
+   target: PM_TPA, value: 8.4273
+2119
+   target: ABLD_C, value: 66.9063
+   target: BA    , value: 205.2346
+   target: QMD   , value: 14.8248
+   target: Tpa   , value: 166.4207
+   target: SDI   , value: 316.6165
+   target: TCuFt , value: 7535.3824
+   target: MCuFt , value: 6974.5172
+   target: PP_TPA, value: 102.1833
+   target: DF_TPA, value: 47.0177
+   target: SW_TPA, value: 9.2419
+   target: PM_TPA, value: 7.9778
+2124
+   target: ABLD_C, value: 71.067
+   target: BA    , value: 212.8324
+   target: QMD   , value: 15.3684
+   target: Tpa   , value: 160.3632
+   target: SDI   , value: 323.7223
+   target: TCuFt , value: 8076.2321
+   target: MCuFt , value: 7489.2454
+   target: PP_TPA, value: 98.967
+   target: DF_TPA, value: 44.9526
+   target: SW_TPA, value: 8.8974
+   target: PM_TPA, value: 7.5462
+     Year  Target        Value
+219  2029  ABLD_C     0.011834
+218  2029      BA     0.012306
+217  2029     QMD     0.101040
+216  2029     Tpa   220.999881
+215  2029     SDI     0.000000
+214  2029   TCuFt     0.000000
+213  2029   MCuFt     0.000000
+212  2029  PP_TPA   129.999886
+211  2029  DF_TPA    64.999961
+210  2029  SW_TPA    13.000015
+209  2029  PM_TPA    13.000012
+208  2034  ABLD_C     0.094458
+207  2034      BA     0.679878
+206  2034     QMD     0.765226
+205  2034     Tpa   219.450224
+204  2034     SDI     3.272781
+203  2034   TCuFt     0.490117
+202  2034   MCuFt     0.000000
+201  2034  PP_TPA   128.978538
+200  2034  DF_TPA    64.651264
+199  2034  SW_TPA    12.930318
+198  2034  PM_TPA    12.890106
+197  2039  ABLD_C     0.560415
+196  2039      BA     4.178848
+195  2039     QMD     1.910242
+194  2039     Tpa   217.908722
+193  2039     SDI    14.707464
+192  2039   TCuFt    27.648981
+191  2039   MCuFt     0.000000
+190  2039  PP_TPA   127.708449
+189  2039  DF_TPA    64.578107
+188  2039  SW_TPA    12.906217
+187  2039  PM_TPA    12.715964
+186  2044  ABLD_C     1.820492
+185  2044      BA    11.576974
+184  2044     QMD     3.172373
+183  2044     Tpa   216.370629
+182  2044     SDI    33.357239
+181  2044   TCuFt    90.394001
+180  2044   MCuFt     0.000000
+179  2044  PP_TPA   126.530605
+178  2044  DF_TPA    64.531584
+177  2044  SW_TPA    12.817959
+176  2044  PM_TPA    12.490482
+175  2049  ABLD_C     4.001379
+174  2049      BA    22.310041
+173  2049     QMD     4.366951
+172  2049     Tpa   214.835104
+171  2049     SDI    56.033757
+170  2049   TCuFt   232.700041
+169  2049   MCuFt    26.070433
+168  2049  PP_TPA   125.778014
+167  2049  DF_TPA    64.166059
+166  2049  SW_TPA    12.660020
+165  2049  PM_TPA    12.231008
+164  2054  ABLD_C     6.868093
+163  2054      BA    34.792551
+162  2054     QMD     5.461518
+161  2054     Tpa   213.300401
+160  2054     SDI    79.685595
+159  2054   TCuFt   466.983549
+158  2054   MCuFt   239.188946
+157  2054  PP_TPA   125.098123
+156  2054  DF_TPA    63.686211
+155  2054  SW_TPA    12.529414
+154  2054  PM_TPA    11.986651
+153  2059  ABLD_C    10.279676
+152  2059      BA    48.380158
+151  2059     QMD     6.460562
+150  2059     Tpa   211.766990
+149  2059     SDI   103.501855
+148  2059   TCuFt   765.238578
+147  2059   MCuFt   536.110386
+146  2059  PP_TPA   124.428716
+145  2059  DF_TPA    63.174883
+144  2059  SW_TPA    12.402278
+143  2059  PM_TPA    11.761112
+142  2064  ABLD_C    14.131611
+141  2064      BA    62.718373
+140  2064     QMD     7.385880
+139  2064     Tpa   210.235474
+138  2064     SDI   127.311433
+137  2064   TCuFt  1132.850304
+136  2064   MCuFt   901.167956
+135  2064  PP_TPA   123.767330
+134  2064  DF_TPA    62.640387
+133  2064  SW_TPA    12.276015
+132  2064  PM_TPA    11.551742
+131  2069  ABLD_C    18.389529
+130  2069      BA    77.684551
+129  2069     QMD     8.245737
+128  2069     Tpa   208.695710
+127  2069     SDI   151.032349
+126  2069   TCuFt  1574.319562
+125  2069   MCuFt  1295.397587
+124  2069  PP_TPA   123.096832
+123  2069  DF_TPA    62.086847
+122  2069  SW_TPA    12.155875
+121  2069  PM_TPA    11.356156
+120  2074  ABLD_C    22.946459
+119  2074      BA    92.918387
+118  2074     QMD     9.046812
+117  2074     Tpa   207.036393
+116  2074     SDI   174.223739
+115  2074   TCuFt  2074.237737
+114  2074   MCuFt  1775.197843
+113  2074  PP_TPA   122.325705
+112  2074  DF_TPA    61.499349
+111  2074  SW_TPA    12.037838
+110  2074  PM_TPA    11.173502
+109  2079  ABLD_C    27.767338
+108  2079      BA   108.210764
+107  2079     QMD     9.804561
+106  2079     Tpa   204.959565
+105  2079     SDI   196.644267
+104  2079   TCuFt  2628.604588
+103  2079   MCuFt  2310.541591
+102  2079  PP_TPA   121.262692
+101  2079  DF_TPA    60.803129
+100  2079  SW_TPA    11.907219
+99   2079  PM_TPA    10.986521
+98   2084  ABLD_C    32.789951
+97   2084      BA   123.202393
+96   2084     QMD    10.525554
+95   2084     Tpa   202.019390
+94   2084     SDI   217.714734
+93   2084   TCuFt  3225.443556
+92   2084   MCuFt  2852.092453
+91   2084  PP_TPA   119.739904
+90   2084  DF_TPA    59.787357
+89   2084  SW_TPA    11.727075
+88   2084  PM_TPA    10.765053
+87   2089  ABLD_C    37.791371
+86   2089      BA   137.239372
+85   2089     QMD    11.196316
+84   2089     Tpa   198.262563
+83   2089     SDI   236.683226
+82   2089   TCuFt  3827.834250
+81   2089   MCuFt  3421.774511
+80   2089  PP_TPA   117.861113
+79   2089  DF_TPA    58.425167
+78   2089  SW_TPA    11.476556
+77   2089  PM_TPA    10.499727
+76   2094  ABLD_C    42.899863
+75   2094      BA   150.768043
+74   2094     QMD    11.850911
+73   2094     Tpa   193.737784
+72   2094     SDI   254.192959
+71   2094   TCuFt  4453.699357
+70   2094   MCuFt  4033.398989
+69   2094  PP_TPA   115.653226
+68   2094  DF_TPA    56.768826
+67   2094  SW_TPA    11.151256
+66   2094  PM_TPA    10.164584
+65   2099  ABLD_C    47.977837
+64   2099      BA   163.521703
+63   2099     QMD    12.483832
+62   2099     Tpa   188.723306
+61   2099     SDI   270.050839
+60   2099   TCuFt  5085.937838
+59   2099   MCuFt  4624.212092
+58   2099  PP_TPA   113.276675
+57   2099  DF_TPA    54.924162
+56   2099  SW_TPA    10.761761
+55   2099  PM_TPA     9.760772
+54   2104  ABLD_C    52.976917
+53   2104      BA   175.470525
+52   2104     QMD    13.099061
+51   2104     Tpa   183.393565
+50   2104     SDI   284.314432
+49   2104   TCuFt  5723.604958
+48   2104   MCuFt  5248.276592
+47   2104  PP_TPA   110.727806
+46   2104  DF_TPA    52.987465
+45   2104  SW_TPA    10.355704
+44   2104  PM_TPA     9.322589
+43   2109  ABLD_C    57.843389
+42   2109      BA   186.528159
+41   2109     QMD    13.693559
+40   2109     Tpa   177.920104
+39   2109     SDI   296.984653
+38   2109   TCuFt  6352.923228
+37   2109   MCuFt  5839.729486
+36   2109  PP_TPA   108.066470
+35   2109  DF_TPA    51.017302
+34   2109  SW_TPA     9.960913
+33   2109  PM_TPA     8.875418
+32   2114  ABLD_C    62.487198
+31   2114      BA   196.455015
+30   2114     QMD    14.267773
+29   2114     Tpa   172.267811
+28   2114     SDI   307.717701
+27   2114   TCuFt  6957.912459
+26   2114   MCuFt  6421.536020
+25   2114  PP_TPA   105.220242
+24   2114  DF_TPA    49.028994
+23   2114  SW_TPA     9.591246
+22   2114  PM_TPA     8.427328
+21   2119  ABLD_C    66.906279
+20   2119      BA   205.234554
+19   2119     QMD    14.824800
+18   2119     Tpa   166.420653
+17   2119     SDI   316.616518
+16   2119   TCuFt  7535.382379
+15   2119   MCuFt  6974.517157
+14   2119  PP_TPA   102.183289
+13   2119  DF_TPA    47.017671
+12   2119  SW_TPA     9.241908
+11   2119  PM_TPA     7.977784
+10   2124  ABLD_C    71.067016
+9    2124      BA   212.832389
+8    2124     QMD    15.368381
+7    2124     Tpa   160.363246
+6    2124     SDI   323.722270
+5    2124   TCuFt  8076.232097
+4    2124   MCuFt  7489.245354
+3    2124  PP_TPA    98.967048
+2    2124  DF_TPA    44.952600
+1    2124  SW_TPA     8.897412
+0    2124  PM_TPA     7.546184
+#+end_example
